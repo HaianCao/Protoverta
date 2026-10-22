@@ -21,7 +21,7 @@ def test_base_url_joining_and_validation():
         GatewayConfig(Protocol.CHAT, "https://example.com/v1", "bad\nkey", "local")
 
 
-def test_local_auth_and_stream_rejection():
+def test_local_auth_and_unsupported_stream_route():
     server = serve(GatewayConfig(Protocol.CHAT, "https://example.com/v1", "key", "local"))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -30,10 +30,73 @@ def test_local_auth_and_stream_rejection():
         with pytest.raises(HTTPError) as unauth:
             urlopen(Request(url, data=b"{}", method="POST"))
         assert unauth.value.code == 401
-        body = json.dumps({"model": "m", "messages": [], "stream": True}).encode()
+        body = json.dumps({"model": "m", "messages": [], "max_tokens": 8, "stream": True}).encode()
         with pytest.raises(HTTPError) as unsupported:
-            urlopen(Request(url, data=body, headers={"Authorization": "Bearer local"}, method="POST"))
+            urlopen(Request(url.replace("/chat/completions", "/messages"), data=body, headers={"Authorization": "Bearer local"}, method="POST"))
         assert unsupported.value.code == 422
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_gateway_transcodes_messages_sse_to_chat_without_network():
+    captured = {}
+
+    def upstream_open(request, *, timeout):
+        captured["body"] = json.loads(request.data)
+        events = [
+            ("message_start", {"type": "message_start", "message": {"model": "m", "content": [], "usage": {"input_tokens": 3}}}),
+            ("content_block_start", {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
+            ("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "pong"}}),
+            ("content_block_stop", {"type": "content_block_stop", "index": 0}),
+            ("message_delta", {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 1}}),
+            ("message_stop", {"type": "message_stop"}),
+        ]
+        from protoverta.sse import encode_sse
+
+        return io.BytesIO(b"".join(encode_sse(kind, json.dumps(body)) for kind, body in events))
+
+    config = GatewayConfig(Protocol.MESSAGES, "https://example.com/v1", "upstream-secret", "local-token", "x-api-key")
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(config, upstream_open=upstream_open))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        url = f"http://127.0.0.1:{server.server_port}/v1/chat/completions"
+        body = {"model": "m", "messages": [{"role": "user", "content": "ping"}], "max_tokens": 8, "stream": True}
+        request = Request(url, data=json.dumps(body).encode(), headers={"Authorization": "Bearer local-token"}, method="POST")
+        with urlopen(request) as response:
+            wire = response.read()
+            assert response.headers["Content-Type"].startswith("text/event-stream")
+        assert b'"content":"pong"' in wire
+        assert b"[DONE]" in wire
+        assert captured["body"]["stream"] is True
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_gateway_reports_interrupted_sse_without_done_marker():
+    from protoverta.sse import encode_sse
+
+    def upstream_open(request, *, timeout):
+        return io.BytesIO(encode_sse("message_start", json.dumps({
+            "type": "message_start", "message": {"model": "m", "content": [], "usage": {"input_tokens": 1}},
+        })))
+
+    config = GatewayConfig(Protocol.MESSAGES, "https://example.com/v1", "key", "local", "x-api-key")
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(config, upstream_open=upstream_open))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        url = f"http://127.0.0.1:{server.server_port}/v1/chat/completions"
+        body = {"model": "m", "messages": [], "max_tokens": 8, "stream": True}
+        request = Request(url, data=json.dumps(body).encode(), headers={"Authorization": "Bearer local"}, method="POST")
+        with urlopen(request) as response:
+            wire = response.read()
+        assert b"event: error" in wire
+        assert b"[DONE]" not in wire
     finally:
         server.shutdown()
         server.server_close()

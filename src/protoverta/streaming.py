@@ -1,0 +1,415 @@
+"""Strict incremental decoders for text and client-side function-call SSE.
+
+These decoders consume already-framed :class:`SSEEvent` values. They never
+interpret an incomplete stream as a completed response. Target-protocol
+encoders and HTTP forwarding are implemented separately.
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from typing import Any
+
+from .core import Protocol
+from .sse import SSEEvent
+
+
+class StreamError(ValueError):
+    """Malformed, unsupported, or prematurely terminated upstream stream."""
+
+
+@dataclass(frozen=True, slots=True)
+class Delta:
+    kind: str
+    model: str | None = None
+    index: int | None = None
+    item_id: str | None = None
+    call_id: str | None = None
+    name: str | None = None
+    text: str | None = None
+    reason: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+
+
+def _obj(value: Any, label: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise StreamError(f"{label} must be an object")
+    return value
+
+
+def _str(value: Any, label: str) -> str:
+    if not isinstance(value, str):
+        raise StreamError(f"{label} must be a string")
+    return value
+
+
+def _index(value: Any, label: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise StreamError(f"{label} must be a non-negative integer")
+    return value
+
+
+def _tokens(value: Any, label: str) -> int | None:
+    if value is None:
+        return None
+    return _index(value, label)
+
+
+def _valid_arguments(raw: str, label: str) -> None:
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise StreamError(f"{label} is not valid JSON") from exc
+    if not isinstance(parsed, dict):
+        raise StreamError(f"{label} must be a JSON object")
+
+
+def _json_event(event: SSEEvent, label: str) -> dict[str, Any]:
+    try:
+        body = json.loads(event.data)
+    except json.JSONDecodeError as exc:
+        raise StreamError(f"{label} contains invalid JSON") from exc
+    return _obj(body, label)
+
+
+@dataclass(slots=True)
+class _Tool:
+    call_id: str = ""
+    name: str = ""
+    item_id: str = ""
+    arguments: str = ""
+    opened: bool = False
+    closed: bool = False
+
+
+class StreamDecoder:
+    """Decode one upstream stream into ordered canonical deltas.
+
+    ``feed`` may be called once per parsed SSE event. ``finish`` must be called
+    at EOF; it raises unless the protocol's terminal marker was seen.
+    """
+
+    def __init__(self, protocol: Protocol | str) -> None:
+        self.protocol = Protocol(protocol)
+        self.started = False
+        self.ended = False
+        self.model: str | None = None
+        self.reason: str | None = None
+        self.input_tokens: int | None = None
+        self.output_tokens: int | None = None
+        self.tools: dict[int, _Tool] = {}
+        self.blocks: dict[int, str] = {}
+        self.seen_blocks: set[int] = set()
+        self.items: dict[int, tuple[str, str]] = {}
+        self.seen_items: set[int] = set()
+        self.text_items: dict[int, str] = {}
+        self.sequence: int | None = None
+        self.saw_tool = False
+
+    def feed(self, event: SSEEvent) -> list[Delta]:
+        if self.ended:
+            raise StreamError("event after stream completion")
+        if self.protocol == Protocol.CHAT:
+            return self._chat(event)
+        if self.protocol == Protocol.MESSAGES:
+            return self._messages(event)
+        return self._responses(event)
+
+    def finish(self) -> None:
+        if not self.ended:
+            raise StreamError("stream ended before its terminal event")
+
+    def _start(self, model: Any, input_tokens: Any = None) -> list[Delta]:
+        if self.started:
+            raise StreamError("duplicate stream start")
+        self.model = _str(model, "model")
+        self.input_tokens = _tokens(input_tokens, "input_tokens")
+        self.started = True
+        return [Delta("start", model=self.model, input_tokens=self.input_tokens)]
+
+    def _complete(self, reason: str) -> list[Delta]:
+        if not self.started or self.ended:
+            raise StreamError("invalid stream completion")
+        if self.blocks:
+            raise StreamError("stream completed with open content blocks")
+        for tool in self.tools.values():
+            if not tool.opened or not tool.closed:
+                raise StreamError("stream completed with an unfinished tool call")
+            _valid_arguments(tool.arguments or "{}", "tool arguments")
+        if reason == "tool_calls" and not self.saw_tool:
+            raise StreamError("tool finish reason without tool calls")
+        self.ended = True
+        return [Delta("finish", reason=reason, input_tokens=self.input_tokens, output_tokens=self.output_tokens)]
+
+    def _chat(self, event: SSEEvent) -> list[Delta]:
+        if event.data == "[DONE]":
+            if self.reason is None:
+                raise StreamError("Chat [DONE] arrived before finish_reason")
+            for index in sorted(self.tools):
+                tool = self.tools[index]
+                if not tool.opened:
+                    raise StreamError("tool call ended before ID and name were known")
+                tool.closed = True
+            deltas = [Delta("tool_end", index=i, call_id=t.call_id, item_id=t.item_id) for i, t in sorted(self.tools.items())]
+            return deltas + self._complete(self.reason)
+        if event.event not in {"message", "chat.completion.chunk"}:
+            raise StreamError(f"unsupported Chat SSE event: {event.event}")
+        body = _json_event(event, "Chat chunk")
+        if body.get("object") != "chat.completion.chunk":
+            raise StreamError("invalid Chat chunk object")
+        deltas = self._start(body.get("model")) if not self.started else []
+        if body.get("model") != self.model:
+            raise StreamError("model changed within Chat stream")
+        choices = body.get("choices")
+        if not isinstance(choices, list) or len(choices) > 1:
+            raise StreamError("Chat stream requires zero or one choice")
+        if not choices:
+            if self.reason is None or self.input_tokens is not None or self.output_tokens is not None:
+                raise StreamError("Chat usage chunk is out of order or duplicated")
+            usage = _obj(body.get("usage"), "Chat usage")
+            self.input_tokens = _tokens(usage.get("prompt_tokens"), "prompt_tokens")
+            self.output_tokens = _tokens(usage.get("completion_tokens"), "completion_tokens")
+            return deltas
+        choice = _obj(choices[0], "Chat choice")
+        if self.reason is not None:
+            raise StreamError("Chat choice arrived after finish_reason")
+        if choice.get("index") != 0 or choice.get("logprobs"):
+            raise StreamError("unsupported Chat choice index or logprobs")
+        delta = _obj(choice.get("delta"), "Chat delta")
+        if delta.get("role") not in {None, "assistant"}:
+            raise StreamError("Chat delta has a non-assistant role")
+        if delta.get("refusal") or delta.get("audio") or delta.get("function_call"):
+            raise StreamError("unsupported Chat delta field")
+        content = delta.get("content")
+        if content is not None:
+            deltas.append(Delta("text", text=_str(content, "Chat content")))
+        for partial in delta.get("tool_calls") or []:
+            partial = _obj(partial, "Chat tool delta")
+            index = _index(partial.get("index"), "Chat tool index")
+            tool = self.tools.setdefault(index, _Tool())
+            if partial.get("type") not in {None, "function"}:
+                raise StreamError("unsupported Chat tool type")
+            if "id" in partial:
+                if tool.call_id and tool.call_id != partial["id"]:
+                    raise StreamError("Chat tool ID changed")
+                tool.call_id = _str(partial["id"], "Chat tool ID")
+            fn = partial.get("function") or {}
+            fn = _obj(fn, "Chat tool function")
+            if "name" in fn:
+                if tool.name and tool.name != fn["name"]:
+                    raise StreamError("Chat tool name changed")
+                tool.name = _str(fn["name"], "Chat tool name")
+            if not tool.opened and tool.call_id and tool.name:
+                tool.opened = True
+                self.saw_tool = True
+                deltas.append(Delta("tool_start", index=index, call_id=tool.call_id, name=tool.name))
+            if "arguments" in fn:
+                arguments = _str(fn["arguments"], "Chat tool arguments")
+                tool.arguments += arguments
+                if tool.opened:
+                    deltas.append(Delta("tool_delta", index=index, call_id=tool.call_id, text=arguments))
+                elif arguments:
+                    raise StreamError("Chat tool arguments preceded its ID/name")
+        reason = choice.get("finish_reason")
+        if reason is not None:
+            if self.reason is not None:
+                raise StreamError("duplicate Chat finish_reason")
+            if reason not in {"stop", "tool_calls", "length"}:
+                raise StreamError(f"unsupported Chat finish_reason: {reason}")
+            self.reason = reason
+        return deltas
+
+    def _messages(self, event: SSEEvent) -> list[Delta]:
+        if event.event == "ping":
+            return []
+        body = _json_event(event, "Messages event")
+        if body.get("type") != event.event:
+            raise StreamError("Messages event/data type mismatch")
+        kind = event.event
+        if kind == "error":
+            raise StreamError("upstream Messages stream reported an error")
+        if kind == "message_start":
+            message = _obj(body.get("message"), "message_start.message")
+            if message.get("content") not in (None, []):
+                raise StreamError("message_start contains nonempty content")
+            usage = _obj(message.get("usage") or {}, "message_start.usage")
+            return self._start(message.get("model"), usage.get("input_tokens"))
+        if not self.started:
+            raise StreamError("Messages block before message_start")
+        if self.reason is not None and kind not in {"message_stop", "message_delta"}:
+            raise StreamError("Messages content arrived after stop_reason")
+        if kind == "content_block_start":
+            index = _index(body.get("index"), "content block index")
+            if index in self.seen_blocks:
+                raise StreamError("duplicate Messages content block index")
+            self.seen_blocks.add(index)
+            block = _obj(body.get("content_block"), "content_block")
+            block_type = block.get("type")
+            if block_type == "text":
+                self.blocks[index] = "text"
+                initial = _str(block.get("text", ""), "initial text")
+                return [Delta("text", index=index, text=initial)] if initial else []
+            if block_type == "tool_use":
+                call_id = _str(block.get("id"), "tool_use.id")
+                name = _str(block.get("name"), "tool_use.name")
+                initial = _obj(block.get("input", {}), "tool_use.input")
+                if initial:
+                    raise StreamError("nonempty initial tool input is unsupported")
+                self.blocks[index] = "tool"
+                self.tools[index] = _Tool(call_id=call_id, name=name, opened=True)
+                self.saw_tool = True
+                return [Delta("tool_start", index=index, call_id=call_id, name=name)]
+            raise StreamError(f"unsupported Messages content block: {block_type}")
+        if kind == "content_block_delta":
+            index = _index(body.get("index"), "content block index")
+            active = self.blocks.get(index)
+            delta = _obj(body.get("delta"), "content_block_delta.delta")
+            if active == "text" and delta.get("type") == "text_delta":
+                return [Delta("text", index=index, text=_str(delta.get("text"), "text delta"))]
+            if active == "tool" and delta.get("type") == "input_json_delta":
+                value = _str(delta.get("partial_json"), "partial_json")
+                self.tools[index].arguments += value
+                return [Delta("tool_delta", index=index, call_id=self.tools[index].call_id, text=value)]
+            raise StreamError("Messages delta does not match its open block")
+        if kind == "content_block_stop":
+            index = _index(body.get("index"), "content block index")
+            active = self.blocks.pop(index, None)
+            if active is None:
+                raise StreamError("Messages block_stop without block_start")
+            if active == "tool":
+                tool = self.tools[index]
+                _valid_arguments(tool.arguments or "{}", "tool arguments")
+                tool.closed = True
+                return [Delta("tool_end", index=index, call_id=tool.call_id)]
+            return []
+        if kind == "message_delta":
+            if self.reason is not None or self.blocks:
+                raise StreamError("Messages message_delta out of order")
+            delta = _obj(body.get("delta"), "message_delta.delta")
+            reason = delta.get("stop_reason")
+            self.reason = {"end_turn": "stop", "tool_use": "tool_calls", "max_tokens": "length"}.get(reason)
+            if self.reason is None:
+                raise StreamError(f"unsupported Messages stop_reason: {reason}")
+            usage = _obj(body.get("usage") or {}, "message_delta.usage")
+            if "input_tokens" in usage:
+                self.input_tokens = _tokens(usage["input_tokens"], "input_tokens")
+            if "output_tokens" in usage:
+                self.output_tokens = _tokens(usage["output_tokens"], "output_tokens")
+            return []
+        if kind == "message_stop":
+            if self.reason is None:
+                raise StreamError("Messages message_stop before stop_reason")
+            return self._complete(self.reason)
+        raise StreamError(f"unsupported Messages event: {kind}")
+
+    def _responses(self, event: SSEEvent) -> list[Delta]:
+        body = _json_event(event, "Responses event")
+        kind = body.get("type")
+        if kind != event.event:
+            raise StreamError("Responses event/data type mismatch")
+        sequence = _index(body.get("sequence_number"), "Responses sequence_number")
+        if self.sequence is not None and sequence <= self.sequence:
+            raise StreamError("Responses sequence_number did not increase")
+        self.sequence = sequence
+        if kind in {"error", "response.failed"}:
+            raise StreamError("upstream Responses stream reported an error")
+        if kind == "response.created":
+            response = _obj(body.get("response"), "response.created.response")
+            return self._start(response.get("model"))
+        if not self.started:
+            raise StreamError("Responses item before response.created")
+        if kind == "response.in_progress":
+            return []
+        if kind == "response.output_item.added":
+            index = _index(body.get("output_index"), "output_index")
+            if index in self.seen_items:
+                raise StreamError("duplicate Responses output_index")
+            self.seen_items.add(index)
+            item = _obj(body.get("item"), "output item")
+            item_type = item.get("type")
+            item_id = _str(item.get("id"), "output item ID")
+            if item_type == "message" and item.get("role") == "assistant":
+                self.items[index] = ("text", item_id)
+                self.text_items[index] = ""
+                return []
+            if item_type == "function_call":
+                call_id = _str(item.get("call_id"), "function_call.call_id")
+                name = _str(item.get("name"), "function_call.name")
+                self.items[index] = ("tool", item_id)
+                self.tools[index] = _Tool(call_id=call_id, name=name, item_id=item_id, opened=True)
+                self.saw_tool = True
+                return [Delta("tool_start", index=index, item_id=item_id, call_id=call_id, name=name)]
+            raise StreamError(f"unsupported Responses output item: {item_type}")
+        if kind == "response.output_text.delta":
+            index = _index(body.get("output_index"), "output_index")
+            if self.items.get(index, (None,))[0] != "text":
+                raise StreamError("Responses text delta without a message item")
+            value = _str(body.get("delta"), "text delta")
+            self.text_items[index] += value
+            return [Delta("text", index=index, item_id=self.items[index][1], text=value)]
+        if kind == "response.function_call_arguments.delta":
+            index = _index(body.get("output_index"), "output_index")
+            if self.items.get(index, (None,))[0] != "tool":
+                raise StreamError("Responses tool delta without a function_call item")
+            delta = _str(body.get("delta"), "function arguments delta")
+            tool = self.tools[index]
+            tool.arguments += delta
+            return [Delta("tool_delta", index=index, item_id=tool.item_id, call_id=tool.call_id, text=delta)]
+        if kind == "response.output_text.done":
+            index = _index(body.get("output_index"), "output_index")
+            if self.items.get(index, (None,))[0] != "text" or body.get("text") != self.text_items[index]:
+                raise StreamError("Responses completed text differs from deltas")
+            return []
+        if kind == "response.function_call_arguments.done":
+            index = _index(body.get("output_index"), "output_index")
+            if self.items.get(index, (None,))[0] != "tool" or body.get("arguments") != self.tools[index].arguments:
+                raise StreamError("Responses completed tool arguments differ from deltas")
+            return []
+        if kind in {"response.content_part.added", "response.content_part.done"}:
+            return []
+        if kind == "response.output_item.done":
+            index = _index(body.get("output_index"), "output_index")
+            item_type, item_id = self.items.pop(index, (None, None))
+            if item_type is None:
+                raise StreamError("Responses output_item.done without added")
+            item = _obj(body.get("item"), "completed output item")
+            if item.get("id") != item_id or item.get("status") != "completed":
+                raise StreamError("Responses output item identity/status changed")
+            if item_type == "tool":
+                tool = self.tools[index]
+                if item.get("call_id") != tool.call_id or item.get("name") != tool.name:
+                    raise StreamError("Responses tool identity changed")
+                if item.get("arguments") != tool.arguments:
+                    raise StreamError("Responses tool argument deltas differ from completed item")
+                _valid_arguments(tool.arguments, "tool arguments")
+                tool.closed = True
+                return [Delta("tool_end", index=index, item_id=item_id, call_id=tool.call_id)]
+            if item.get("type") != "message" or item.get("role") != "assistant":
+                raise StreamError("Responses message item changed type or role")
+            content = item.get("content")
+            if content is not None:
+                if not isinstance(content, list) or any(not isinstance(part, dict) or part.get("type") != "output_text" for part in content):
+                    raise StreamError("unsupported Responses completed message content")
+                if "".join(_str(part.get("text"), "completed output text") for part in content) != self.text_items[index]:
+                    raise StreamError("Responses completed message text differs from deltas")
+            return []
+        if kind in {"response.completed", "response.incomplete"}:
+            if self.items:
+                raise StreamError("Responses finished with open output items")
+            response = _obj(body.get("response"), "final response")
+            if response.get("model") != self.model:
+                raise StreamError("Responses model changed")
+            status = response.get("status")
+            if kind == "response.completed" and status == "completed":
+                reason = "tool_calls" if self.saw_tool else "stop"
+            elif kind == "response.incomplete" and status == "incomplete" and _obj(response.get("incomplete_details"), "incomplete_details").get("reason") == "max_output_tokens":
+                reason = "length"
+            else:
+                raise StreamError("unsupported Responses final status")
+            usage = _obj(response.get("usage") or {}, "Responses usage")
+            self.input_tokens = _tokens(usage.get("input_tokens"), "input_tokens")
+            self.output_tokens = _tokens(usage.get("output_tokens"), "output_tokens")
+            return self._complete(reason)
+        raise StreamError(f"unsupported Responses event: {kind}")
