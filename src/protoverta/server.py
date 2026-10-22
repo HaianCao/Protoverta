@@ -12,7 +12,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .core import ConversionError, Protocol, convert_request, convert_response
 from .sse import encode_sse
-from .stream_pipe import StreamTranscoder
+from .stream_pipe import StreamTranscoder, StreamValidator
 from .streaming import StreamError
 
 
@@ -83,7 +83,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
             self.wfile.write(raw)
 
         def _stream(self, response, source: Protocol, target: Protocol) -> None:
-            transcoder = StreamTranscoder(source, target) if source != target else None
+            pipeline = StreamTranscoder(source, target) if source != target else StreamValidator(source)
             headers_sent = False
 
             def send_headers() -> None:
@@ -101,13 +101,16 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                     chunk = response.read1(4096) if hasattr(response, "read1") else response.read(1)
                     if not chunk:
                         break
-                    output = transcoder.feed(chunk) if transcoder else chunk
+                    output = pipeline.feed(chunk)
                     if output:
                         send_headers()
                         self.wfile.write(output)
                         self.wfile.flush()
-                if transcoder:
-                    transcoder.finish()
+                tail = pipeline.finish()
+                if tail:
+                    send_headers()
+                    self.wfile.write(tail)
+                    self.wfile.flush()
                 send_headers()
             except (StreamError, UnicodeError, OSError) as exc:
                 if not headers_sent:

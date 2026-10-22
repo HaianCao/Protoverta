@@ -18,21 +18,27 @@ class SSEEvent:
 
 
 class SSEParser:
-    def __init__(self) -> None:
+    def __init__(self, *, max_event_chars: int = 1_000_000) -> None:
+        if max_event_chars <= 0:
+            raise ValueError("max_event_chars must be positive")
+        self._max_event_chars = max_event_chars
         self._decoder = codecs.getincrementaldecoder("utf-8")("strict")
         self._line = ""
         self._pending_cr = False
         self._event_type = ""
         self._data: list[str] = []
         self._id: str | None = None
+        self._event_chars = 0
 
     def _dispatch(self) -> list[SSEEvent]:
         if not self._data:
             self._event_type = ""
+            self._event_chars = 0
             return []
         event = SSEEvent(self._event_type or "message", "\n".join(self._data), self._id)
         self._event_type = ""
         self._data = []
+        self._event_chars = 0
         return [event]
 
     def _process_line(self) -> list[SSEEvent]:
@@ -66,16 +72,23 @@ class SSEParser:
                 events.extend(self._process_line())
             else:
                 self._line += char
+                self._event_chars += 1
+                if self._event_chars > self._max_event_chars:
+                    raise ValueError("SSE event exceeds size limit")
         return events
 
-    def finish(self) -> list[SSEEvent]:
+    def finish(self, *, strict: bool = False) -> list[SSEEvent]:
         remaining = self._decoder.decode(b"", final=True)
         if remaining:
             self._line += remaining
+        incomplete = bool(self._line or self._data or self._event_type)
         # An EOF without a blank line is an incomplete event, not completion.
         self._line = ""
         self._data = []
         self._event_type = ""
+        self._event_chars = 0
+        if strict and incomplete:
+            raise ValueError("SSE stream ended with an incomplete event")
         return []
 
 

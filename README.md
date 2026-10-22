@@ -54,7 +54,9 @@ $env:PROTOVERTA_LOCAL_TOKEN = "a-long-random-local-token"
 python -m protoverta --upstream-protocol chat --upstream-base-url https://provider.example/v1 --upstream-key-env PROTOVERTA_UPSTREAM_KEY --inbound-token-env PROTOVERTA_LOCAL_TOKEN --port 8765
 ```
 
-The gateway accepts `POST /v1/chat/completions`, `POST /v1/messages`, and `POST /v1/responses`. It binds to `127.0.0.1`, prints its URL on startup, and requires `Authorization: Bearer <local-token>`. Use `--auth-style x-api-key` for upstreams that require that header. Streaming conversion is incremental; Chat/Responses → Messages is rejected because those sources do not report input-token usage at stream start. Other missing usage or unsupported interleaving fails explicitly instead of emitting a false completion.
+The gateway accepts `POST /v1/chat/completions`, `POST /v1/messages`, and `POST /v1/responses`. It binds to `127.0.0.1`, prints its URL on startup, and requires `Authorization: Bearer <local-token>`. Use `--auth-style x-api-key` for upstreams that require that header.
+
+Streaming supports Chat → Responses, Messages → Chat/Responses, and Responses → Chat for text and client-side function calls. Same-protocol SSE events are validated and forwarded with equivalent framing. Terminal events are held until upstream EOF is verified. Generated Responses usage includes zero-valued cache/reasoning subtotals when the source protocol does not provide those breakdowns; do not interpret these as measured values. Chat/Responses → Messages remains unavailable: Messages needs real usage in its first event, which these sources provide only at the end. Unsupported content parts, annotations, logprobs, and incomplete streams fail explicitly. Real CLI-client interoperability belongs to the next integration milestone.
 
 ## Contributing
 

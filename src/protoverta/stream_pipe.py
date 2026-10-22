@@ -23,18 +23,73 @@ class StreamTranscoder:
         self.parser = SSEParser()
         self.decoder = StreamDecoder(self.source)
         self.encoder = StreamEncoder(self.target)
+        self._terminal = b""
+        self._closed = False
 
     def feed(self, chunk: bytes) -> bytes:
+        if self._closed:
+            raise StreamError("stream already finished")
         output = bytearray()
-        for event in self.parser.feed(chunk):
+        try:
+            events = self.parser.feed(chunk)
+        except (UnicodeError, ValueError) as exc:
+            raise StreamError(str(exc)) from exc
+        for event in events:
             for delta in self.decoder.feed(event):
                 for encoded in self.encoder.feed(delta):
-                    output.extend(encode_sse(encoded.event, encoded.data, id=encoded.id))
+                    wire = encode_sse(encoded.event, encoded.data, id=encoded.id)
+                    if delta.kind == "finish":
+                        self._terminal += wire
+                    else:
+                        output.extend(wire)
         return bytes(output)
 
     def finish(self) -> bytes:
-        if self.parser.finish():
-            raise StreamError("unexpected buffered SSE events at EOF")
+        if self._closed:
+            raise StreamError("stream already finished")
+        try:
+            self.parser.finish(strict=True)
+        except ValueError as exc:
+            raise StreamError(str(exc)) from exc
         self.decoder.finish()
         self.encoder.finish()
-        return b""
+        self._closed = True
+        return self._terminal
+
+
+class StreamValidator:
+    """Validate a same-protocol stream and preserve its SSE event semantics."""
+
+    def __init__(self, protocol: Protocol | str) -> None:
+        self.parser = SSEParser()
+        self.decoder = StreamDecoder(protocol)
+        self._terminal = b""
+        self._closed = False
+
+    def feed(self, chunk: bytes) -> bytes:
+        if self._closed:
+            raise StreamError("stream already finished")
+        try:
+            events = self.parser.feed(chunk)
+        except (UnicodeError, ValueError) as exc:
+            raise StreamError(str(exc)) from exc
+        output = bytearray()
+        for event in events:
+            self.decoder.feed(event)
+            wire = encode_sse(event.event, event.data, id=event.id)
+            if self.decoder.ended:
+                self._terminal += wire
+            else:
+                output.extend(wire)
+        return bytes(output)
+
+    def finish(self) -> bytes:
+        if self._closed:
+            raise StreamError("stream already finished")
+        try:
+            self.parser.finish(strict=True)
+        except (UnicodeError, ValueError) as exc:
+            raise StreamError(str(exc)) from exc
+        self.decoder.finish()
+        self._closed = True
+        return self._terminal

@@ -40,6 +40,7 @@ class StreamEncoder:
         self.output: list[dict[str, Any]] = []
         self.saw_tool = False
         self.message_output_index: int | None = None
+        self.initial_input_tokens: int | None = None
 
     def finish(self) -> None:
         if not self.ended:
@@ -51,10 +52,11 @@ class StreamEncoder:
         if delta.kind == "start":
             if self.started or not delta.model:
                 raise StreamError("invalid or duplicate stream start")
-            if self.protocol == Protocol.MESSAGES and delta.input_tokens is None:
-                raise StreamError("Messages streaming requires input_tokens at start")
+            if self.protocol == Protocol.MESSAGES and (delta.input_tokens is None or delta.output_tokens is None):
+                raise StreamError("Messages streaming requires input_tokens and output_tokens at start")
             self.started = True
             self.model = delta.model
+            self.initial_input_tokens = delta.input_tokens
             prefix = {Protocol.CHAT: "chatcmpl_", Protocol.MESSAGES: "msg_", Protocol.RESPONSES: "resp_"}[self.protocol]
             self.id = f"{prefix}{uuid.uuid4().hex}"
             return self._start(delta)
@@ -98,7 +100,23 @@ class StreamEncoder:
         self.sequence += 1
         return _event(kind, {"type": kind, "sequence_number": sequence, **body})
 
+    def _response_snapshot(self, status: str, *, usage: dict[str, int] | None = None, incomplete_details: dict[str, str] | None = None) -> dict[str, Any]:
+        return {
+            "id": self.id, "object": "response", "access_programs": None,
+            "created_at": self.created, "completed_at": int(time.time()) if status == "completed" else None,
+            "status": status, "error": None, "incomplete_details": incomplete_details,
+            "instructions": None, "max_output_tokens": None, "model": self.model,
+            "output": self.output.copy() if status != "in_progress" else [],
+            "parallel_tool_calls": True, "previous_response_id": None,
+            "reasoning": {"effort": None, "summary": None}, "store": False,
+            "temperature": None, "text": {"format": {"type": "text"}},
+            "tool_choice": "auto", "tools": [], "top_p": None,
+            "truncation": "disabled", "usage": usage, "user": None, "metadata": {},
+        }
+
     def _chat_chunk(self, choices: list[dict[str, Any]], usage: dict[str, int] | None = None) -> SSEEvent:
+        for choice in choices:
+            choice["logprobs"] = None
         body: dict[str, Any] = {"id": self.id, "object": "chat.completion.chunk", "created": self.created, "model": self.model, "choices": choices}
         if usage is not None:
             body["usage"] = usage
@@ -111,12 +129,9 @@ class StreamEncoder:
             return [_event("message_start", {"type": "message_start", "message": {
                 "id": self.id, "type": "message", "role": "assistant", "content": [], "model": self.model,
                 "stop_reason": None, "stop_sequence": None,
-                "usage": {"input_tokens": delta.input_tokens, "output_tokens": 0},
+                "usage": {"input_tokens": delta.input_tokens, "output_tokens": delta.output_tokens},
             }})]
-        return [self._response_event("response.created", response={
-            "id": self.id, "object": "response", "status": "in_progress", "model": self.model,
-            "output": [], "usage": None,
-        })]
+        return [self._response_event("response.created", response=self._response_snapshot("in_progress"))]
 
     def _text(self, delta: Delta) -> list[SSEEvent]:
         if self.protocol == Protocol.CHAT:
@@ -140,13 +155,13 @@ class StreamEncoder:
             self.output.append({"id": item_id, "type": "message", "status": "in_progress", "role": "assistant", "content": []})
             events.extend([
                 self._response_event("response.output_item.added", output_index=self.text_index, item=self.output[-1].copy()),
-                self._response_event("response.content_part.added", output_index=self.text_index, content_index=0, part={"type": "output_text", "text": "", "annotations": []}),
+                self._response_event("response.content_part.added", item_id=item_id, output_index=self.text_index, content_index=0, part={"type": "output_text", "text": "", "annotations": [], "logprobs": []}),
             ])
         self.text += delta.text
-        events.append(self._response_event("response.output_text.delta", output_index=self.text_index, content_index=0, delta=delta.text))
+        events.append(self._response_event("response.output_text.delta", item_id=self.output[self.message_output_index]["id"], output_index=self.text_index, content_index=0, delta=delta.text, logprobs=[]))
         return events
 
-    def _close_text(self) -> list[SSEEvent]:
+    def _close_text(self, *, status: str = "completed") -> list[SSEEvent]:
         if self.text_index is None:
             return []
         index = self.text_index
@@ -157,12 +172,12 @@ class StreamEncoder:
             item = self.output[self.message_output_index] if self.message_output_index is not None else None
             if item is None:
                 raise StreamError("missing response message item")
-            part = {"type": "output_text", "text": self.text, "annotations": []}
-            item.update(status="completed", content=[part])
+            part = {"type": "output_text", "text": self.text, "annotations": [], "logprobs": []}
+            item.update(status=status, content=[part])
             self.text = ""
             return [
-                self._response_event("response.output_text.done", output_index=index, content_index=0, text=part["text"]),
-                self._response_event("response.content_part.done", output_index=index, content_index=0, part=part),
+                self._response_event("response.output_text.done", item_id=item["id"], output_index=index, content_index=0, text=part["text"], logprobs=[]),
+                self._response_event("response.content_part.done", item_id=item["id"], output_index=index, content_index=0, part=part),
                 self._response_event("response.output_item.done", output_index=index, item=item.copy()),
             ]
         return []
@@ -195,7 +210,7 @@ class StreamEncoder:
         tool = self.tools[delta.index]
         if self.protocol == Protocol.MESSAGES:
             return [_event("content_block_delta", {"type": "content_block_delta", "index": tool["target_index"], "delta": {"type": "input_json_delta", "partial_json": delta.text}})]
-        return [self._response_event("response.function_call_arguments.delta", output_index=tool["target_index"], delta=delta.text)]
+        return [self._response_event("response.function_call_arguments.delta", item_id=tool["item_id"], output_index=tool["target_index"], delta=delta.text)]
 
     def _tool_end(self, delta: Delta) -> list[SSEEvent]:
         if self.protocol == Protocol.CHAT:
@@ -206,7 +221,7 @@ class StreamEncoder:
         item = self.output[tool["target_index"]]
         item.update(status="completed", arguments=tool["arguments"])
         return [
-            self._response_event("response.function_call_arguments.done", output_index=tool["target_index"], arguments=tool["arguments"]),
+            self._response_event("response.function_call_arguments.done", item_id=tool["item_id"], output_index=tool["target_index"], arguments=tool["arguments"]),
             self._response_event("response.output_item.done", output_index=tool["target_index"], item=item.copy()),
         ]
 
@@ -223,19 +238,23 @@ class StreamEncoder:
             events = self._close_text()
             reason = {"stop": "end_turn", "tool_calls": "tool_use", "length": "max_tokens"}[delta.reason]
             events.extend([
-                _event("message_delta", {"type": "message_delta", "delta": {"stop_reason": reason, "stop_sequence": None}, "usage": {"output_tokens": delta.output_tokens}}),
+                _event("message_delta", {"type": "message_delta", "delta": {"stop_reason": reason, "stop_sequence": None}, "usage": {"input_tokens": delta.input_tokens, "output_tokens": delta.output_tokens}}),
                 _event("message_stop", {"type": "message_stop"}),
             ])
             return events
         if delta.input_tokens is None or delta.output_tokens is None:
             raise StreamError("Responses final event requires input and output token usage")
-        events = self._close_text()
         incomplete = delta.reason == "length"
-        response = {
-            "id": self.id, "object": "response", "status": "incomplete" if incomplete else "completed",
-            "model": self.model, "output": self.output,
-            "usage": {"input_tokens": delta.input_tokens, "output_tokens": delta.output_tokens, "total_tokens": delta.input_tokens + delta.output_tokens},
-        }
-        if incomplete:
-            response["incomplete_details"] = {"reason": "max_output_tokens"}
+        events = self._close_text(status="incomplete" if incomplete else "completed")
+        response = self._response_snapshot(
+            "incomplete" if incomplete else "completed",
+            usage={
+                "input_tokens": delta.input_tokens,
+                "input_tokens_details": {"cached_tokens": 0},
+                "output_tokens": delta.output_tokens,
+                "output_tokens_details": {"reasoning_tokens": 0},
+                "total_tokens": delta.input_tokens + delta.output_tokens,
+            },
+            incomplete_details={"reason": "max_output_tokens"} if incomplete else None,
+        )
         return events + [self._response_event("response.incomplete" if incomplete else "response.completed", response=response)]

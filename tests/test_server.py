@@ -103,6 +103,99 @@ def test_gateway_reports_interrupted_sse_without_done_marker():
         thread.join(timeout=2)
 
 
+def test_gateway_validates_interrupted_same_protocol_stream():
+    from protoverta.sse import encode_sse
+
+    def upstream_open(request, *, timeout):
+        chunk = {"object": "chat.completion.chunk", "model": "m", "choices": [
+            {"index": 0, "delta": {"content": "partial"}, "finish_reason": None},
+        ]}
+        return io.BytesIO(encode_sse("message", json.dumps(chunk)))
+
+    config = GatewayConfig(Protocol.CHAT, "https://example.com/v1", "key", "local")
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(config, upstream_open=upstream_open))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        url = f"http://127.0.0.1:{server.server_port}/v1/chat/completions"
+        body = {"model": "m", "messages": [], "stream": True}
+        request = Request(url, data=json.dumps(body).encode(), headers={"Authorization": "Bearer local"}, method="POST")
+        with urlopen(request) as response:
+            wire = response.read()
+        assert b"partial" in wire
+        assert b"event: error" in wire
+        assert b"[DONE]" not in wire
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_gateway_does_not_forward_done_before_clean_eof():
+    from protoverta.sse import encode_sse
+
+    def upstream_open(request, *, timeout):
+        first = {"object": "chat.completion.chunk", "model": "m", "choices": [
+            {"index": 0, "delta": {"content": "ok"}, "finish_reason": None},
+        ]}
+        last = {"object": "chat.completion.chunk", "model": "m", "choices": [
+            {"index": 0, "delta": {}, "finish_reason": "stop"},
+        ]}
+        wire = encode_sse("message", json.dumps(first)) + encode_sse("message", json.dumps(last))
+        wire += encode_sse("message", "[DONE]") + b"data: truncated"
+        return io.BytesIO(wire)
+
+    config = GatewayConfig(Protocol.CHAT, "https://example.com/v1", "key", "local")
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(config, upstream_open=upstream_open))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        url = f"http://127.0.0.1:{server.server_port}/v1/chat/completions"
+        body = {"model": "m", "messages": [], "stream": True}
+        request = Request(url, data=json.dumps(body).encode(), headers={"Authorization": "Bearer local"}, method="POST")
+        with urlopen(request) as response:
+            wire = response.read()
+        assert b"ok" in wire
+        assert b"event: error" in wire
+        assert b"[DONE]" not in wire
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_client_disconnect_stops_upstream_stream_processing():
+    from protoverta.sse import encode_sse
+
+    class Upstream(io.BytesIO):
+        reads = 0
+
+        def read1(self, size):
+            self.reads += 1
+            return super().read1(1)
+
+    class DisconnectedWriter:
+        def write(self, data):
+            raise BrokenPipeError("client closed the connection")
+
+        def flush(self):
+            raise AssertionError("must not flush a disconnected writer")
+
+    config = GatewayConfig(Protocol.MESSAGES, "https://example.com/v1", "key", "local", "x-api-key")
+    handler_type = make_handler(config)
+    handler = handler_type.__new__(handler_type)
+    handler.wfile = DisconnectedWriter()
+    handler.send_response = lambda status: None
+    handler.send_header = lambda name, value: None
+    handler.end_headers = lambda: None
+    first = encode_sse("message_start", json.dumps({
+        "type": "message_start", "message": {"model": "m", "content": [], "usage": {"input_tokens": 1, "output_tokens": 1}},
+    }))
+    upstream = Upstream(first + b"irrelevant trailing bytes")
+    handler._stream(upstream, Protocol.MESSAGES, Protocol.CHAT)
+    assert upstream.tell() < len(first) + len(b"irrelevant trailing bytes")
+
+
 def test_gateway_converts_request_and_response_without_network():
     captured = {}
 

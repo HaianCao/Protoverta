@@ -104,7 +104,10 @@ class StreamDecoder:
         self.seen_blocks: set[int] = set()
         self.items: dict[int, tuple[str, str]] = {}
         self.seen_items: set[int] = set()
+        self.completed_items: dict[int, dict[str, Any]] = {}
+        self.incomplete_items = False
         self.text_items: dict[int, str] = {}
+        self.text_parts: dict[int, str] = {}
         self.sequence: int | None = None
         self.saw_tool = False
 
@@ -121,13 +124,14 @@ class StreamDecoder:
         if not self.ended:
             raise StreamError("stream ended before its terminal event")
 
-    def _start(self, model: Any, input_tokens: Any = None) -> list[Delta]:
+    def _start(self, model: Any, input_tokens: Any = None, output_tokens: Any = None) -> list[Delta]:
         if self.started:
             raise StreamError("duplicate stream start")
         self.model = _str(model, "model")
         self.input_tokens = _tokens(input_tokens, "input_tokens")
+        self.output_tokens = _tokens(output_tokens, "output_tokens")
         self.started = True
-        return [Delta("start", model=self.model, input_tokens=self.input_tokens)]
+        return [Delta("start", model=self.model, input_tokens=self.input_tokens, output_tokens=self.output_tokens)]
 
     def _complete(self, reason: str) -> list[Delta]:
         if not self.started or self.ended:
@@ -235,7 +239,7 @@ class StreamDecoder:
             if message.get("content") not in (None, []):
                 raise StreamError("message_start contains nonempty content")
             usage = _obj(message.get("usage") or {}, "message_start.usage")
-            return self._start(message.get("model"), usage.get("input_tokens"))
+            return self._start(message.get("model"), usage.get("input_tokens"), usage.get("output_tokens"))
         if not self.started:
             raise StreamError("Messages block before message_start")
         if self.reason is not None and kind not in {"message_stop", "message_delta"}:
@@ -331,6 +335,8 @@ class StreamDecoder:
             item_type = item.get("type")
             item_id = _str(item.get("id"), "output item ID")
             if item_type == "message" and item.get("role") == "assistant":
+                if item.get("content") != []:
+                    raise StreamError("Responses message item has nonempty initial content")
                 self.items[index] = ("text", item_id)
                 self.text_items[index] = ""
                 return []
@@ -342,10 +348,23 @@ class StreamDecoder:
                 self.saw_tool = True
                 return [Delta("tool_start", index=index, item_id=item_id, call_id=call_id, name=name)]
             raise StreamError(f"unsupported Responses output item: {item_type}")
+        if kind == "response.content_part.added":
+            index = _index(body.get("output_index"), "output_index")
+            if self.items.get(index, (None,))[0] != "text" or body.get("item_id") != self.items[index][1]:
+                raise StreamError("Responses content part has wrong item identity")
+            if body.get("content_index") != 0 or index in self.text_parts:
+                raise StreamError("unsupported Responses content part index")
+            part = _obj(body.get("part"), "Responses content part")
+            if part.get("type") != "output_text" or part.get("text") != "" or part.get("annotations") != [] or part.get("logprobs") != []:
+                raise StreamError("unsupported Responses content part metadata")
+            self.text_parts[index] = "open"
+            return []
         if kind == "response.output_text.delta":
             index = _index(body.get("output_index"), "output_index")
-            if self.items.get(index, (None,))[0] != "text":
+            if self.items.get(index, (None,))[0] != "text" or self.text_parts.get(index) != "open":
                 raise StreamError("Responses text delta without a message item")
+            if body.get("item_id") != self.items[index][1] or body.get("content_index") != 0 or body.get("logprobs") != []:
+                raise StreamError("unsupported Responses text delta metadata")
             value = _str(body.get("delta"), "text delta")
             self.text_items[index] += value
             return [Delta("text", index=index, item_id=self.items[index][1], text=value)]
@@ -353,21 +372,37 @@ class StreamDecoder:
             index = _index(body.get("output_index"), "output_index")
             if self.items.get(index, (None,))[0] != "tool":
                 raise StreamError("Responses tool delta without a function_call item")
+            if body.get("item_id") != self.items[index][1]:
+                raise StreamError("Responses tool delta has wrong item ID")
             delta = _str(body.get("delta"), "function arguments delta")
             tool = self.tools[index]
             tool.arguments += delta
             return [Delta("tool_delta", index=index, item_id=tool.item_id, call_id=tool.call_id, text=delta)]
         if kind == "response.output_text.done":
             index = _index(body.get("output_index"), "output_index")
-            if self.items.get(index, (None,))[0] != "text" or body.get("text") != self.text_items[index]:
+            if self.items.get(index, (None,))[0] != "text" or self.text_parts.get(index) != "open" or body.get("text") != self.text_items[index]:
                 raise StreamError("Responses completed text differs from deltas")
+            if body.get("item_id") != self.items[index][1] or body.get("content_index") != 0 or body.get("logprobs") != []:
+                raise StreamError("unsupported Responses completed text metadata")
+            self.text_parts[index] = "text_done"
             return []
         if kind == "response.function_call_arguments.done":
             index = _index(body.get("output_index"), "output_index")
             if self.items.get(index, (None,))[0] != "tool" or body.get("arguments") != self.tools[index].arguments:
                 raise StreamError("Responses completed tool arguments differ from deltas")
+            if body.get("item_id") != self.items[index][1]:
+                raise StreamError("Responses completed tool arguments have wrong item ID")
             return []
-        if kind in {"response.content_part.added", "response.content_part.done"}:
+        if kind == "response.content_part.done":
+            index = _index(body.get("output_index"), "output_index")
+            if self.items.get(index, (None,))[0] != "text" or self.text_parts.get(index) != "text_done":
+                raise StreamError("Responses content part closed out of order")
+            if body.get("item_id") != self.items[index][1] or body.get("content_index") != 0:
+                raise StreamError("Responses completed content part has wrong identity")
+            part = _obj(body.get("part"), "Responses completed content part")
+            if part.get("type") != "output_text" or part.get("text") != self.text_items[index] or part.get("annotations") != [] or part.get("logprobs") != []:
+                raise StreamError("unsupported Responses completed content metadata")
+            self.text_parts[index] = "closed"
             return []
         if kind == "response.output_item.done":
             index = _index(body.get("output_index"), "output_index")
@@ -375,8 +410,9 @@ class StreamDecoder:
             if item_type is None:
                 raise StreamError("Responses output_item.done without added")
             item = _obj(body.get("item"), "completed output item")
-            if item.get("id") != item_id or item.get("status") != "completed":
+            if item.get("id") != item_id or item.get("status") not in {"completed", "incomplete"}:
                 raise StreamError("Responses output item identity/status changed")
+            self.incomplete_items |= item.get("status") == "incomplete"
             if item_type == "tool":
                 tool = self.tools[index]
                 if item.get("call_id") != tool.call_id or item.get("name") != tool.name:
@@ -385,15 +421,19 @@ class StreamDecoder:
                     raise StreamError("Responses tool argument deltas differ from completed item")
                 _valid_arguments(tool.arguments, "tool arguments")
                 tool.closed = True
+                self.completed_items[index] = item
                 return [Delta("tool_end", index=index, item_id=item_id, call_id=tool.call_id)]
             if item.get("type") != "message" or item.get("role") != "assistant":
                 raise StreamError("Responses message item changed type or role")
+            if self.text_parts.get(index) != "closed":
+                raise StreamError("Responses message item closed before its content part")
             content = item.get("content")
-            if content is not None:
-                if not isinstance(content, list) or any(not isinstance(part, dict) or part.get("type") != "output_text" for part in content):
-                    raise StreamError("unsupported Responses completed message content")
-                if "".join(_str(part.get("text"), "completed output text") for part in content) != self.text_items[index]:
-                    raise StreamError("Responses completed message text differs from deltas")
+            if not isinstance(content, list) or len(content) != 1:
+                raise StreamError("unsupported Responses completed message content")
+            part = _obj(content[0], "Responses completed message content")
+            if part.get("type") != "output_text" or part.get("text") != self.text_items[index] or part.get("annotations") != [] or part.get("logprobs") != []:
+                raise StreamError("Responses completed message content differs from deltas")
+            self.completed_items[index] = item
             return []
         if kind in {"response.completed", "response.incomplete"}:
             if self.items:
@@ -401,6 +441,12 @@ class StreamDecoder:
             response = _obj(body.get("response"), "final response")
             if response.get("model") != self.model:
                 raise StreamError("Responses model changed")
+            output = response.get("output")
+            if not isinstance(output, list) or len(output) != len(self.completed_items):
+                raise StreamError("Responses final output differs from streamed items")
+            for index, item in enumerate(output):
+                if item != self.completed_items.get(index):
+                    raise StreamError("Responses final output differs from streamed items")
             status = response.get("status")
             if kind == "response.completed" and status == "completed":
                 reason = "tool_calls" if self.saw_tool else "stop"
@@ -408,6 +454,8 @@ class StreamDecoder:
                 reason = "length"
             else:
                 raise StreamError("unsupported Responses final status")
+            if self.incomplete_items and reason != "length":
+                raise StreamError("incomplete Responses item in completed response")
             usage = _obj(response.get("usage") or {}, "Responses usage")
             self.input_tokens = _tokens(usage.get("input_tokens"), "input_tokens")
             self.output_tokens = _tokens(usage.get("output_tokens"), "output_tokens")
