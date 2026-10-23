@@ -81,5 +81,25 @@ second request. The Messages response included `caller: {type: "direct"}` on its
 non-direct/server callers during conversion. These checks do not execute hosted
 tools or establish compatibility with arbitrary namespace extensions.
 
+Unpublished alpha-4 follow-up used the same model and production reasoning
+policy. Explicit forced namespace selection passed with Chat and Messages
+upstreams, including exact arguments, restored namespace/name and matching
+tool-result continuation. Reproduce with `scripts/probe_namespace.py
+--force-function` and its provider/model/key arguments.
+
+Three JSON Schema samples also passed through the real gateway: inbound
+Responses → Chat upstream (SSE), inbound Messages → Responses upstream (SSE),
+and inbound Chat → Messages upstream (completed JSON). Each requested a strict
+object with one integer property fixed to 5 and returned the expected object.
+These samples verify wire conversion and sample adherence, not universal
+schema enforcement or support for arbitrary schema keywords. Reproduce using
+`scripts/probe_formats.py`; credentials are read from a named environment
+variable and raw request/response bodies are not printed.
+
+The forced Chat JSON probe exposed a provider-specific `index` property on
+completed `tool_calls`. The converter accepts this optional nonnegative integer
+only when it matches the call's array position. Incorrect positions and boolean
+or string indexes remain errors; unknown tool fields are still rejected.
+
 References: [reasoning controls](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens),
 [model](https://openrouter.ai/nvidia/nemotron-3-ultra-550b-a55b:free).

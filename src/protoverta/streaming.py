@@ -11,7 +11,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from .core import ConversionError, Protocol, _decode_usage
+from .core import ConversionError, Protocol, _decode_usage, _validate_response_item
 from .sse import SSEEvent
 
 
@@ -40,6 +40,18 @@ def _obj(value: Any, label: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise StreamError(f"{label} must be an object")
     return value
+
+
+def _only(value: dict, allowed: set[str], label: str) -> None:
+    if set(value) - allowed:
+        raise StreamError(f"{label} contains unsupported fields")
+
+
+def _response_item(item: dict) -> None:
+    try:
+        _validate_response_item(item, "Responses output item")
+    except ConversionError as exc:
+        raise StreamError(str(exc)) from exc
 
 
 def _str(value: Any, label: str) -> str:
@@ -152,6 +164,10 @@ class StreamDecoder:
         self.started = True
         return [Delta("start", model=self.model, input_tokens=self.input_tokens, output_tokens=self.output_tokens, **self.usage_details)]
 
+    def _check_call_id(self, call_id: str, index: int) -> None:
+        if not call_id or any(other != index and tool.call_id == call_id for other, tool in self.tools.items()):
+            raise StreamError("empty or duplicate stream tool call ID")
+
     def _complete(self, reason: str) -> list[Delta]:
         if not self.started or self.ended:
             raise StreamError("invalid stream completion")
@@ -212,7 +228,7 @@ class StreamDecoder:
             raise StreamError("unsupported Chat choice index or logprobs")
         delta = _obj(choice.get("delta"), "Chat delta")
         for field, value in delta.items():
-            if field not in {"role", "content", "tool_calls"} and value not in (None, "", [], {}):
+            if field not in {"role", "content", "tool_calls"} and (field not in {"refusal", "annotations", "reasoning", "reasoning_content", "reasoning_details"} or value not in (None, "", [])):
                 raise StreamError(f"unsupported Chat delta field: {field}")
         if delta.get("role") not in {None, "assistant"}:
             raise StreamError("Chat delta has a non-assistant role")
@@ -223,6 +239,7 @@ class StreamDecoder:
             deltas.append(Delta("text", text=_str(content, "Chat content")))
         for partial in delta.get("tool_calls") or []:
             partial = _obj(partial, "Chat tool delta")
+            _only(partial, {"index", "id", "type", "function"}, "Chat tool delta")
             index = _index(partial.get("index"), "Chat tool index")
             tool = self.tools.setdefault(index, _Tool())
             if partial.get("type") not in {None, "function"}:
@@ -233,11 +250,13 @@ class StreamDecoder:
                 tool.call_id = _str(partial["id"], "Chat tool ID")
             fn = partial.get("function") or {}
             fn = _obj(fn, "Chat tool function")
+            _only(fn, {"name", "arguments"}, "Chat tool function")
             if "name" in fn:
                 if tool.name and tool.name != fn["name"]:
                     raise StreamError("Chat tool name changed")
                 tool.name = _str(fn["name"], "Chat tool name")
             if not tool.opened and tool.call_id and tool.name:
+                self._check_call_id(tool.call_id, index)
                 tool.opened = True
                 self.saw_tool = True
                 deltas.append(Delta("tool_start", index=index, call_id=tool.call_id, name=tool.name))
@@ -285,16 +304,19 @@ class StreamDecoder:
             block = _obj(body.get("content_block"), "content_block")
             block_type = block.get("type")
             if block_type == "text":
+                _only(block, {"type", "text", "citations"}, "Messages text block")
                 if block.get("citations") not in (None, []):
                     raise StreamError("Messages citations cannot be preserved across protocols")
                 self.blocks[index] = "text"
                 initial = _str(block.get("text", ""), "initial text")
                 return [Delta("text", index=index, text=initial)] if initial else []
             if block_type == "tool_use":
+                _only(block, {"type", "id", "name", "input", "caller"}, "Messages tool block")
                 if "caller" in block and block["caller"] != {"type": "direct"}:
                     raise StreamError("non-direct Messages tool callers cannot be preserved across protocols")
                 call_id = _str(block.get("id"), "tool_use.id")
                 name = _str(block.get("name"), "tool_use.name")
+                self._check_call_id(call_id, index)
                 initial = _obj(block.get("input", {}), "tool_use.input")
                 if initial:
                     raise StreamError("nonempty initial tool input is unsupported")
@@ -308,8 +330,10 @@ class StreamDecoder:
             active = self.blocks.get(index)
             delta = _obj(body.get("delta"), "content_block_delta.delta")
             if active == "text" and delta.get("type") == "text_delta":
+                _only(delta, {"type", "text"}, "Messages text delta")
                 return [Delta("text", index=index, text=_str(delta.get("text"), "text delta"))]
             if active == "tool" and delta.get("type") == "input_json_delta":
+                _only(delta, {"type", "partial_json"}, "Messages tool delta")
                 value = _str(delta.get("partial_json"), "partial_json")
                 self.tools[index].arguments += value
                 return [Delta("tool_delta", index=index, call_id=self.tools[index].call_id, text=value)]
@@ -368,6 +392,7 @@ class StreamDecoder:
                 raise StreamError("duplicate Responses output_index")
             self.seen_items.add(index)
             item = _obj(body.get("item"), "output item")
+            _response_item(item)
             item_type = item.get("type")
             item_id = _str(item.get("id"), "output item ID")
             if item_type == "message" and item.get("role") == "assistant":
@@ -379,6 +404,7 @@ class StreamDecoder:
             if item_type == "function_call":
                 call_id = _str(item.get("call_id"), "function_call.call_id")
                 name = _str(item.get("name"), "function_call.name")
+                self._check_call_id(call_id, index)
                 self.items[index] = ("tool", item_id)
                 self.tools[index] = _Tool(call_id=call_id, name=name, item_id=item_id, opened=True)
                 self.saw_tool = True
@@ -446,6 +472,7 @@ class StreamDecoder:
             if item_type is None:
                 raise StreamError("Responses output_item.done without added")
             item = _obj(body.get("item"), "completed output item")
+            _response_item(item)
             if item.get("id") != item_id or item.get("status") not in {"completed", "incomplete"}:
                 raise StreamError("Responses output item identity/status changed")
             self.incomplete_items |= item.get("status") == "incomplete"

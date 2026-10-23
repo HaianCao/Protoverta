@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "models": [
+    {
+      "base_url": "https://provider.example/v1",
+      "protocol": "chat",
+      "model": "replace-with-exact-model-id",
+      "features": {
+        "text": true,
+        "streaming": true,
+        "tools": true,
+        "forced_tool_choice": true,
+        "strict_json_schema": false
+      },
+      "checked_at": "2026-10-23",
+      "evidence": "Illustrative only: replace these values with your own documented probe results"
+    }
+  ]
+}

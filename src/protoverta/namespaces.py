@@ -98,8 +98,12 @@ class NamespaceMap:
                     item.pop("namespace", None)
         choice = result.get("tool_choice")
         if isinstance(choice, dict) and choice.get("namespace") is not None:
-            # Forced tool selection is not yet supported by the strict codecs.
-            raise ConversionError("namespaced tool_choice is not supported")
+            if set(choice) != {"type", "namespace", "name"} or choice.get("type") != "function":
+                raise ConversionError("invalid namespaced tool_choice")
+            pair = (_name(choice["namespace"], "namespace"), _name(choice["name"], "function name"))
+            if pair not in seen:
+                raise ConversionError("namespaced tool_choice must name a declared function")
+            result["tool_choice"] = {"type": "function", "name": self.alias(*pair)}
         return result
 
     def restore(self, body: dict) -> dict:

@@ -44,7 +44,7 @@ def test_messages_profile_applies_budget_and_initial_instruction_policy():
 @pytest.mark.parametrize("field,value", [
     ("include", ["web_search_call.action.sources"]),
     ("reasoning", {"summary": "auto"}),
-    ("text", {"format": {"type": "json_object"}}),
+    ("text", {"format": {"type": "unknown"}}),
 ])
 def test_codex_profile_rejects_unmapped_behavior(field, value):
     body = codex_request()

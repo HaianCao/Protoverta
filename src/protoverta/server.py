@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import secrets
 import threading
@@ -13,6 +14,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from .capabilities import CapabilityRegistry
 from .core import ConversionError, Protocol, convert_request, convert_response
 from .namespaces import NamespaceMap
 from .profiles import prepare_claude_request, prepare_codex_request
@@ -42,6 +44,8 @@ class GatewayConfig:
     upstream_reasoning: str = "provider_default"
     namespace_tools: str = "reject"
     messages_system_models: tuple[str, ...] = ()
+    capabilities: CapabilityRegistry | None = None
+    require_verified_capabilities: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "upstream_protocol", Protocol(self.upstream_protocol))
@@ -74,6 +78,10 @@ class GatewayConfig:
             raise ValueError("messages_system_models requires a Messages upstream")
         if self.default_max_output_tokens is not None and (isinstance(self.default_max_output_tokens, bool) or not isinstance(self.default_max_output_tokens, int) or self.default_max_output_tokens <= 0):
             raise ValueError("default_max_output_tokens must be a positive integer")
+        if self.capabilities is not None and not isinstance(self.capabilities, CapabilityRegistry):
+            raise ValueError("capabilities must be a CapabilityRegistry")
+        if not isinstance(self.require_verified_capabilities, bool) or self.require_verified_capabilities and self.capabilities is None:
+            raise ValueError("require_verified_capabilities requires a capability registry")
 
     @property
     def upstream_url(self) -> str:
@@ -152,8 +160,8 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
             self.end_headers()
             self.wfile.write(raw)
 
-        def _stream(self, response, source: Protocol, target: Protocol, namespace_map: NamespaceMap | None = None) -> None:
-            pipeline = StreamTranscoder(source, target, messages_usage_policy=config.messages_usage_policy, max_pending_bytes=config.max_body_bytes, response_transform=namespace_map.restore if namespace_map else None) if source != target else StreamValidator(source)
+        def _stream(self, response, source: Protocol, target: Protocol, response_transform=None) -> None:
+            pipeline = StreamTranscoder(source, target, messages_usage_policy=config.messages_usage_policy, max_pending_bytes=config.max_body_bytes, response_transform=response_transform) if source != target else StreamValidator(source)
             headers_sent = False
 
             def send_headers() -> None:
@@ -239,6 +247,8 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                         payload = prepare_claude_request(payload)
                     outbound = convert_request(payload, protocol, config.upstream_protocol, messages_mid_system=mid_system)
                 outbound = apply_upstream_reasoning(outbound, config.upstream_protocol, config.upstream_reasoning)
+                if config.capabilities is not None:
+                    config.capabilities.preflight(config.upstream_base_url, config.upstream_protocol, outbound, require_verified=config.require_verified_capabilities)
             except (json.JSONDecodeError, UnicodeError, ConversionError) as exc:
                 self._json(422, {"error": {"message": str(exc)}})
                 return
@@ -257,10 +267,22 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                 data = json.dumps(outbound, ensure_ascii=False).encode("utf-8")
             upstream_url = config.upstream_url + ("?" + target_url.query if target_url.query and protocol == config.upstream_protocol else "")
             request = Request(upstream_url, data=data, headers=headers, method="POST")
+
+            def restore_response(result):
+                mapped = namespace_map.restore(result) if namespace_map else copy.deepcopy(result)
+                # Generated Responses snapshots must describe the requested
+                # format instead of incorrectly echoing plain-text defaults.
+                if protocol == Protocol.RESPONSES and "text" in payload:
+                    snapshot = mapped.get("response", mapped if "output" in mapped else None)
+                    if isinstance(snapshot, dict):
+                        snapshot["text"] = copy.deepcopy(payload["text"])
+                return mapped
+
             try:
                 with open_upstream(request, timeout=config.timeout) as response:
                     if streaming:
-                        self._stream(response, config.upstream_protocol, protocol, namespace_map)
+                        transform = restore_response if protocol == Protocol.RESPONSES and (namespace_map or "text" in payload) else None
+                        self._stream(response, config.upstream_protocol, protocol, transform)
                         return
                     raw = response.read(config.max_body_bytes + 1)
                     if len(raw) > config.max_body_bytes:
@@ -270,8 +292,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                         raise ConversionError("upstream returned a non-object JSON response")
                     if protocol != config.upstream_protocol:
                         result = convert_response(result, config.upstream_protocol, protocol)
-                        if namespace_map:
-                            result = namespace_map.restore(result)
+                        result = restore_response(result)
                     self._json(200, result, getattr(response, "headers", None))
             except HTTPError as exc:
                 try:

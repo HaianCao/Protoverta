@@ -17,7 +17,7 @@ One Gateway. Any Protocol. Any Model.
 
 Protoverta converts requests and responses among OpenAI Chat Completions, Anthropic Messages, and OpenAI Responses. Use it as a Python library or run it as a local HTTP gateway.
 
-**Current scope:** text and client-side function tools, including incremental SSE where usage and event ordering can be preserved. Unsupported fields and unsafe streaming routes are rejected rather than silently changed. Multimodal content, token counting, and server-side conversation state are not supported.
+**Current scope:** text, client-side function tools, forced function selection, and supported JSON output formats, including incremental SSE where usage and event ordering can be preserved. Unsupported fields and unsafe streaming routes are rejected rather than silently changed. Multimodal content, token counting, and server-side conversation state are not supported.
 
 ## Install
 
@@ -78,9 +78,19 @@ deterministic, collision-checked flat aliases for Chat/Messages. Each request
 rebuilds its own mapping from definitions and historical calls; JSON responses
 and SSE call items restore the original `name` and `namespace`, preserving call
 IDs and arguments. Namespace descriptions are prepended to function descriptions.
-Nested namespaces, custom/strict/hosted tools and forced namespaced tool choices
-remain unsupported. The default is `reject`; native forwarding is unchanged.
+Nested namespaces and custom/strict/hosted tools remain unsupported. An explicit
+gateway extension can select one declared namespaced function. The default is
+`reject`; native forwarding is unchanged.
 Use `GatewayConfig(..., namespace_tools="flatten")` from Python.
+
+Forced function selection maps between all three protocols. JSON object mode maps
+between Chat and Responses; JSON Schema maps across the supported strict subset
+when Messages is involved. See [tool selection and output formats](docs/compatibility/output-formats.md).
+
+An optional [capability registry](docs/compatibility/capabilities.md) can block
+unsupported provider/model features before upstream I/O. Configure it with
+`--capabilities-file FILE`; add `--require-verified-capabilities` to reject unknown
+features too. Records are scoped to the exact API prefix, protocol and model.
 
 For a Messages model whose provider explicitly supports mid-conversation system
 text, opt in with repeatable `--messages-system-model EXACT_MODEL_ID` or
@@ -128,10 +138,10 @@ This uses temporary client state, explicitly disables upstream reasoning, and ma
 incur API charges. Add `--tool-loop` to verify Claude's read-only nonce-file tool
 round trip, or Codex's read-only `get_goal` query with its matching tool result
 observed in the outbound request. Shell permissions are not relaxed. These probes
-do not test resume; never use private prompts as fixtures.
+do not test resume unless `--resume-target` is provided; never use private prompts as fixtures.
 
-For a two-turn real text resume probe, use `--resume-target PROTOCOL` instead of
-`--tool-loop`. The selected model is retained, while the second invocation uses
+For a two-turn real resume probe, use `--resume-target PROTOCOL`. Combine it with
+`--tool-loop` to resume after a completed read-only tool call. The selected model is retained, while the second invocation uses
 a different provider configuration ID and must recall a token from the first
 turn. This still requires `--allow-live` and may incur API charges.
 

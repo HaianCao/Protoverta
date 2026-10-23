@@ -13,15 +13,14 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from .errors import ConversionError
+from .formats import OutputFormat, decode_output_format, encode_output_format
+
 
 class Protocol(StrEnum):
     CHAT = "chat"
     MESSAGES = "messages"
     RESPONSES = "responses"
-
-
-class ConversionError(ValueError):
-    """A request cannot be converted without changing its meaning."""
 
 
 @dataclass(slots=True)
@@ -50,6 +49,7 @@ class Request:
     tool_choice: Any = None
     parallel_tool_calls: bool | None = None
     reasoning_effort: str | None = None
+    output_format: OutputFormat | None = None
 
 
 @dataclass(slots=True)
@@ -202,8 +202,45 @@ def _chat_content(value: Any, label: str) -> list[Part]:
     return result
 
 
+def _tool_choice(value: Any, source: Protocol) -> str | dict | None:
+    """Normalize forced function selection without accepting hosted tools."""
+    if value is None:
+        return None
+    if source != Protocol.MESSAGES and isinstance(value, str) and value in {"auto", "none", "required"}:
+        return value
+    value = _object(value, "tool_choice")
+    if source == Protocol.MESSAGES:
+        _only(value, {"type", "name", "disable_parallel_tool_use"}, "tool_choice")
+        kind = value.get("type")
+        if isinstance(kind, str) and kind in {"auto", "any", "none"} and "name" not in value:
+            return {"auto": "auto", "any": "required", "none": "none"}[kind]
+        if kind == "tool":
+            return {"type": "function", "name": _string(value.get("name"), "tool_choice.name")}
+    elif value.get("type") == "function":
+        if source == Protocol.CHAT:
+            _only(value, {"type", "function"}, "tool_choice")
+            function = _object(value.get("function"), "tool_choice.function")
+            _only(function, {"name"}, "tool_choice.function")
+            name = function.get("name")
+        else:
+            _only(value, {"type", "name"}, "tool_choice")
+            name = value.get("name")
+        return {"type": "function", "name": _string(name, "tool_choice.name")}
+    raise ConversionError("tool_choice is not portable")
+
+
+def _validate_chat_call(call: dict, index: int) -> None:
+    _only(call, {"id", "type", "function", "index"}, "tool_call")
+    # Some compatible providers include the streaming-style position in a
+    # completed JSON call. Accept it only when it agrees with array ordering.
+    if "index" in call and (type(call["index"]) is not int or call["index"] != index):
+        raise ConversionError("Chat tool_call index must match its array position")
+    if call.get("type") != "function":
+        raise ConversionError("only client-side function calls are supported")
+
+
 def _decode_chat(body: dict[str, Any]) -> Request:
-    _only(body, {"model", "messages", "tools", "tool_choice", "max_completion_tokens", "max_tokens", "temperature", "stream", "parallel_tool_calls", "reasoning_effort"}, "Chat request")
+    _only(body, {"model", "messages", "tools", "tool_choice", "max_completion_tokens", "max_tokens", "temperature", "stream", "parallel_tool_calls", "reasoning_effort", "response_format"}, "Chat request")
     if "max_completion_tokens" in body and "max_tokens" in body:
         raise ConversionError("choose one Chat token limit field")
     turns: list[Turn] = []
@@ -214,11 +251,9 @@ def _decode_chat(body: dict[str, Any]) -> Request:
             _only(item, {"role", "content", "tool_calls"}, "message")
             parts = _chat_content(item.get("content"), "message.content")
             if role == "assistant":
-                for call in _list(item.get("tool_calls") or [], "tool_calls"):
+                for index, call in enumerate(_list(item.get("tool_calls") or [], "tool_calls")):
                     call = _object(call, "tool_call")
-                    _only(call, {"id", "type", "function"}, "tool_call")
-                    if call.get("type") != "function":
-                        raise ConversionError("only client-side function calls are supported")
+                    _validate_chat_call(call, index)
                     fn = _object(call.get("function"), "tool_call.function")
                     _only(fn, {"name", "arguments"}, "tool_call.function")
                     parts.append(Part("tool_call", call_id=_string(call.get("id"), "tool_call.id"), name=_string(fn.get("name"), "tool_call.name"), arguments=_arguments(fn.get("arguments"), "tool_call.arguments")))
@@ -239,7 +274,7 @@ def _decode_chat(body: dict[str, Any]) -> Request:
         if fn.get("strict"):
             raise ConversionError("strict tool schemas have no universal equivalent")
         tools.append({"name": _string(fn.get("name"), "tool name"), "description": fn.get("description", ""), "parameters": fn.get("parameters", {"type": "object", "properties": {}})})
-    return Request(_string(body.get("model"), "model"), turns, tools, _optional_positive_int(body.get("max_completion_tokens", body.get("max_tokens")), "max_completion_tokens"), _optional_temperature(body.get("temperature")), _stream_flag(body.get("stream", False)), body.get("tool_choice"), _parallel_flag(body.get("parallel_tool_calls")), _effort(body.get("reasoning_effort")))
+    return Request(_string(body.get("model"), "model"), turns, tools, _optional_positive_int(body.get("max_completion_tokens", body.get("max_tokens")), "max_completion_tokens"), _optional_temperature(body.get("temperature")), _stream_flag(body.get("stream", False)), _tool_choice(body.get("tool_choice"), Protocol.CHAT), _parallel_flag(body.get("parallel_tool_calls")), _effort(body.get("reasoning_effort")))
 
 
 def _message_parts(content: Any, label: str) -> list[Part]:
@@ -279,7 +314,7 @@ def _message_parts(content: Any, label: str) -> list[Part]:
 def _decode_messages(body: dict[str, Any]) -> Request:
     _only(body, {"model", "system", "messages", "tools", "tool_choice", "max_tokens", "temperature", "stream", "output_config"}, "Messages request")
     output_config = _object(body.get("output_config", {}), "output_config")
-    _only(output_config, {"effort"}, "output_config")
+    _only(output_config, {"effort", "format"}, "output_config")
     turns: list[Turn] = []
     if "system" in body:
         system = body["system"]
@@ -303,15 +338,12 @@ def _decode_messages(body: dict[str, Any]) -> Request:
     parallel = None
     if choice is not None:
         choice = _object(choice, "tool_choice")
-        _only(choice, {"type", "disable_parallel_tool_use"}, "tool_choice")
-        if choice.get("type") not in {"auto", "any", "none"}:
-            raise ConversionError("tool_choice is not portable")
         if "disable_parallel_tool_use" in choice:
             flag = choice["disable_parallel_tool_use"]
             if not isinstance(flag, bool):
                 raise ConversionError("disable_parallel_tool_use must be a boolean")
             parallel = not flag
-        choice = {"auto": "auto", "any": "required", "none": "none"}[choice["type"]]
+        choice = _tool_choice(choice, Protocol.MESSAGES)
     return Request(_string(body.get("model"), "model"), turns, tools, _optional_positive_int(body.get("max_tokens"), "max_tokens"), _optional_temperature(body.get("temperature")), _stream_flag(body.get("stream", False)), choice, parallel, _effort(output_config.get("effort")))
 
 
@@ -331,7 +363,7 @@ def _response_content(content: Any, label: str) -> list[Part]:
 
 
 def _decode_responses(body: dict[str, Any]) -> Request:
-    _only(body, {"model", "input", "instructions", "tools", "tool_choice", "max_output_tokens", "temperature", "stream", "store", "parallel_tool_calls", "reasoning"}, "Responses request")
+    _only(body, {"model", "input", "instructions", "tools", "tool_choice", "max_output_tokens", "temperature", "stream", "store", "parallel_tool_calls", "reasoning", "text"}, "Responses request")
     reasoning = _object(body.get("reasoning", {}), "reasoning")
     _only(reasoning, {"effort"}, "reasoning")
     if body.get("store") is True:
@@ -379,13 +411,20 @@ def _decode_responses(body: dict[str, Any]) -> Request:
         if item.get("type") != "function" or item.get("strict"):
             raise ConversionError("only non-strict function tools are supported")
         tools.append({"name": _string(item.get("name"), "tool name"), "description": item.get("description", ""), "parameters": item.get("parameters", {"type": "object", "properties": {}})})
-    return Request(_string(body.get("model"), "model"), turns, tools, _optional_positive_int(body.get("max_output_tokens"), "max_output_tokens"), _optional_temperature(body.get("temperature")), _stream_flag(body.get("stream", False)), body.get("tool_choice"), _parallel_flag(body.get("parallel_tool_calls")), _effort(reasoning.get("effort")))
+    return Request(_string(body.get("model"), "model"), turns, tools, _optional_positive_int(body.get("max_output_tokens"), "max_output_tokens"), _optional_temperature(body.get("temperature")), _stream_flag(body.get("stream", False)), _tool_choice(body.get("tool_choice"), Protocol.RESPONSES), _parallel_flag(body.get("parallel_tool_calls")), _effort(reasoning.get("effort")))
 
 
 _DECODERS = {Protocol.CHAT: _decode_chat, Protocol.MESSAGES: _decode_messages, Protocol.RESPONSES: _decode_responses}
 
 
 def _check_turns(request: Request, target: Protocol, *, messages_mid_system: bool = False) -> None:
+    names = [tool["name"] for tool in request.tools]
+    if len(names) != len(set(names)):
+        raise ConversionError("duplicate tool definition name")
+    if isinstance(request.tool_choice, dict) and request.tool_choice["name"] not in names:
+        raise ConversionError("forced tool_choice must name a declared function")
+    if request.tool_choice == "required" and not names:
+        raise ConversionError("required tool_choice requires function tools")
     if target == Protocol.MESSAGES:
         seen_conversation = False
         for turn in request.turns:
@@ -466,7 +505,9 @@ def _encode_chat(req: Request) -> dict[str, Any]:
     if req.temperature is not None:
         out["temperature"] = req.temperature
     if req.tool_choice is not None:
-        if isinstance(req.tool_choice, str) and req.tool_choice in {"auto", "none", "required"}:
+        if isinstance(req.tool_choice, dict):
+            out["tool_choice"] = {"type": "function", "function": {"name": req.tool_choice["name"]}}
+        elif isinstance(req.tool_choice, str) and req.tool_choice in {"auto", "none", "required"}:
             out["tool_choice"] = req.tool_choice
         else:
             raise ConversionError("tool_choice is not portable")
@@ -508,8 +549,8 @@ def _encode_messages(req: Request) -> dict[str, Any]:
             out["tool_choice"] = {"type": "any"}
         elif choice == "none":
             out["tool_choice"] = {"type": "none"}
-        elif isinstance(choice, dict) and choice.get("type") in {"auto", "any", "none", "tool"}:
-            out["tool_choice"] = choice
+        elif isinstance(choice, dict):
+            out["tool_choice"] = {"type": "tool", "name": choice["name"]}
         else:
             raise ConversionError("tool_choice is not portable")
     if req.parallel_tool_calls is False and req.tools:
@@ -554,7 +595,9 @@ def _encode_responses(req: Request) -> dict[str, Any]:
     if req.temperature is not None:
         out["temperature"] = req.temperature
     if req.tool_choice is not None:
-        if isinstance(req.tool_choice, str) and req.tool_choice in {"auto", "none", "required"}:
+        if isinstance(req.tool_choice, dict):
+            out["tool_choice"] = dict(req.tool_choice)
+        elif isinstance(req.tool_choice, str) and req.tool_choice in {"auto", "none", "required"}:
             out["tool_choice"] = req.tool_choice
         else:
             raise ConversionError("tool_choice is not portable")
@@ -572,8 +615,24 @@ def convert_request(body: dict[str, Any], source: Protocol | str, target: Protoc
     if source == target:
         return body.copy()
     request = _DECODERS[source](_object(body, "request"))
+    request.output_format = decode_output_format(body, source)
     _check_turns(request, target, messages_mid_system=messages_mid_system)
-    return _ENCODERS[target](request)
+    output = _ENCODERS[target](request)
+    formatted = encode_output_format(request.output_format, target)
+    if "output_config" in formatted:
+        output.setdefault("output_config", {}).update(formatted["output_config"])
+    else:
+        output.update(formatted)
+    return output
+
+
+def _validate_response_item(item: dict, label: str) -> None:
+    if item.get("type") == "message":
+        _only(item, {"type", "id", "status", "role", "content"}, label)
+    elif item.get("type") == "function_call":
+        _only(item, {"type", "id", "status", "call_id", "name", "arguments", "namespace"}, label)
+        if item.get("namespace") is not None:
+            raise ConversionError("upstream Responses namespace cannot be preserved in this protocol")
 
 
 def _decode_result(body: dict[str, Any], source: Protocol) -> Result:
@@ -595,8 +654,11 @@ def _decode_result(body: dict[str, Any], source: Protocol) -> Result:
         if msg.get("refusal"):
             raise ConversionError("refusal cannot be preserved across protocols")
         parts = _chat_content(msg.get("content"), "message.content")
-        for call in _list(msg.get("tool_calls") or [], "tool_calls"):
-            fn = _object(_object(call, "tool_call").get("function"), "function")
+        for index, call in enumerate(_list(msg.get("tool_calls") or [], "tool_calls")):
+            call = _object(call, "tool_call")
+            _validate_chat_call(call, index)
+            fn = _object(call.get("function"), "function")
+            _only(fn, {"name", "arguments"}, "function")
             parts.append(Part("tool_call", call_id=_string(call.get("id"), "call.id"), name=_string(fn.get("name"), "function.name"), arguments=_arguments(fn.get("arguments"), "function.arguments")))
         usage = _object(body.get("usage") or {}, "usage")
         reason = choice.get("finish_reason")
@@ -621,6 +683,7 @@ def _decode_result(body: dict[str, Any], source: Protocol) -> Result:
     parts = []
     for item in _list(body.get("output"), "output"):
         item = _object(item, "output item")
+        _validate_response_item(item, "output item")
         if item.get("type") == "message":
             allowed_status = {None, "completed", "incomplete"} if body.get("status") == "incomplete" else {None, "completed"}
             if item.get("role") not in {None, "assistant"} or item.get("status") not in allowed_status:
@@ -691,4 +754,8 @@ def convert_response(body: dict[str, Any], source: Protocol | str, target: Proto
     source, target = Protocol(source), Protocol(target)
     if source == target:
         return body.copy()
-    return _encode_result(_decode_result(_object(body, "response"), source), target)
+    result = _decode_result(_object(body, "response"), source)
+    call_ids = [part.call_id for part in result.parts if part.kind == "tool_call"]
+    if any(not value for value in call_ids) or len(call_ids) != len(set(call_ids)):
+        raise ConversionError("empty or duplicate response tool call ID")
+    return _encode_result(result, target)

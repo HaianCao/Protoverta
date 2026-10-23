@@ -82,6 +82,8 @@ class StreamEncoder:
         if delta.kind == "tool_start":
             if delta.index is None or not delta.call_id or not delta.name or delta.index in self.tools:
                 raise StreamError("invalid or duplicate tool start")
+            if any(tool["call_id"] == delta.call_id for tool in self.tools.values()):
+                raise StreamError("duplicate stream tool call ID")
             self.tools[delta.index] = {"call_id": delta.call_id, "name": delta.name, "arguments": "", "item_id": delta.item_id or f"fc_{uuid.uuid4().hex}"}
             self.open_blocks.add(delta.index)
             self.saw_tool = True

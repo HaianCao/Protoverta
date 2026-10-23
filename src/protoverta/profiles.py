@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 
 from .core import ConversionError, Protocol
+from .formats import decode_output_format
 
 
 def _blank_assistant_message(item: dict) -> bool:
@@ -121,10 +122,10 @@ def prepare_codex_request(body: dict, target: Protocol, *, default_max_output_to
         reasoning.pop("summary", None)
         if not reasoning:
             result.pop("reasoning")
-    if "text" in result:
-        if result["text"] != {"format": {"type": "text"}}:
-            raise ConversionError("Codex gateway only supports plain text output")
+    if result.get("text") == {"format": {"type": "text"}}:
         result.pop("text")
+    elif "text" in result:
+        decode_output_format(result, Protocol.RESPONSES)
     for tool in result.get("tools", []) if isinstance(result.get("tools"), list) else []:
         if isinstance(tool, dict) and (tool.get("type") == "namespace" or "tools" in tool):
             raise ConversionError("Codex gateway cannot translate namespaced tools without namespace_tools='flatten'; enable mapping for synchronous function tools or use native Responses")
