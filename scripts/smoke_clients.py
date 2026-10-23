@@ -286,6 +286,10 @@ def run_client(
     timeout,
     model,
     prompt: str | None = None,
+    persist_session: bool = False,
+    resume_id: str | None = None,
+    provider_id: str = "smoke",
+    trace_file: Path | None = None,
 ):
     if client == "codex":
         settings = {
@@ -421,6 +425,43 @@ def run_client(
                 "--",
                 *args[4:],
             ]
+        if provider_id != "smoke":
+            content = config_path.read_text(encoding="utf-8")
+            content = content.replace("[providers.smoke]", f"[providers.{provider_id}]").replace('id = "smoke"', f'id = "{provider_id}"')
+            config_path.write_text(content, encoding="utf-8")
+            args[args.index("-p") + 1] = provider_id
+            if client == "claude":
+                # ClaudApter derives its credential variable from the provider
+                # ID. Model/provider replay must not accidentally reuse smoke's
+                # credential mapping or leak that extra variable to the CLI.
+                env.pop("SMOKE_TOKEN", None)
+                env[provider_id.upper().replace("-", "_") + "_TOKEN"] = config.upstream_api_key
+    if persist_session:
+        args = [value for value in args if value not in {"--ephemeral", "--no-session-persistence"}]
+    if resume_id:
+        if client == "codex":
+            at = args.index("--") + 1 if adapter_source is not None or installed_adapter else args.index("exec") + 1
+            args[at:at] = ["resume", resume_id]
+            if "--sandbox" in args:
+                at = args.index("--sandbox")
+                del args[at:at + 2]
+            # exec resume has no --sandbox flag of its own. Preserve the first
+            # invocation's read-only policy explicitly at Codex's root scope.
+            if adapter_source is not None or installed_adapter:
+                args[args.index("exec")] = "run"
+                at = args.index("--") + 1
+                args[at:at] = ["--sandbox", "read-only", "exec"]
+            else:
+                at = args.index("exec")
+                args[at:at] = ["--sandbox", "read-only"]
+        else:
+            args[-1:-1] = ["--resume", resume_id]
+    if trace_file is not None:
+        if adapter_source is None:
+            raise ValueError("Tracing requires a source adapter and synthetic state")
+        module_index = args.index("-m")
+        module_name = args[module_index + 1]
+        args[module_index:module_index + 2] = [str(Path(__file__).with_name("trace_adapter.py")), module_name, str(trace_file)]
     return subprocess.run(
         args,
         cwd=directory,

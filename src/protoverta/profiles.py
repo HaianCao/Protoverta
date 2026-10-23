@@ -124,6 +124,9 @@ def prepare_codex_request(body: dict, target: Protocol, *, default_max_output_to
         if result["text"] != {"format": {"type": "text"}}:
             raise ConversionError("Codex gateway only supports plain text output")
         result.pop("text")
+    for tool in result.get("tools", []) if isinstance(result.get("tools"), list) else []:
+        if isinstance(tool, dict) and (tool.get("type") == "namespace" or "tools" in tool):
+            raise ConversionError("Codex gateway cannot translate namespaced tools in this session; start a fresh gateway session or use a native Responses provider")
     if target == Protocol.MESSAGES:
         if "max_output_tokens" not in result and default_max_output_tokens is not None:
             result["max_output_tokens"] = default_max_output_tokens
@@ -140,7 +143,7 @@ def prepare_codex_request(body: dict, target: Protocol, *, default_max_output_to
                     continue  # The strict decoder reports invalid items.
                 if item.get("role") in {"system", "developer"}:
                     if conversation_started:
-                        raise ConversionError("Codex gateway cannot relocate mid-conversation instructions")
+                        raise ConversionError("Codex gateway cannot relocate mid-conversation instructions into Messages system text; start a fresh session or use a Chat/Responses provider")
                     item["role"] = "system"
                 else:
                     conversation_started = True

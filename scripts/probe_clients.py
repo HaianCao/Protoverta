@@ -18,6 +18,7 @@ from unittest.mock import patch
 from urllib.request import build_opener
 
 from smoke_clients import MARKER, run_client
+from smoke_resume import session_id
 
 from protoverta.core import Protocol
 from protoverta.server import GatewayConfig
@@ -128,6 +129,36 @@ def probe(client: str, upstream: Protocol, base_url: str, key: str, model: str, 
         return {"client": client, "upstream": upstream.value, "model": model, "tool_loop": tool_loop, "passed": passed, "tool_verified": executed_tool if tool_loop else None, "requests": requests, "returncode": result.returncode, "error": "" if passed else (result.stderr + result.stdout)[-2500:].replace(key, "[REDACTED]")}
 
 
+def probe_resume(client: str, source: Protocol, target: Protocol, base_url: str, key: str, model: str, adapter_source: Path, *, timeout: int = 120) -> dict:
+    """Two short synthetic API turns; replay one nonce on the selected model."""
+    executable = shutil.which(client)
+    if not executable:
+        raise ValueError(f"{client} is not on PATH")
+    if not base_url.endswith("/v1"):
+        raise ValueError("This probe requires an explicit /v1 API prefix")
+    nonce = "RESUME_NONCE_" + secrets.token_hex(12)
+    with tempfile.TemporaryDirectory(prefix="protoverta-live-resume-") as directory:
+        root = Path(directory)
+        env = {name: value for name, value in os.environ.items() if name.upper() in {"PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP"}}
+        env.update({"HOME": directory, "USERPROFILE": directory, "APPDATA": str(root / "roaming"), "LOCALAPPDATA": str(root / "local"), "CODEX_HOME": str(root / "codex"), "CLAUDE_CONFIG_DIR": str(root / "claude"), "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1", "CLAUDE_CODE_SIMPLE": "1"})
+        for name in ("roaming", "local", "codex", "claude"):
+            (root / name).mkdir()
+        config = GatewayConfig(source, base_url, key, "isolated-probe", upstream_reasoning="openrouter_disabled")
+        first = run_client(client, executable, "http://127.0.0.1:0", base_url.removesuffix("/v1"), config, env, directory, False, adapter_source, False, source, timeout, model, prompt=f"Remember this synthetic token for my next message: {nonce}. Reply ACK only. Do not use tools.", persist_session=True)
+        if first.returncode != 0:
+            return {"passed": False, "client": client, "stage": "initial", "error": (first.stderr + first.stdout)[-2000:].replace(key, "[REDACTED]")}
+        identifier = session_id(client, first.stdout)
+        config = GatewayConfig(target, base_url, key, "isolated-probe", upstream_reasoning="openrouter_disabled")
+        second = run_client(client, executable, "http://127.0.0.1:0", base_url.removesuffix("/v1"), config, env, directory, False, adapter_source, False, target, timeout, model, prompt="Return only the exact synthetic token I asked you to remember in my previous message. Do not use tools.", persist_session=True, resume_id=identifier, provider_id="alternate")
+        try:
+            answer, _ = _completed_answer(client, second.stdout)
+            same_session = session_id(client, second.stdout) == identifier
+        except (ValueError, KeyError, StopIteration):
+            answer, same_session = "", False
+        passed = second.returncode == 0 and same_session and nonce in answer
+        return {"passed": passed, "client": client, "source": source.value, "target": target.value, "model": model, "same_session": same_session, "nonce_recalled": nonce in answer, "error": "" if passed else (second.stderr + second.stdout)[-2500:].replace(key, "[REDACTED]")}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--client", choices=["codex", "claude"], required=True)
@@ -137,14 +168,17 @@ def main() -> int:
     parser.add_argument("--base-url", default="https://openrouter.ai/api/v1")
     parser.add_argument("--adapter-source", type=Path, required=True)
     parser.add_argument("--tool-loop", action="store_true", help="Verify a real tool round trip: Claude reads a nonce file; Codex queries get_goal")
+    parser.add_argument("--resume-target", type=Protocol, choices=list(Protocol), help="Run two persistent text turns, resuming against this protocol")
     parser.add_argument("--allow-live", action="store_true", help="Acknowledge real API calls and possible charges")
     args = parser.parse_args()
     if not args.allow_live:
         parser.error("Live API calls require --allow-live")
+    if args.resume_target and args.tool_loop:
+        parser.error("Real-provider resume currently supports text only; do not combine with --tool-loop")
     key = os.environ.get(args.key_env)
     if not key:
         parser.error("The configured key environment variable is empty")
-    result = probe(args.client, args.upstream, args.base_url, key, args.model, args.adapter_source, tool_loop=args.tool_loop)
+    result = probe_resume(args.client, args.upstream, args.resume_target, args.base_url, key, args.model, args.adapter_source) if args.resume_target else probe(args.client, args.upstream, args.base_url, key, args.model, args.adapter_source, tool_loop=args.tool_loop)
     print(json.dumps(result, indent=2))
     return 0 if result["passed"] else 1
 

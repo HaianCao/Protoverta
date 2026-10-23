@@ -63,5 +63,11 @@ Transport compatibility covered by synthetic regression tests:
 No request headers, credentials or user conversations are committed as fixtures.
 These results describe one provider/model at one time, not universal support.
 
+Follow-up text resume also passed for Codex Chat → Messages and Claude
+Chat → Responses on the same model, with explicit upstream reasoning disabled.
+The tests retained the session ID and recalled a synthetic token from the prior
+turn. See [resume checks and remaining boundaries](resume.md); these results do
+not establish real-provider resume after tool calls or changing real models.
+
 References: [reasoning controls](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens),
 [model](https://openrouter.ai/nvidia/nemotron-3-ultra-550b-a55b:free).

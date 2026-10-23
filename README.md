@@ -101,6 +101,7 @@ python scripts/smoke_clients.py --client claude --upstream responses --tool-loop
 Use `--adapter-source PATH` to include a source launcher, or `--installed-adapter` to test a launcher installed in the active Python environment. These fixtures verify client/protocol interoperability, not a real provider's model capabilities.
 
 Provider checks and limits: [OpenRouter text/tool conformance](docs/compatibility/openrouter.md).
+Session replay checks and boundaries: [resume compatibility](docs/compatibility/resume.md).
 
 For an opt-in real OpenRouter text round trip through a source launcher, use
 `scripts/probe_clients.py --client claude --upstream chat --model MODEL_ID --key-env KEY_VARIABLE --adapter-source PATH --allow-live`.
@@ -109,5 +110,10 @@ incur API charges. Add `--tool-loop` to verify Claude's read-only nonce-file too
 round trip, or Codex's read-only `get_goal` query with its matching tool result
 observed in the outbound request. Shell permissions are not relaxed. These probes
 do not test resume; never use private prompts as fixtures.
+
+For a two-turn real text resume probe, use `--resume-target PROTOCOL` instead of
+`--tool-loop`. The selected model is retained, while the second invocation uses
+a different provider configuration ID and must recall a token from the first
+turn. This still requires `--allow-live` and may incur API charges.
 
 See [SECURITY.md](SECURITY.md) for reporting security issues. Licensed under [MIT](LICENSE).
