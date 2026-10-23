@@ -19,7 +19,15 @@ def run(script: Path, options: list[str], env: dict[str, str]) -> None:
         raise RuntimeError(f"{script.parent.parent.name} {script.name} failed: {(result.stdout + result.stderr)[-1600:]}")
 
 
-def exercise(source: Path, wheel: Path, root: Path, *, command: str, skip: str, install_name: str) -> dict:
+def run_remote(repo: str, name: str, options: list[str], env: dict[str, str]) -> None:
+    url = f"https://raw.githubusercontent.com/HaianCao/{repo}/integration/protoverta/scripts/{name}.ps1"
+    command = f'& ([scriptblock]::Create((irm "{url}"))) ' + " ".join(options)
+    result = subprocess.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command], env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=420, check=False)
+    if result.returncode:
+        raise RuntimeError(f"{repo} remote {name} failed: {(result.stdout + result.stderr)[-1600:]}")
+
+
+def exercise(source: Path, wheel: Path, root: Path, *, command: str, skip: str, install_name: str, remote_repo: str | None = None) -> dict:
     roaming = root / "roaming"
     local = root / "local"
     profile = root / "profile"
@@ -33,16 +41,22 @@ def exercise(source: Path, wheel: Path, root: Path, *, command: str, skip: str, 
     uninstaller = source / "scripts" / "uninstall.ps1"
     executable = local / "Programs" / install_name / "venv" / "Scripts" / f"{command}.exe"
     python = executable.with_name("python.exe")
-    options = [skip, "-NonInteractive", "-NoPathChanges", "-ProtovertaWheel", str(wheel)]
-    for _ in range(2):
-        run(installer, options, env)
+    options = [skip, "-NonInteractive", "-NoPathChanges", "-WithGateway", "-SourceBranch", "integration/protoverta"] if remote_repo else [skip, "-NonInteractive", "-NoPathChanges", "-ProtovertaWheel", str(wheel)]
+    for index in range(2):
+        if remote_repo:
+            run_remote(remote_repo, "install", options if index == 0 else [skip, "-NonInteractive", "-NoPathChanges", "-SourceBranch", "integration/protoverta"], env)
+        else:
+            run(installer, options, env)
         if not executable.is_file():
             raise RuntimeError(f"{command} executable missing")
         subprocess.run([str(executable), "--help"], env=env, capture_output=True, check=True, timeout=30)
         subprocess.run([str(python), "-c", "import importlib.metadata; assert importlib.metadata.version('protoverta') == '0.3.0a3'"], env=env, capture_output=True, check=True, timeout=30)
         if sentinel.read_text(encoding="utf-8") != "synthetic-settings\n":
             raise RuntimeError("test configuration changed during install/update")
-    run(uninstaller, ["-NonInteractive", "-NoPathChanges"], env)
+    if remote_repo:
+        run_remote(remote_repo, "uninstall", ["-NonInteractive", "-NoPathChanges"], env)
+    else:
+        run(uninstaller, ["-NonInteractive", "-NoPathChanges"], env)
     if executable.exists() or not sentinel.is_file():
         raise RuntimeError("uninstall did not remove only the wrapper")
     return {"project": source.name, "install": True, "update": True, "uninstall": True, "config_preserved": True}
@@ -51,14 +65,15 @@ def exercise(source: Path, wheel: Path, root: Path, *, command: str, skip: str, 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--wheel", type=Path, required=True)
+    parser.add_argument("--remote", action="store_true", help="Use the published one-line preview installer and release wheel")
     args = parser.parse_args()
     wheel = args.wheel.resolve(strict=True)
     root = Path(__file__).resolve().parents[2]
     with tempfile.TemporaryDirectory(prefix="protoverta-windows-install-") as directory:
         isolated = Path(directory)
         results = [
-            exercise(root / "free-codex-cli", wheel, isolated / "codex", command="codex-ca", skip="-SkipCodexInstall", install_name="codex-ca"),
-            exercise(root / "free-claude-cli", wheel, isolated / "claude", command="claude-ca", skip="-SkipClaudeInstall", install_name="claudapter"),
+            exercise(root / "free-codex-cli", wheel, isolated / "codex", command="codex-ca", skip="-SkipCodexInstall", install_name="codex-ca", remote_repo="CodexApter" if args.remote else None),
+            exercise(root / "free-claude-cli", wheel, isolated / "claude", command="claude-ca", skip="-SkipClaudeInstall", install_name="claudapter", remote_repo="ClaudApter" if args.remote else None),
         ]
     print(json.dumps(results, indent=2))
     return 0
