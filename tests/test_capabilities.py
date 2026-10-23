@@ -2,7 +2,12 @@ import json
 
 import pytest
 
-from protoverta import CapabilityRecord, CapabilityRegistry, ConversionError, request_features
+from protoverta import (
+    CapabilityRecord,
+    CapabilityRegistry,
+    ConversionError,
+    request_features,
+)
 from protoverta.server import GatewayConfig
 
 
@@ -58,6 +63,13 @@ def test_registry_load_round_trip_and_invalid_fields(tmp_path):
     body["models"][0]["features"]["unknown_feature"] = True
     with pytest.raises(ValueError):
         CapabilityRegistry.from_dict(body)
+
+
+def test_registry_invalid_types_are_reported_explicitly():
+    with pytest.raises(TypeError, match="ISO date string"):
+        CapabilityRecord("https://example.test/v1", "chat", "m", {}, None, "probe")
+    with pytest.raises(TypeError, match="CapabilityRecord"):
+        CapabilityRegistry(({},))
 
 
 @pytest.mark.parametrize("protocol,body,expected", [

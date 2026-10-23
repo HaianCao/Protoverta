@@ -50,7 +50,7 @@ class CapabilityRecord:
         if not isinstance(self.features, Mapping) or set(self.features) - FEATURES or any(not isinstance(value, bool) for value in self.features.values()):
             raise ValueError("capabilities require known feature names and boolean values")
         if not isinstance(self.checked_at, str):
-            raise ValueError("checked_at must be an ISO date")
+            raise TypeError("checked_at must be an ISO date string")
         date.fromisoformat(self.checked_at)
         if not isinstance(self.evidence, str) or not self.evidence.strip():
             raise ValueError("capability evidence must identify a documentation or probe result")
@@ -136,7 +136,7 @@ class CapabilityRegistry:
         index = {}
         for record in records:
             if not isinstance(record, CapabilityRecord):
-                raise ValueError("registry entries must be CapabilityRecord instances")
+                raise TypeError("registry entries must be CapabilityRecord instances")
             key = (record.base_url, record.protocol, record.model)
             if key in index:
                 raise ValueError("duplicate capability entry for API prefix/protocol/model")

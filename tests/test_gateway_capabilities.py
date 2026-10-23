@@ -10,8 +10,8 @@ from urllib.request import Request, urlopen
 
 import pytest
 
-from protoverta.server import GatewayConfig, make_handler
 from protoverta.capabilities import CapabilityRecord, CapabilityRegistry
+from protoverta.server import GatewayConfig, make_handler
 from protoverta.sse import SSEParser, encode_sse
 from protoverta.stream_encoder import StreamEncoder
 from protoverta.streaming import Delta

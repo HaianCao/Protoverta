@@ -6,7 +6,6 @@ from protoverta import ConversionError, Protocol, convert_request
 from protoverta.profiles import prepare_codex_request
 from protoverta.server import apply_upstream_reasoning
 
-
 SCHEMA = {"type": "object", "properties": {"ok": {"type": "boolean"}, "values": {"type": "array", "items": {"type": "integer"}}}, "required": ["ok", "values"], "additionalProperties": False}
 
 

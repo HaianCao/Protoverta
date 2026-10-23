@@ -34,7 +34,7 @@ def main() -> int:
     try:
         capabilities = CapabilityRegistry.load(args.capabilities_file) if args.capabilities_file else None
         config = GatewayConfig(Protocol(args.upstream_protocol), args.upstream_base_url, key, token, args.auth_style, client_profile=args.client_profile, default_max_output_tokens=args.default_max_output_tokens, messages_usage_policy=args.messages_usage_policy, upstream_reasoning=args.upstream_reasoning, namespace_tools=args.namespace_tools, messages_system_models=tuple(args.messages_system_model), capabilities=capabilities, require_verified_capabilities=args.require_verified_capabilities)
-    except (ValueError, OSError) as exc:
+    except (ValueError, TypeError, OSError) as exc:
         parser.error(str(exc))
     server = serve(config, port=args.port)
     print(f"READY http://127.0.0.1:{server.server_port}", flush=True)
