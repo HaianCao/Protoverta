@@ -50,3 +50,57 @@ def test_live_resume_probe_requires_old_nonce_and_same_session(probe_module, mon
     assert calls[1][1]["resume_id"] == "session-1"
     assert calls[1][1]["provider_id"] == "alternate"
     assert "fake-key" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("client", ["codex", "claude"])
+def test_resume_switches_vendor_model_key_and_reasoning_policy(probe_module, monkeypatch, tmp_path, client):
+    calls = []
+    monkeypatch.setattr(probe_module.shutil, "which", lambda name: name + ".exe")
+    monkeypatch.setattr(probe_module.secrets, "token_hex", lambda size: "synthetic")
+
+    def run(*args, **kwargs):
+        calls.append(args)
+        answer = "ACK" if len(calls) == 1 else "RESUME_NONCE_synthetic"
+        stdout = json.dumps({"session_id": "session-1", "result": answer, "is_error": False}) if client == "claude" else "\n".join(json.dumps(event) for event in [{"type": "thread.started", "thread_id": "session-1"}, {"type": "item.completed", "item": {"type": "agent_message", "text": answer}}])
+        return SimpleNamespace(returncode=0, stdout=stdout, stderr="source-secret target-secret")
+
+    monkeypatch.setattr(probe_module, "run_client", run)
+    result = probe_module.probe_resume(client, probe_module.Protocol.CHAT, probe_module.Protocol.CHAT, "https://source.test/v1", "source-secret", "model-a", tmp_path, target_base_url="https://target.test/v1", target_key="target-secret", target_model="model-b", target_reasoning="provider_default")
+    assert result["passed"] and result["provider_changed"] and result["credentials_changed"]
+    assert calls[0][4].upstream_base_url == "https://source.test/v1"
+    assert calls[1][3] == "https://target.test"
+    assert calls[1][4].upstream_api_key == "target-secret"
+    assert calls[1][4].upstream_reasoning == "provider_default"
+    assert calls[1][12] == "model-b"
+    assert "source-secret" not in json.dumps(result) and "target-secret" not in json.dumps(result)
+
+
+def test_probe_redacts_before_truncating_long_failure_output(probe_module, monkeypatch, tmp_path):
+    monkeypatch.setattr(probe_module.shutil, "which", lambda name: name + ".exe")
+    secret = "synthetic-private-key-that-must-not-be-partially-shown"
+    result = SimpleNamespace(returncode=1, stdout=secret + "x" * 2490, stderr="")
+    monkeypatch.setattr(probe_module, "run_client", lambda *args, **kwargs: result)
+    observed = probe_module.probe("claude", probe_module.Protocol.CHAT, "https://example.test/v1", secret, "m", tmp_path)
+    assert "partially-shown" not in observed["error"]
+    assert not observed["passed"]
+
+
+def test_three_turn_probe_observes_real_public_reasoning_replay(probe_module, monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(probe_module.shutil, "which", lambda name: name + ".exe")
+    monkeypatch.setattr(probe_module.secrets, "token_hex", lambda size: "synthetic")
+
+    def run(*args, **kwargs):
+        calls.append(kwargs)
+        if len(calls) > 1:
+            shape = {"public_reasoning_received": True} if len(calls) == 2 else {"public_reasoning_items": 1}
+            kwargs["trace_file"].write_text(json.dumps([shape]), encoding="utf-8")
+        answer = "ACK" if len(calls) == 1 else "RESUME_NONCE_synthetic"
+        output = "\n".join(json.dumps(item) for item in [{"type": "thread.started", "thread_id": "same-session"}, {"type": "item.completed", "item": {"type": "agent_message", "text": answer}}])
+        return SimpleNamespace(returncode=0, stdout=output, stderr="")
+
+    monkeypatch.setattr(probe_module, "run_client", run)
+    result = probe_module.probe_resume("codex", probe_module.Protocol.CHAT, probe_module.Protocol.CHAT, "https://example.test/v1", "synthetic-key", "m", tmp_path, target_public_reasoning=True, verify_replay=True)
+    assert result["passed"] and result["public_reasoning_received"] and result["replayed_public_reasoning"]
+    assert len(calls) == 3 and calls[-1]["resume_id"] == "same-session"
+    assert "RESUME_NONCE_synthetic" not in calls[-1]["prompt"]

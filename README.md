@@ -17,7 +17,7 @@ One Gateway. Any Protocol. Any Model.
 
 Protoverta converts requests and responses among OpenAI Chat Completions, Anthropic Messages, and OpenAI Responses. Use it as a Python library or run it as a local HTTP gateway.
 
-**Current scope:** text, client-side function tools, forced function selection, and supported JSON output formats, including incremental SSE where usage and event ordering can be preserved. Unsupported fields and unsafe streaming routes are rejected rather than silently changed. Multimodal content, token counting, and server-side conversation state are not supported.
+**Current scope:** text, user image inputs, client-side function tools, forced function selection, and supported JSON output formats, including incremental SSE where usage and event ordering can be preserved. Unsupported fields and unsafe streaming routes are rejected rather than silently changed. Image generation, audio/video, token counting, and server-side conversation state are not supported.
 
 ## Install
 
@@ -44,6 +44,10 @@ chat_request = convert_request(messages_request, "messages", "chat")
 
 `ConversionError` indicates an unsupported or invalid JSON conversion. For SSE, `StreamTranscoder` accepts upstream bytes via `feed()` and requires `finish()` at EOF; it raises `StreamError` on invalid or interrupted streams. Protocol names are `chat`, `messages`, and `responses`.
 
+User images support URL/base64 references in ordered text/image messages on all
+six request routes. Explicit detail selectors, provider-owned file IDs and
+image tool results have portability limits; see [image inputs](docs/compatibility/images.md).
+
 ## Gateway
 
 Provide credentials through environment variables:
@@ -64,6 +68,11 @@ apply after conversion, also on native routes; they request disabling computatio
 not hiding reasoning output. Models requiring reasoning may reject them; the
 gateway does not retry with a different setting or discard unsupported output.
 The equivalent Python option is `GatewayConfig(..., upstream_reasoning="openrouter_disabled")`.
+
+`--public-reasoning` separately opts into unsigned Chat `reasoning_content` ↔
+Responses `reasoning_text` conversion for JSON/SSE and explicit history replay.
+It never turns summaries into raw reasoning, fabricates Messages signatures,
+or migrates encrypted state. See [the reasoning contract](docs/compatibility/reasoning.md).
 
 Streaming supports all six directions for text and client-side function calls. Chat/Responses → Messages requires the explicit `--messages-usage-policy deferred` option (or `StreamTranscoder(..., messages_usage_policy="deferred")`). Initial usage is provisionally zero, then corrected with measured usage in `message_delta`; final input and output counts are mandatory. Overlapping tool calls are serialized in first-start order with bounded buffering. The default `strict` policy still rejects these two routes.
 

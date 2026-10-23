@@ -48,11 +48,12 @@ require_verified_capabilities=True)`. Omitting the registry keeps existing
 behavior. Requiring verified capabilities without a registry is an error.
 
 Recognized features: `text`, `streaming`, `tools`, `forced_tool_choice`,
-`json_object`, `json_schema`, `strict_json_schema`, `reasoning_effort`, `images`,
+`json_object`, `json_schema`, `strict_json_schema`, `reasoning_effort`, `public_reasoning`, `images`,
 and `mid_conversation_system`. Feature detection inspects content, not arbitrary
 tool schema properties. Records cannot enable conversions the core does not
-implement: for example, an image-capable model still cannot receive translated
-images in the current text/function subset.
+implement: for example, an image-capable model does not enable translated
+image tool results or provider-owned Files API IDs. Ordinary user image inputs
+have a separate [portable contract](images.md).
 
 Both consumer development branches expose the registry path and strict option
 in their provider editors. Paths are resolved relative to the configuration
@@ -60,4 +61,6 @@ file, not the working directory. Basic launch checks run before setup hands off
 the terminal; each actual outbound request is checked again for tools, formats
 and other recognized features. The editors reference a registry file; they do
 not create observations or claim support from the model catalog. These changes
-require the next pinned core release before consumer preview publication.
+were published with the pinned `0.3.0a5` preview release. The `0.3.0a6` preview
+adds user images and opt-in unsigned public reasoning; earlier wheels do not
+contain those conversions.

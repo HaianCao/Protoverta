@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .core import ConversionError, Protocol, _decode_usage, _validate_response_item
+from .reasoning import response_reasoning
 from .sse import SSEEvent
 
 
@@ -106,8 +107,14 @@ class StreamDecoder:
     at EOF; it raises unless the protocol's terminal marker was seen.
     """
 
-    def __init__(self, protocol: Protocol | str) -> None:
+    def __init__(self, protocol: Protocol | str, *, public_reasoning: bool = False) -> None:
         self.protocol = Protocol(protocol)
+        if not isinstance(public_reasoning, bool):
+            raise TypeError("public_reasoning must be a boolean")
+        self.public_reasoning = public_reasoning
+        self.reasoning_closed = False
+        self.reasoning_items: dict[int, str] = {}
+        self.reasoning_parts: dict[int, str] = {}
         self.started = False
         self.ended = False
         self.model: str | None = None
@@ -228,6 +235,14 @@ class StreamDecoder:
             raise StreamError("unsupported Chat choice index or logprobs")
         delta = _obj(choice.get("delta"), "Chat delta")
         for field, value in delta.items():
+            if field == "reasoning_content" and self.public_reasoning:
+                if value is not None:
+                    value = _str(value, "public reasoning_content")
+                    if value:
+                        if self.reasoning_closed:
+                            raise StreamError("interleaved public reasoning cannot be preserved")
+                        deltas.append(Delta("reasoning_text", text=value))
+                continue
             if field not in {"role", "content", "tool_calls"} and (field not in {"refusal", "annotations", "reasoning", "reasoning_content", "reasoning_details"} or value not in (None, "", [])):
                 raise StreamError(f"unsupported Chat delta field: {field}")
         if delta.get("role") not in {None, "assistant"}:
@@ -235,9 +250,12 @@ class StreamDecoder:
         if delta.get("refusal") or delta.get("audio") or delta.get("function_call"):
             raise StreamError("unsupported Chat delta field")
         content = delta.get("content")
-        if content is not None:
+        if content is not None and not (self.public_reasoning and content == ""):
+            if content:
+                self.reasoning_closed = True
             deltas.append(Delta("text", text=_str(content, "Chat content")))
         for partial in delta.get("tool_calls") or []:
+            self.reasoning_closed = True
             partial = _obj(partial, "Chat tool delta")
             _only(partial, {"index", "id", "type", "function"}, "Chat tool delta")
             index = _index(partial.get("index"), "Chat tool index")
@@ -395,6 +413,19 @@ class StreamDecoder:
             _response_item(item)
             item_type = item.get("type")
             item_id = _str(item.get("id"), "output item ID")
+            if item_type == "reasoning" and self.public_reasoning:
+                if self.reasoning_closed or self.reasoning_items:
+                    raise StreamError("only one public reasoning prefix item is portable")
+                try:
+                    response_reasoning(item, initial=True)
+                except ConversionError as exc:
+                    raise StreamError(str(exc)) from exc
+                self.items[index] = ("reasoning", item_id)
+                self.reasoning_items[index] = ""
+                return []
+            if any(kind == "reasoning" for kind, _ in self.items.values()):
+                raise StreamError("public reasoning item must close before ordinary output")
+            self.reasoning_closed = True
             if item_type == "message" and item.get("role") == "assistant":
                 if item.get("content") != []:
                     raise StreamError("Responses message item has nonempty initial content")
@@ -410,6 +441,8 @@ class StreamDecoder:
                 self.saw_tool = True
                 return [Delta("tool_start", index=index, item_id=item_id, call_id=call_id, name=name)]
             raise StreamError(f"unsupported Responses output item: {item_type}")
+        if kind in {"response.content_part.added", "response.reasoning_text.delta", "response.reasoning_text.done", "response.content_part.done"} and type(body.get("output_index")) is int and self.items.get(body["output_index"], (None,))[0] == "reasoning":
+            return self._public_reasoning_event(body, kind)
         if kind == "response.content_part.added":
             index = _index(body.get("output_index"), "output_index")
             if self.items.get(index, (None,))[0] != "text" or body.get("item_id") != self.items[index][1]:
@@ -476,6 +509,15 @@ class StreamDecoder:
             if item.get("id") != item_id or item.get("status") not in {"completed", "incomplete"}:
                 raise StreamError("Responses output item identity/status changed")
             self.incomplete_items |= item.get("status") == "incomplete"
+            if item_type == "reasoning":
+                try:
+                    text = response_reasoning(item)
+                except ConversionError as exc:
+                    raise StreamError(str(exc)) from exc
+                if self.reasoning_parts.get(index) != "closed" or text != self.reasoning_items[index]:
+                    raise StreamError("completed public reasoning differs from its deltas")
+                self.completed_items[index] = item
+                return []
             if item_type == "tool":
                 tool = self.tools[index]
                 if item.get("call_id") != tool.call_id or item.get("name") != tool.name:
@@ -523,3 +565,29 @@ class StreamDecoder:
             self._usage(usage)
             return self._complete(reason)
         raise StreamError(f"unsupported Responses event: {kind}")
+
+    def _public_reasoning_event(self, body: dict, kind: str) -> list[Delta]:
+        index = _index(body.get("output_index"), "output_index")
+        if body.get("item_id") != self.items[index][1] or type(body.get("content_index")) is not int or body["content_index"] != 0:
+            raise StreamError("public reasoning content has wrong identity")
+        state = self.reasoning_parts.get(index)
+        if kind == "response.content_part.added":
+            if state is not None or body.get("part") != {"type": "reasoning_text", "text": ""}:
+                raise StreamError("invalid initial public reasoning part")
+            self.reasoning_parts[index] = "open"
+            return []
+        if kind == "response.reasoning_text.delta":
+            if state != "open":
+                raise StreamError("public reasoning delta without an open part")
+            text = _str(body.get("delta"), "public reasoning delta")
+            self.reasoning_items[index] += text
+            return [Delta("reasoning_text", text=text)]
+        if kind == "response.reasoning_text.done":
+            if state != "open" or body.get("text") != self.reasoning_items[index]:
+                raise StreamError("completed public reasoning text differs from deltas")
+            self.reasoning_parts[index] = "text_done"
+            return []
+        if state != "text_done" or body.get("part") != {"type": "reasoning_text", "text": self.reasoning_items[index]}:
+            raise StreamError("public reasoning part closed out of order or changed")
+        self.reasoning_parts[index] = "closed"
+        return []

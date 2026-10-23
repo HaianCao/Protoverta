@@ -26,7 +26,7 @@ def test_harness_preserves_opt_in_session_and_resume_arguments(harness, monkeypa
         captured.update(args=args, kwargs=kwargs)
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr(harness.subprocess, "run", run)
+    monkeypatch.setattr(harness, "run_process", run)
     config = GatewayConfig("chat", "http://127.0.0.1:1234/v1", "fake-upstream-key", "local")
     identifier = "00000000-0000-4000-8000-000000000001"
     harness.run_client(client, client + ".exe", "http://127.0.0.1:4321", "http://127.0.0.1:1234", config, {}, str(tmp_path), False, tmp_path, False, harness.Protocol.CHAT, 10, "test-model", persist_session=persist, resume_id=identifier if persist else None, provider_id="alternate")
@@ -35,8 +35,10 @@ def test_harness_preserves_opt_in_session_and_resume_arguments(harness, monkeypa
     assert args[args.index("-p") + 1] == "alternate"
     if client == "codex":
         assert "alternate" in raw["providers"]
+        root = args[args.index("--") + 1:]
+        assert root[:4] == ["-c", "model_providers.alternate.request_max_retries=0", "-c", "model_providers.alternate.stream_max_retries=0"]
         if persist:
-            assert args[args.index("--") + 1:args.index("--") + 6] == ["--sandbox", "read-only", "exec", "resume", identifier]
+            assert root[4:9] == ["--sandbox", "read-only", "exec", "resume", identifier]
             assert "run" in args
         assert ("--ephemeral" not in args) == persist
     else:

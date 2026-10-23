@@ -111,9 +111,57 @@ or vendor, hidden reasoning, or every protocol pair. Reproduce with
 the corresponding client, source protocol, adapter source and key environment.
 
 Encrypted reasoning,
-signed thinking, server-owned `previous_response_id`, multimodal history and
+signed thinking, server-owned `previous_response_id`, image tool results and
 compaction are not portable under the current contract and remain errors.
+Ordinary user image history now has a [limited portable contract](images.md);
+the original resume matrix did not exercise it. Unsigned public reasoning has
+an explicit [Chat/Responses extension](reasoning.md), not hidden-state migration.
 Native forwarding is not a promise that another provider can reuse such state.
+
+## Additional real-vendor observations (2026-10-23)
+
+Text resume from OpenRouter `nvidia/nemotron-3-ultra-550b-a55b:free` (Chat,
+reasoning explicitly disabled) to NVIDIA NIM Chat passed with Claude Code for
+`minimaxai/minimax-m3.1-flash` and `deepseek-ai/deepseek-v4.1-flash`. Both changed
+the real vendor, credentials and model, retained the session ID and recalled a
+random token supplied only before the switch. These were text-only samples;
+the target retained provider-default reasoning and happened not to return an
+unsupported thinking block. This does not guarantee all future turns.
+
+Codex's switch to the same NIM MiniMax target initially failed with a recorded
+`unsupported_reasoning` decoder category. With the explicit unsigned public
+reasoning extension enabled, the two-turn switch passed with the same session
+ID and exact token recall. No stream payload or session file was rewritten by
+the test harness; only fixed diagnostic categories/shapes were recorded.
+
+A follow-up three-turn Codex probe passed after receiving public reasoning:
+the third request replayed a public reasoning item, kept the same session and
+recalled the token again. Codex's serialized `encrypted_content: null` is
+accepted as an absent placeholder; any non-null value remains rejected. This
+does not verify signed/encrypted reasoning or cross-model reasoning-state reuse.
+
+The same three-turn Codex vendor/model switch also passed after a completed
+read-only `get_goal` call on the source. The probe verified the tool result,
+then a target public-reasoning response, then its replay on a third turn,
+unchanged session ID and exact token recall. No goal was created or updated.
+
+NIM `z-ai/glm-5.3-flash` passed a direct short Chat JSON baseline but its Claude
+resume probe timed out, so resume is unverified. `openai/gpt-oss-20b` timed out
+on two direct Chat JSON baselines, so it has no passing new integration result.
+OpenRouter `thinkingmachines/inkling:free` returned 403 on a real Claude resume
+attempt, reporting a harness-access restriction. It was not retried with fake
+app identity or a paid fallback. These are failures/unverified cases, not passes.
+
+NIM's GLM page uses `/glm-5-3-flash` in its URL, while its documented API model
+ID is `z-ai/glm-5.3-flash`. See the
+[NVIDIA sample](https://build.nvidia.com/z-ai/glm-5-3-flash).
+
+`scripts/probe_clients.py` accepts `--target-base-url`, `--target-key-env`,
+`--target-model`, `--source-reasoning`, `--target-reasoning` and the Codex-only
+`--target-public-reasoning`. The source/target keys stay in environment variables;
+the report exposes only whether credentials differ. `--verify-replay` adds a
+third target turn and separately reports whether the client sent public
+reasoning items back. Fixed stream-error categories do not retain bodies.
 
 Reproduce a supported case from a checkout with Protoverta installed:
 

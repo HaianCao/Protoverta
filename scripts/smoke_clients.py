@@ -10,7 +10,6 @@ import io
 import json
 import os
 import shutil
-import subprocess
 import sys
 import tempfile
 import threading
@@ -19,6 +18,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 from urllib.request import Request
+
+from probe_process import run_process
 
 from protoverta.core import Protocol, convert_request
 from protoverta.server import GatewayConfig, gateway_session
@@ -374,7 +375,7 @@ def run_client(
                 Protocol.RESPONSES: "responses",
             }[upstream]
             config_path.write_text(
-                f'schema_version = 1\n[providers.smoke]\ndisplay_name = "Smoke"\nbase_url = "{upstream_origin}/v1"\nprotocol = "{protocol}"\nexecution_mode = "gateway"\nupstream_reasoning = "{config.upstream_reasoning}"\nauth_secret_ref = "smoke-main"\n[secrets.smoke-main]\nbackend = "environment"\nenv_var = "SMOKE_TOKEN"\n',
+                f'schema_version = 1\n[providers.smoke]\ndisplay_name = "Smoke"\nbase_url = "{upstream_origin}/v1"\nprotocol = "{protocol}"\nexecution_mode = "gateway"\nupstream_reasoning = "{config.upstream_reasoning}"\npublic_reasoning = {str(config.public_reasoning).lower()}\nauth_secret_ref = "smoke-main"\n[secrets.smoke-main]\nbackend = "environment"\nenv_var = "SMOKE_TOKEN"\n',
                 encoding="utf-8",
             )
             options = [
@@ -456,13 +457,22 @@ def run_client(
                 args[at:at] = ["--sandbox", "read-only"]
         else:
             args[-1:-1] = ["--resume", resume_id]
+    if client == "codex" and (adapter_source is not None or installed_adapter):
+        # Real-provider probes must not multiply failed requests through the
+        # CLI's default reconnect policy. These overrides belong at root scope.
+        at = args.index("--") + 1
+        retry_options = ["-c", f"model_providers.{provider_id}.request_max_retries=0", "-c", f"model_providers.{provider_id}.stream_max_retries=0"]
+        if not resume_id:
+            args[args.index("exec")] = "run"
+            retry_options.append("exec")
+        args[at:at] = retry_options
     if trace_file is not None:
         if adapter_source is None:
             raise ValueError("Tracing requires a source adapter and synthetic state")
         module_index = args.index("-m")
         module_name = args[module_index + 1]
         args[module_index:module_index + 2] = [str(Path(__file__).with_name("trace_adapter.py")), module_name, str(trace_file)]
-    return subprocess.run(
+    return run_process(
         args,
         cwd=directory,
         env=env,

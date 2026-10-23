@@ -1,4 +1,4 @@
-"""Strict text/function-tool conversion between three LLM wire formats.
+"""Strict portable-content/function-tool conversion between LLM wire formats.
 
 This module deliberately rejects fields whose semantics cannot be preserved.
 It does not fabricate reasoning state, token counts, or server-side history.
@@ -15,6 +15,8 @@ from typing import Any
 
 from .errors import ConversionError
 from .formats import OutputFormat, decode_output_format, encode_output_format
+from .images import Image, decode_image
+from .reasoning import reasoning_item, response_reasoning
 
 
 class Protocol(StrEnum):
@@ -30,6 +32,7 @@ class Part:
     call_id: str = ""
     name: str = ""
     arguments: str = ""
+    image: Image | None = None
 
 
 @dataclass(slots=True)
@@ -195,6 +198,9 @@ def _chat_content(value: Any, label: str) -> list[Part]:
     result: list[Part] = []
     for block in _list(value, label):
         block = _object(block, label)
+        if block.get("type") == "image_url":
+            result.append(Part("image", image=decode_image(block, "chat")))
+            continue
         if block.get("type") != "text":
             raise ConversionError(f"{label}: only text content is supported")
         _only(block, {"type", "text"}, label)
@@ -239,7 +245,7 @@ def _validate_chat_call(call: dict, index: int) -> None:
         raise ConversionError("only client-side function calls are supported")
 
 
-def _decode_chat(body: dict[str, Any]) -> Request:
+def _decode_chat(body: dict[str, Any], *, public_reasoning: bool = False) -> Request:
     _only(body, {"model", "messages", "tools", "tool_choice", "max_completion_tokens", "max_tokens", "temperature", "stream", "parallel_tool_calls", "reasoning_effort", "response_format"}, "Chat request")
     if "max_completion_tokens" in body and "max_tokens" in body:
         raise ConversionError("choose one Chat token limit field")
@@ -248,8 +254,10 @@ def _decode_chat(body: dict[str, Any]) -> Request:
         item = _object(item, "message")
         role = _string(item.get("role"), "message.role")
         if role in {"system", "developer", "user", "assistant"}:
-            _only(item, {"role", "content", "tool_calls"}, "message")
+            _only(item, {"role", "content", "tool_calls"} | ({"reasoning_content"} if public_reasoning else set()), "message")
             parts = _chat_content(item.get("content"), "message.content")
+            if "reasoning_content" in item:
+                parts.insert(0, Part("reasoning_text", text=_string(item["reasoning_content"], "reasoning_content")))
             if role == "assistant":
                 for index, call in enumerate(_list(item.get("tool_calls") or [], "tool_calls")):
                     call = _object(call, "tool_call")
@@ -289,6 +297,8 @@ def _message_parts(content: Any, label: str) -> list[Part]:
             if block.get("citations") not in (None, []):
                 raise ConversionError("Messages citations cannot be preserved across protocols")
             parts.append(Part("text", text=_string(block.get("text"), "text")))
+        elif kind == "image":
+            parts.append(Part("image", image=decode_image(block, "messages")))
         elif kind == "tool_use":
             _only(block, {"type", "id", "name", "input", "caller"}, label)
             if "caller" in block and block["caller"] != {"type": "direct"}:
@@ -353,6 +363,9 @@ def _response_content(content: Any, label: str) -> list[Part]:
     parts: list[Part] = []
     for block in _list(content, label):
         block = _object(block, label)
+        if block.get("type") == "input_image":
+            parts.append(Part("image", image=decode_image(block, "responses")))
+            continue
         if block.get("type") not in {"input_text", "output_text"}:
             raise ConversionError(f"unsupported Responses content type: {block.get('type')}")
         _only(block, {"type", "text", "annotations", "logprobs"}, label)
@@ -362,7 +375,7 @@ def _response_content(content: Any, label: str) -> list[Part]:
     return parts
 
 
-def _decode_responses(body: dict[str, Any]) -> Request:
+def _decode_responses(body: dict[str, Any], *, public_reasoning: bool = False) -> Request:
     _only(body, {"model", "input", "instructions", "tools", "tool_choice", "max_output_tokens", "temperature", "stream", "store", "parallel_tool_calls", "reasoning", "text"}, "Responses request")
     reasoning = _object(body.get("reasoning", {}), "reasoning")
     _only(reasoning, {"effort"}, "reasoning")
@@ -386,6 +399,10 @@ def _decode_responses(body: dict[str, Any]) -> Request:
                 if item.get("status") not in {None, "completed"}:
                     raise ConversionError("incomplete Responses history message")
                 turns.append(Turn(role, _response_content(item.get("content"), "input.content")))
+            elif kind == "reasoning" and public_reasoning:
+                if item.get("status") == "incomplete":
+                    raise ConversionError("incomplete public reasoning history cannot be replayed")
+                turns.append(Turn("assistant", [Part("reasoning_text", text=response_reasoning(item))]))
             elif kind == "function_call":
                 _only(item, {"type", "id", "status", "call_id", "name", "arguments"}, "function_call")
                 turns.append(Turn("assistant", [Part("tool_call", call_id=_string(item.get("call_id"), "call_id"), name=_string(item.get("name"), "function name"), arguments=_arguments(item.get("arguments"), "arguments"))]))
@@ -393,7 +410,10 @@ def _decode_responses(body: dict[str, Any]) -> Request:
                 _only(item, {"type", "id", "call_id", "output"}, "function_call_output")
                 output = item.get("output")
                 if isinstance(output, list):
-                    output = "".join(part.text for part in _response_content(output, "function_call_output.output"))
+                    output_parts = _response_content(output, "function_call_output.output")
+                    if any(part.kind != "text" for part in output_parts):
+                        raise ConversionError("non-text tool results are unsupported")
+                    output = "".join(part.text for part in output_parts)
                 turns.append(Turn("user", [Part("tool_result", call_id=_string(item.get("call_id"), "call_id"), text=_string(output, "output"))]))
             else:
                 raise ConversionError(f"unsupported Responses item: {kind}")
@@ -437,6 +457,15 @@ def _check_turns(request: Request, target: Protocol, *, messages_mid_system: boo
             _check_mid_system_placement(request.turns)
     calls: set[str] = set()
     for turn in request.turns:
+        seen_ordinary = False
+        for part in turn.parts:
+            if part.kind == "reasoning_text":
+                if target == Protocol.MESSAGES or turn.role != "assistant" or seen_ordinary:
+                    raise ConversionError("unsigned public reasoning requires a Chat/Responses assistant prefix; Messages signatures cannot be fabricated")
+            else:
+                seen_ordinary = True
+        if any(part.kind == "image" for part in turn.parts) and (turn.role != "user" or any(part.kind not in {"text", "image"} for part in turn.parts)):
+            raise ConversionError("portable images require an ordinary user text/image message")
         if target in {Protocol.CHAT, Protocol.RESPONSES}:
             seen_tool_call = False
             for part in turn.parts:
@@ -490,8 +519,13 @@ def _encode_chat(req: Request) -> dict[str, Any]:
             messages.extend({"role": "tool", "tool_call_id": p.call_id, "content": p.text} for p in results)
         else:
             msg: dict[str, Any] = {"role": turn.role, "content": text if text or not calls else None}
+            if any(p.kind == "image" for p in turn.parts):
+                msg["content"] = [p.image.encode("chat") if p.kind == "image" else {"type": "text", "text": p.text} for p in turn.parts]
             if calls:
                 msg["tool_calls"] = [{"id": p.call_id, "type": "function", "function": {"name": p.name, "arguments": p.arguments}} for p in calls]
+            reasoning = [p.text for p in turn.parts if p.kind == "reasoning_text"]
+            if reasoning:
+                msg["reasoning_content"] = "".join(reasoning)
             messages.append(msg)
     out: dict[str, Any] = {"model": req.model, "messages": messages, "stream": req.stream}
     if req.parallel_tool_calls is not None:
@@ -525,6 +559,8 @@ def _encode_messages(req: Request) -> dict[str, Any]:
         for p in turn.parts:
             if p.kind == "text":
                 blocks.append({"type": "text", "text": p.text})
+            elif p.kind == "image":
+                blocks.append(p.image.encode("messages"))
             elif p.kind == "tool_call":
                 blocks.append({"type": "tool_use", "id": p.call_id, "name": p.name, "input": json.loads(p.arguments)})
             elif p.kind == "tool_result":
@@ -562,7 +598,7 @@ def _encode_messages(req: Request) -> dict[str, Any]:
 
 def _flush_response_text(inputs: list[dict[str, Any]], role: str, parts: list[Part]) -> None:
     if parts:
-        item: dict[str, Any] = {"role": role, "content": [{"type": "output_text" if role == "assistant" else "input_text", "text": p.text} for p in parts]}
+        item: dict[str, Any] = {"role": role, "content": [p.image.encode("responses") if p.kind == "image" else {"type": "output_text" if role == "assistant" else "input_text", "text": p.text} for p in parts]}
         if role == "assistant":
             item.update({"type": "message", "id": "msg_" + secrets.token_hex(12), "status": "completed"})
         inputs.append(item)
@@ -574,8 +610,10 @@ def _encode_responses(req: Request) -> dict[str, Any]:
     for turn in req.turns:
         text_parts: list[Part] = []
         for p in turn.parts:
-            if p.kind == "text":
+            if p.kind in {"text", "image"}:
                 text_parts.append(p)
+            elif p.kind == "reasoning_text":
+                inputs.append(reasoning_item(p.text))
             elif p.kind == "tool_call":
                 _flush_response_text(inputs, turn.role, text_parts)
                 inputs.append({"type": "function_call", "call_id": p.call_id, "name": p.name, "arguments": p.arguments})
@@ -607,14 +645,17 @@ def _encode_responses(req: Request) -> dict[str, Any]:
 _ENCODERS = {Protocol.CHAT: _encode_chat, Protocol.MESSAGES: _encode_messages, Protocol.RESPONSES: _encode_responses}
 
 
-def convert_request(body: dict[str, Any], source: Protocol | str, target: Protocol | str, *, messages_mid_system: bool = False) -> dict[str, Any]:
-    """Convert a non-streaming text/function request; reject unsupported semantics."""
+def convert_request(body: dict[str, Any], source: Protocol | str, target: Protocol | str, *, messages_mid_system: bool = False, public_reasoning: bool = False) -> dict[str, Any]:
+    """Convert JSON input, including stream requests; reject unsupported semantics."""
     source, target = Protocol(source), Protocol(target)
     if not isinstance(messages_mid_system, bool):
         raise TypeError("messages_mid_system must be a boolean")
+    if not isinstance(public_reasoning, bool):
+        raise TypeError("public_reasoning must be a boolean")
     if source == target:
         return body.copy()
-    request = _DECODERS[source](_object(body, "request"))
+    options = {"public_reasoning": public_reasoning} if source in {Protocol.CHAT, Protocol.RESPONSES} else {}
+    request = _DECODERS[source](_object(body, "request"), **options)
     request.output_format = decode_output_format(body, source)
     _check_turns(request, target, messages_mid_system=messages_mid_system)
     output = _ENCODERS[target](request)
@@ -635,7 +676,7 @@ def _validate_response_item(item: dict, label: str) -> None:
             raise ConversionError("upstream Responses namespace cannot be preserved in this protocol")
 
 
-def _decode_result(body: dict[str, Any], source: Protocol) -> Result:
+def _decode_result(body: dict[str, Any], source: Protocol, *, public_reasoning: bool = False) -> Result:
     if source == Protocol.CHAT:
         choices = _list(body.get("choices"), "choices")
         if len(choices) != 1:
@@ -645,7 +686,8 @@ def _decode_result(body: dict[str, Any], source: Protocol) -> Result:
             raise ConversionError("Chat logprobs cannot be preserved")
         msg = _object(choice.get("message"), "message")
         _only(msg, {"role", "content", "tool_calls", "refusal", "annotations", "reasoning", "reasoning_content", "reasoning_details"}, "Chat response message")
-        if any(msg.get(key) not in (None, "", []) for key in ("reasoning", "reasoning_content", "reasoning_details")):
+        rejected_reasoning = ("reasoning", "reasoning_details") if public_reasoning else ("reasoning", "reasoning_content", "reasoning_details")
+        if any(msg.get(key) not in (None, "", []) for key in rejected_reasoning):
             raise ConversionError("Chat reasoning cannot be preserved across protocols")
         if msg.get("role") != "assistant":
             raise ConversionError("Chat response message must have assistant role")
@@ -654,6 +696,8 @@ def _decode_result(body: dict[str, Any], source: Protocol) -> Result:
         if msg.get("refusal"):
             raise ConversionError("refusal cannot be preserved across protocols")
         parts = _chat_content(msg.get("content"), "message.content")
+        if public_reasoning and msg.get("reasoning_content") is not None:
+            parts.insert(0, Part("reasoning_text", text=_string(msg["reasoning_content"], "reasoning_content")))
         for index, call in enumerate(_list(msg.get("tool_calls") or [], "tool_calls")):
             call = _object(call, "tool_call")
             _validate_chat_call(call, index)
@@ -689,6 +733,10 @@ def _decode_result(body: dict[str, Any], source: Protocol) -> Result:
             if item.get("role") not in {None, "assistant"} or item.get("status") not in allowed_status:
                 raise ConversionError("Responses output message must be a completed assistant message")
             parts.extend(_response_content(item.get("content"), "message.content"))
+        elif item.get("type") == "reasoning" and public_reasoning:
+            if item.get("status") == "incomplete" and body.get("status") != "incomplete":
+                raise ConversionError("incomplete public reasoning in a completed response")
+            parts.append(Part("reasoning_text", text=response_reasoning(item)))
         elif item.get("type") == "function_call":
             if item.get("status") not in {None, "completed"}:
                 raise ConversionError("Responses function call is incomplete")
@@ -710,6 +758,14 @@ def _decode_result(body: dict[str, Any], source: Protocol) -> Result:
 
 
 def _encode_result(result: Result, target: Protocol) -> dict[str, Any]:
+    seen_ordinary = False
+    for part in result.parts:
+        if part.kind == "reasoning_text":
+            if target == Protocol.MESSAGES or seen_ordinary:
+                raise ConversionError("unsigned public reasoning requires a Chat/Responses assistant prefix; Messages signatures cannot be fabricated")
+        else:
+            seen_ordinary = True
+    reasoning = [p.text for p in result.parts if p.kind == "reasoning_text"]
     if target in {Protocol.CHAT, Protocol.RESPONSES}:
         seen_tool_call = False
         for part in result.parts:
@@ -721,6 +777,8 @@ def _encode_result(result: Result, target: Protocol) -> dict[str, Any]:
     calls = [p for p in result.parts if p.kind == "tool_call"]
     if target == Protocol.CHAT:
         message: dict[str, Any] = {"role": "assistant", "content": text or None}
+        if reasoning:
+            message["reasoning_content"] = "".join(reasoning)
         if calls:
             message["tool_calls"] = [{"id": p.call_id, "type": "function", "function": {"name": p.name, "arguments": p.arguments}} for p in calls]
         out: dict[str, Any] = {"id": "chatcmpl-" + secrets.token_hex(12), "created": int(time.time()), "object": "chat.completion", "model": result.model, "choices": [{"index": 0, "message": message, "finish_reason": result.finish_reason}]}
@@ -739,6 +797,8 @@ def _encode_result(result: Result, target: Protocol) -> dict[str, Any]:
         out = {"id": "msg_" + secrets.token_hex(12), "type": "message", "role": "assistant", "model": result.model, "content": blocks, "stop_reason": {"stop": "end_turn", "tool_calls": "tool_use", "length": "max_tokens"}[result.finish_reason], "stop_sequence": None, "usage": _encode_usage(result, target)}
         return out
     output: list[dict[str, Any]] = []
+    if reasoning:
+        output.append(reasoning_item("".join(reasoning), identifier="rs_" + secrets.token_hex(12), status="incomplete" if result.finish_reason == "length" else "completed"))
     if text:
         output.append({"id": "msg_" + secrets.token_hex(12), "type": "message", "role": "assistant", "status": "incomplete" if result.finish_reason == "length" else "completed", "content": [{"type": "output_text", "text": text, "annotations": [], "logprobs": []}]})
     output.extend({"id": "fc_" + secrets.token_hex(12), "type": "function_call", "call_id": p.call_id, "name": p.name, "arguments": p.arguments, "status": "completed"} for p in calls)
@@ -749,12 +809,16 @@ def _encode_result(result: Result, target: Protocol) -> dict[str, Any]:
     return out
 
 
-def convert_response(body: dict[str, Any], source: Protocol | str, target: Protocol | str) -> dict[str, Any]:
+def convert_response(body: dict[str, Any], source: Protocol | str, target: Protocol | str, *, public_reasoning: bool = False) -> dict[str, Any]:
     """Convert a completed text/function response without inventing usage."""
     source, target = Protocol(source), Protocol(target)
+    if not isinstance(public_reasoning, bool):
+        raise TypeError("public_reasoning must be a boolean")
     if source == target:
         return body.copy()
-    result = _decode_result(_object(body, "response"), source)
+    result = _decode_result(_object(body, "response"), source, public_reasoning=public_reasoning)
+    if any(part.kind == "image" for part in result.parts):
+        raise ConversionError("image output is not supported across protocols")
     call_ids = [part.call_id for part in result.parts if part.kind == "tool_call"]
     if any(not value for value in call_ids) or len(call_ids) != len(set(call_ids)):
         raise ConversionError("empty or duplicate response tool call ID")

@@ -16,7 +16,7 @@ from urllib.parse import urlsplit, urlunsplit
 from .core import Protocol
 from .errors import ConversionError
 
-FEATURES = frozenset({"text", "streaming", "tools", "forced_tool_choice", "json_object", "json_schema", "strict_json_schema", "reasoning_effort", "images", "mid_conversation_system"})
+FEATURES = frozenset({"text", "streaming", "tools", "forced_tool_choice", "json_object", "json_schema", "strict_json_schema", "reasoning_effort", "public_reasoning", "images", "mid_conversation_system"})
 
 
 def _prefix(value: str) -> str:
@@ -128,6 +128,9 @@ def request_features(body: dict, protocol: Protocol | str) -> frozenset[str]:
 
     if contains_image(body.get("messages", body.get("input"))):
         features.add("images")
+    history = body.get("messages" if protocol != Protocol.RESPONSES else "input")
+    if isinstance(history, list) and any(isinstance(item, dict) and (item.get("role") == "assistant" and item.get("reasoning_content") is not None or item.get("type") == "reasoning" and bool(item.get("content"))) for item in history):
+        features.add("public_reasoning")
     return frozenset(features)
 
 

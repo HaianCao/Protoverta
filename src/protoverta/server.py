@@ -46,8 +46,11 @@ class GatewayConfig:
     messages_system_models: tuple[str, ...] = ()
     capabilities: CapabilityRegistry | None = None
     require_verified_capabilities: bool = False
+    public_reasoning: bool = False
 
     def __post_init__(self) -> None:
+        if not isinstance(self.public_reasoning, bool):
+            raise TypeError("public_reasoning must be a boolean")
         object.__setattr__(self, "upstream_protocol", Protocol(self.upstream_protocol))
         parsed = urlsplit(self.upstream_base_url)
         _ = parsed.port
@@ -161,7 +164,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
             self.wfile.write(raw)
 
         def _stream(self, response, source: Protocol, target: Protocol, response_transform=None) -> None:
-            pipeline = StreamTranscoder(source, target, messages_usage_policy=config.messages_usage_policy, max_pending_bytes=config.max_body_bytes, response_transform=response_transform) if source != target else StreamValidator(source)
+            pipeline = StreamTranscoder(source, target, messages_usage_policy=config.messages_usage_policy, max_pending_bytes=config.max_body_bytes, response_transform=response_transform, public_reasoning=config.public_reasoning) if source != target else StreamValidator(source)
             headers_sent = False
 
             def send_headers() -> None:
@@ -245,7 +248,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                         payload = prepare_codex_request(payload, config.upstream_protocol, default_max_output_tokens=config.default_max_output_tokens, messages_mid_system=mid_system)
                     elif config.client_profile == "claude" and protocol == Protocol.MESSAGES:
                         payload = prepare_claude_request(payload)
-                    outbound = convert_request(payload, protocol, config.upstream_protocol, messages_mid_system=mid_system)
+                    outbound = convert_request(payload, protocol, config.upstream_protocol, messages_mid_system=mid_system, public_reasoning=config.public_reasoning)
                 outbound = apply_upstream_reasoning(outbound, config.upstream_protocol, config.upstream_reasoning)
                 if config.capabilities is not None:
                     config.capabilities.preflight(config.upstream_base_url, config.upstream_protocol, outbound, require_verified=config.require_verified_capabilities)
@@ -291,7 +294,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                     if not isinstance(result, dict):
                         raise ConversionError("upstream returned a non-object JSON response")
                     if protocol != config.upstream_protocol:
-                        result = convert_response(result, config.upstream_protocol, protocol)
+                        result = convert_response(result, config.upstream_protocol, protocol, public_reasoning=config.public_reasoning)
                         result = restore_response(result)
                     self._json(200, result, getattr(response, "headers", None))
             except HTTPError as exc:

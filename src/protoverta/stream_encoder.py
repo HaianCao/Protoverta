@@ -13,6 +13,7 @@ from collections.abc import Callable
 from typing import Any
 
 from .core import ConversionError, Protocol, _encode_usage
+from .reasoning import reasoning_item
 from .sse import SSEEvent
 from .streaming import Delta, StreamError
 
@@ -24,8 +25,14 @@ def _event(kind: str, body: dict[str, Any]) -> SSEEvent:
 class StreamEncoder:
     """Convert ordered canonical deltas to one target protocol's SSE events."""
 
-    def __init__(self, protocol: Protocol | str, *, response_transform: Callable[[dict], dict] | None = None) -> None:
+    def __init__(self, protocol: Protocol | str, *, response_transform: Callable[[dict], dict] | None = None, public_reasoning: bool = False) -> None:
         self.protocol = Protocol(protocol)
+        if not isinstance(public_reasoning, bool):
+            raise TypeError("public_reasoning must be a boolean")
+        self.public_reasoning = public_reasoning
+        self.reasoning_index: int | None = None
+        self.reasoning_text = ""
+        self.reasoning_closed = False
         if response_transform is not None and self.protocol != Protocol.RESPONSES:
             raise ValueError("response_transform is only supported for Responses output")
         self.response_transform = response_transform
@@ -65,6 +72,15 @@ class StreamEncoder:
             return self._start(delta)
         if not self.started:
             raise StreamError("delta before stream start")
+        if delta.kind == "reasoning_text":
+            return self._reasoning(delta)
+        if self.public_reasoning and delta.kind == "text" and delta.text == "":
+            return []
+        if delta.kind in {"text", "tool_start", "finish"}:
+            self.reasoning_closed = True
+            prefix = self._close_reasoning(status="incomplete" if delta.kind == "finish" and delta.reason == "length" else "completed")
+            if prefix:
+                return prefix + self.feed(delta)
         if delta.kind == "finish":
             if delta.reason not in {"stop", "tool_calls", "length"}:
                 raise StreamError("unsupported finish reason")
@@ -99,6 +115,39 @@ class StreamEncoder:
             self.open_blocks.remove(delta.index)
             return self._tool_end(delta)
         raise StreamError(f"unsupported canonical delta: {delta.kind}")
+
+    def _reasoning(self, delta: Delta) -> list[SSEEvent]:
+        if not self.public_reasoning or self.protocol == Protocol.MESSAGES or self.reasoning_closed or not isinstance(delta.text, str):
+            raise StreamError("unsigned public reasoning requires an enabled Chat/Responses prefix; Messages signatures cannot be fabricated")
+        if self.protocol == Protocol.CHAT:
+            return [self._chat_chunk([{"index": 0, "delta": {"reasoning_content": delta.text}, "finish_reason": None}])]
+        events = []
+        if self.reasoning_index is None:
+            self.reasoning_index = self.next_index
+            self.next_index += 1
+            item = {"type": "reasoning", "id": "rs_" + uuid.uuid4().hex, "status": "in_progress", "summary": [], "content": []}
+            self.output.append(item)
+            events.extend([
+                self._response_event("response.output_item.added", output_index=self.reasoning_index, item=item.copy()),
+                self._response_event("response.content_part.added", output_index=self.reasoning_index, item_id=item["id"], content_index=0, part={"type": "reasoning_text", "text": ""}),
+            ])
+        self.reasoning_text += delta.text
+        events.append(self._response_event("response.reasoning_text.delta", output_index=self.reasoning_index, item_id=self.output[self.reasoning_index]["id"], content_index=0, delta=delta.text))
+        return events
+
+    def _close_reasoning(self, *, status: str = "completed") -> list[SSEEvent]:
+        if self.reasoning_index is None:
+            return []
+        index = self.reasoning_index
+        self.reasoning_index = None
+        item = self.output[index]
+        item.update(reasoning_item(self.reasoning_text, identifier=item["id"], status=status))
+        part = item["content"][0]
+        return [
+            self._response_event("response.reasoning_text.done", output_index=index, item_id=item["id"], content_index=0, text=part["text"]),
+            self._response_event("response.content_part.done", output_index=index, item_id=item["id"], content_index=0, part=part.copy()),
+            self._response_event("response.output_item.done", output_index=index, item=item.copy()),
+        ]
 
     def _response_event(self, kind: str, **body: Any) -> SSEEvent:
         sequence = self.sequence
