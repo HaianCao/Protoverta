@@ -11,7 +11,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from .core import Protocol
+from .core import ConversionError, Protocol, _decode_usage
 from .sse import SSEEvent
 
 
@@ -31,6 +31,9 @@ class Delta:
     reason: str | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
+    cached_input_tokens: int | None = None
+    cache_creation_input_tokens: int | None = None
+    reasoning_output_tokens: int | None = None
 
 
 def _obj(value: Any, label: str) -> dict[str, Any]:
@@ -110,6 +113,18 @@ class StreamDecoder:
         self.text_parts: dict[int, str] = {}
         self.sequence: int | None = None
         self.saw_tool = False
+        self.raw_usage: dict[str, Any] = {}
+        self.usage_details: dict[str, int | None] = {}
+
+    def _usage(self, usage: dict[str, Any]) -> None:
+        self.raw_usage.update(usage)
+        try:
+            values = _decode_usage(self.raw_usage, self.protocol)
+        except ConversionError as exc:
+            raise StreamError(str(exc)) from exc
+        self.input_tokens = values.pop("input_tokens")
+        self.output_tokens = values.pop("output_tokens")
+        self.usage_details = values
 
     def feed(self, event: SSEEvent) -> list[Delta]:
         if self.ended:
@@ -131,7 +146,7 @@ class StreamDecoder:
         self.input_tokens = _tokens(input_tokens, "input_tokens")
         self.output_tokens = _tokens(output_tokens, "output_tokens")
         self.started = True
-        return [Delta("start", model=self.model, input_tokens=self.input_tokens, output_tokens=self.output_tokens)]
+        return [Delta("start", model=self.model, input_tokens=self.input_tokens, output_tokens=self.output_tokens, **self.usage_details)]
 
     def _complete(self, reason: str) -> list[Delta]:
         if not self.started or self.ended:
@@ -145,7 +160,7 @@ class StreamDecoder:
         if reason == "tool_calls" and not self.saw_tool:
             raise StreamError("tool finish reason without tool calls")
         self.ended = True
-        return [Delta("finish", reason=reason, input_tokens=self.input_tokens, output_tokens=self.output_tokens)]
+        return [Delta("finish", reason=reason, input_tokens=self.input_tokens, output_tokens=self.output_tokens, **self.usage_details)]
 
     def _chat(self, event: SSEEvent) -> list[Delta]:
         if event.data == "[DONE]":
@@ -173,8 +188,7 @@ class StreamDecoder:
             if self.reason is None or self.input_tokens is not None or self.output_tokens is not None:
                 raise StreamError("Chat usage chunk is out of order or duplicated")
             usage = _obj(body.get("usage"), "Chat usage")
-            self.input_tokens = _tokens(usage.get("prompt_tokens"), "prompt_tokens")
-            self.output_tokens = _tokens(usage.get("completion_tokens"), "completion_tokens")
+            self._usage(usage)
             return deltas
         choice = _obj(choices[0], "Chat choice")
         if self.reason is not None:
@@ -182,6 +196,9 @@ class StreamDecoder:
         if choice.get("index") != 0 or choice.get("logprobs"):
             raise StreamError("unsupported Chat choice index or logprobs")
         delta = _obj(choice.get("delta"), "Chat delta")
+        for field, value in delta.items():
+            if field not in {"role", "content", "tool_calls"} and value not in (None, "", [], {}):
+                raise StreamError(f"unsupported Chat delta field: {field}")
         if delta.get("role") not in {None, "assistant"}:
             raise StreamError("Chat delta has a non-assistant role")
         if delta.get("refusal") or delta.get("audio") or delta.get("function_call"):
@@ -239,7 +256,8 @@ class StreamDecoder:
             if message.get("content") not in (None, []):
                 raise StreamError("message_start contains nonempty content")
             usage = _obj(message.get("usage") or {}, "message_start.usage")
-            return self._start(message.get("model"), usage.get("input_tokens"), usage.get("output_tokens"))
+            self._usage(usage)
+            return self._start(message.get("model"), self.input_tokens, self.output_tokens)
         if not self.started:
             raise StreamError("Messages block before message_start")
         if self.reason is not None and kind not in {"message_stop", "message_delta"}:
@@ -297,10 +315,7 @@ class StreamDecoder:
             if self.reason is None:
                 raise StreamError(f"unsupported Messages stop_reason: {reason}")
             usage = _obj(body.get("usage") or {}, "message_delta.usage")
-            if "input_tokens" in usage:
-                self.input_tokens = _tokens(usage["input_tokens"], "input_tokens")
-            if "output_tokens" in usage:
-                self.output_tokens = _tokens(usage["output_tokens"], "output_tokens")
+            self._usage(usage)
             return []
         if kind == "message_stop":
             if self.reason is None:
@@ -457,7 +472,6 @@ class StreamDecoder:
             if self.incomplete_items and reason != "length":
                 raise StreamError("incomplete Responses item in completed response")
             usage = _obj(response.get("usage") or {}, "Responses usage")
-            self.input_tokens = _tokens(usage.get("input_tokens"), "input_tokens")
-            self.output_tokens = _tokens(usage.get("output_tokens"), "output_tokens")
+            self._usage(usage)
             return self._complete(reason)
         raise StreamError(f"unsupported Responses event: {kind}")

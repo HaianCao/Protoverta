@@ -8,6 +8,39 @@ from protoverta.stream_pipe import StreamTranscoder, StreamValidator
 from protoverta.streaming import Delta, StreamDecoder, StreamError
 
 
+def test_native_messages_preserves_thinking_and_signature_blocks():
+    bodies = [
+        ("message_start", {"type": "message_start", "message": {"model": "m"}}),
+        ("content_block_start", {"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": ""}}),
+        ("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "private fixture"}}),
+        ("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "signature_delta", "signature": "opaque-fixture"}}),
+        ("content_block_stop", {"type": "content_block_stop", "index": 0}),
+        ("message_delta", {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 1}}),
+        ("message_stop", {"type": "message_stop"}),
+    ]
+    wire = b"".join(encode_sse(kind, json.dumps(body)) for kind, body in bodies)
+    validator = StreamValidator("messages")
+    forwarded = validator.feed(wire)
+    assert b"opaque-fixture" in forwarded
+    assert b"message_stop" not in forwarded
+    assert b"message_stop" in validator.finish()
+
+
+def test_native_responses_preserves_reasoning_item():
+    bodies = [
+        ("response.created", {"response": {"status": "in_progress"}}),
+        ("response.output_item.added", {"output_index": 0, "item": {"type": "reasoning", "id": "rs_fixture"}}),
+        ("response.output_item.done", {"output_index": 0, "item": {"type": "reasoning", "id": "rs_fixture", "encrypted_content": "opaque-fixture"}}),
+        ("response.completed", {"response": {"status": "completed"}}),
+    ]
+    wire = b"".join(encode_sse(kind, json.dumps({"type": kind, "sequence_number": seq, **body})) for seq, (kind, body) in enumerate(bodies))
+    validator = StreamValidator("responses")
+    forwarded = validator.feed(wire)
+    assert b"opaque-fixture" in forwarded
+    assert b"response.completed" not in forwarded
+    assert b"response.completed" in validator.finish()
+
+
 def event(kind, **body):
     return SSEEvent(kind, json.dumps(body))
 

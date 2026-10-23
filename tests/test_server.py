@@ -1,24 +1,92 @@
-import json
 import io
+import json
 import threading
 from http.server import ThreadingHTTPServer
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 import pytest
 
 from protoverta.core import Protocol
-from protoverta.server import GatewayConfig, make_handler, serve
+from protoverta.server import GatewayConfig, gateway_session, make_handler, serve
+
+
+def test_native_error_preserves_body_and_retry_headers():
+    original = b'{"type":"error","error":{"type":"invalid_request_error","message":"thinking.type is unsupported"}}'
+
+    def upstream_open(request, *, timeout):
+        raise HTTPError(request.full_url, 400, "Bad Request", {"retry-after": "5", "x-should-retry": "false", "Authorization": "secret"}, io.BytesIO(original))
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(GatewayConfig("messages", "https://example.com/v1", "key", "local"), upstream_open=upstream_open))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        request = Request(f"http://127.0.0.1:{server.server_port}/v1/messages", data=b'{"model":"m"}', headers={"Authorization": "Bearer local"})
+        with pytest.raises(HTTPError) as caught:
+            urlopen(request, timeout=3)
+        assert caught.value.read() == original
+        assert caught.value.headers["retry-after"] == "5"
+        assert caught.value.headers["x-should-retry"] == "false"
+        assert "Authorization" not in caught.value.headers
+        caught.value.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
 
 
 def test_base_url_joining_and_validation():
     config = GatewayConfig(Protocol.MESSAGES, "https://example.com/v1", "key", "local", "x-api-key")
     assert config.upstream_url == "https://example.com/v1/messages"
-    assert GatewayConfig(Protocol.CHAT, "https://example.com", "key", "local").upstream_url == "https://example.com/v1/chat/completions"
+    assert GatewayConfig(Protocol.CHAT, "https://example.com", "key", "local").upstream_url == "https://example.com/chat/completions"
+    assert GatewayConfig(Protocol.CHAT, "https://example.com/api/v1", "key", "local").upstream_url == "https://example.com/api/v1/chat/completions"
+    assert GatewayConfig(Protocol.MESSAGES, "https://example.com/prefix", "key", "local").upstream_url == "https://example.com/prefix/messages"
+    assert GatewayConfig(Protocol.CHAT, "https://example.com/api/v4", "key", "local").upstream_url == "https://example.com/api/v4/chat/completions"
+    assert GatewayConfig(Protocol.CHAT, "http://127.0.0.1:8765/v1", "key", "local").upstream_url == "http://127.0.0.1:8765/v1/chat/completions"
     with pytest.raises(ValueError):
         GatewayConfig(Protocol.CHAT, "http://example.com/v1", "key", "local")
     with pytest.raises(ValueError, match="line breaks"):
         GatewayConfig(Protocol.CHAT, "https://example.com/v1", "bad\nkey", "local")
+
+
+def test_gateway_session_starts_and_stops_loopback_listener():
+    config = GatewayConfig(Protocol.CHAT, "https://example.com/v1", "key", "local")
+    with gateway_session(config) as origin:
+        with pytest.raises(HTTPError) as unauth:
+            urlopen(Request(origin + "/v1/responses", data=b"{}", method="POST"))
+        assert unauth.value.code == 401
+    with pytest.raises(URLError):
+        urlopen(Request(origin + "/v1/responses", data=b"{}", method="POST"), timeout=1)
+
+
+def test_native_messages_preserves_beta_query_and_version_with_bearer_auth():
+    captured = {}
+
+    def upstream_open(request, *, timeout):
+        captured["url"] = request.full_url
+        captured["headers"] = dict(request.header_items())
+        return io.BytesIO(json.dumps({"model": "m", "content": []}).encode())
+
+    config = GatewayConfig(Protocol.MESSAGES, "https://example.com/prefix", "key", "local")
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(config, upstream_open=upstream_open))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        request = Request(
+            f"http://127.0.0.1:{server.server_port}/v1/messages?beta=true", data=b'{"model":"m","stream":false}',
+            headers={"Authorization": "Bearer local", "anthropic-version": "2023-06-01", "anthropic-beta": "fixture-beta"}, method="POST",
+        )
+        with urlopen(request, timeout=3) as response:
+            assert response.status == 200
+        assert captured["url"] == "https://example.com/prefix/messages?beta=true"
+        headers = {key.lower(): value for key, value in captured["headers"].items()}
+        assert headers["authorization"] == "Bearer key"
+        assert headers["anthropic-version"] == "2023-06-01"
+        assert headers["anthropic-beta"] == "fixture-beta"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
 
 
 def test_local_auth_and_unsupported_stream_route():

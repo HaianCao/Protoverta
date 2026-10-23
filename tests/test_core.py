@@ -25,6 +25,10 @@ def test_all_six_text_response_edges(source, target):
     output = convert_response(response, source, target)
     assert output["model"] == "example"
     assert "hello" in str(output)
+    if target == Protocol.RESPONSES:
+        assert output["tools"] == [] and output["tool_choice"] == "auto"
+        assert output["usage"]["input_tokens_details"] == {"cached_tokens": 0}
+        assert output["usage"]["output_tokens_details"] == {"reasoning_tokens": 0}
 
 
 def test_tool_call_and_result_chat_to_messages():
@@ -100,6 +104,7 @@ def test_length_finish_reason_is_preserved():
     target = convert_response(source, "chat", "responses")
     assert target["status"] == "incomplete"
     assert target["incomplete_details"] == {"reason": "max_output_tokens"}
+    assert target["output"][0]["status"] == "incomplete"
 
 
 def test_same_protocol_keeps_extensions():
