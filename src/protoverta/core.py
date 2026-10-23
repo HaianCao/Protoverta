@@ -250,7 +250,9 @@ def _message_parts(content: Any, label: str) -> list[Part]:
         block = _object(block, label)
         kind = block.get("type")
         if kind == "text":
-            _only(block, {"type", "text"}, label)
+            _only(block, {"type", "text", "citations"}, label)
+            if block.get("citations") not in (None, []):
+                raise ConversionError("Messages citations cannot be preserved across protocols")
             parts.append(Part("text", text=_string(block.get("text"), "text")))
         elif kind == "tool_use":
             _only(block, {"type", "id", "name", "input"}, label)
@@ -552,7 +554,9 @@ def _decode_result(body: dict[str, Any], source: Protocol) -> Result:
         if choice.get("logprobs"):
             raise ConversionError("Chat logprobs cannot be preserved")
         msg = _object(choice.get("message"), "message")
-        _only(msg, {"role", "content", "tool_calls", "refusal", "annotations"}, "Chat response message")
+        _only(msg, {"role", "content", "tool_calls", "refusal", "annotations", "reasoning", "reasoning_content", "reasoning_details"}, "Chat response message")
+        if any(msg.get(key) not in (None, "", []) for key in ("reasoning", "reasoning_content", "reasoning_details")):
+            raise ConversionError("Chat reasoning cannot be preserved across protocols")
         if msg.get("role") != "assistant":
             raise ConversionError("Chat response message must have assistant role")
         if msg.get("annotations"):

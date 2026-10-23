@@ -86,4 +86,6 @@ python scripts/smoke_clients.py --client claude --upstream responses --tool-loop
 
 Use `--adapter-source PATH` to include a source launcher, or `--installed-adapter` to test a launcher installed in the active Python environment. These fixtures verify client/protocol interoperability, not a real provider's model capabilities.
 
+Provider checks and limits: [OpenRouter text/tool conformance](docs/compatibility/openrouter.md).
+
 See [SECURITY.md](SECURITY.md) for reporting security issues. Licensed under [MIT](LICENSE).

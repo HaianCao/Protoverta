@@ -139,8 +139,11 @@ class _LifecycleValidator:
         self.sequence = -1
         self.open_items: set[int] = set()
         self.finished_choices: set[int] = set()
+        self.finish_reasons: dict[int, str] = {}
+        self.usage_postludes: set[int] = set()
         self.choices: set[int] = set()
         self.stop_reason = False
+        self.saw_trailing_done = False
 
     def _index(self, body: dict, field: str) -> int:
         value = body.get(field)
@@ -150,6 +153,9 @@ class _LifecycleValidator:
 
     def feed(self, event) -> None:
         if self.ended:
+            if self.protocol == Protocol.RESPONSES and event.event == "message" and event.data == "[DONE]" and not self.saw_trailing_done:
+                self.saw_trailing_done = True
+                return
             raise StreamError("event after stream completion")
         if self.protocol == Protocol.CHAT and event.data == "[DONE]":
             if not self.started or not self.choices or self.choices != self.finished_choices:
@@ -173,10 +179,18 @@ class _LifecycleValidator:
                     raise StreamError("invalid native Chat choice")
                 index = self._index(choice, "index")
                 if index in self.finished_choices:
+                    delta = choice.get("delta")
+                    if (isinstance(delta, dict) and set(delta) <= {"role", "content"}
+                            and delta.get("role") in (None, "assistant") and delta.get("content") in (None, "")
+                            and choice.get("finish_reason") == self.finish_reasons[index]
+                            and isinstance(body.get("usage"), dict) and index not in self.usage_postludes):
+                        self.usage_postludes.add(index)
+                        continue
                     raise StreamError("Chat delta after choice completion")
                 self.choices.add(index)
                 if choice.get("finish_reason") is not None:
                     self.finished_choices.add(index)
+                    self.finish_reasons[index] = choice["finish_reason"]
             self.started = True
             return
         kind = body.get("type")

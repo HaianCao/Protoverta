@@ -113,6 +113,7 @@ class StreamDecoder:
         self.text_parts: dict[int, str] = {}
         self.sequence: int | None = None
         self.saw_tool = False
+        self.saw_trailing_done = False
         self.raw_usage: dict[str, Any] = {}
         self.usage_details: dict[str, int | None] = {}
 
@@ -128,6 +129,9 @@ class StreamDecoder:
 
     def feed(self, event: SSEEvent) -> list[Delta]:
         if self.ended:
+            if self.protocol == Protocol.RESPONSES and event.event == "message" and event.data == "[DONE]" and not self.saw_trailing_done:
+                self.saw_trailing_done = True
+                return []
             raise StreamError("event after stream completion")
         if self.protocol == Protocol.CHAT:
             return self._chat(event)
@@ -192,6 +196,17 @@ class StreamDecoder:
             return deltas
         choice = _obj(choices[0], "Chat choice")
         if self.reason is not None:
+            # OpenRouter may repeat the finished choice in its usage postlude.
+            # Only an empty, unchanged completion with first-time usage qualifies.
+            delta = _obj(choice.get("delta"), "Chat usage delta")
+            if (choice.get("index") == 0 and not choice.get("logprobs")
+                    and choice.get("finish_reason") == self.reason
+                    and set(delta) <= {"role", "content"}
+                    and delta.get("role") in (None, "assistant") and delta.get("content") in (None, "")
+                    and isinstance(body.get("usage"), dict)
+                    and self.input_tokens is None and self.output_tokens is None):
+                self._usage(body["usage"])
+                return deltas
             raise StreamError("Chat choice arrived after finish_reason")
         if choice.get("index") != 0 or choice.get("logprobs"):
             raise StreamError("unsupported Chat choice index or logprobs")
@@ -270,6 +285,8 @@ class StreamDecoder:
             block = _obj(body.get("content_block"), "content_block")
             block_type = block.get("type")
             if block_type == "text":
+                if block.get("citations") not in (None, []):
+                    raise StreamError("Messages citations cannot be preserved across protocols")
                 self.blocks[index] = "text"
                 initial = _str(block.get("text", ""), "initial text")
                 return [Delta("text", index=index, text=initial)] if initial else []
@@ -326,8 +343,10 @@ class StreamDecoder:
     def _responses(self, event: SSEEvent) -> list[Delta]:
         body = _json_event(event, "Responses event")
         kind = body.get("type")
-        if kind != event.event:
+        if not isinstance(kind, str) or event.event not in {"message", kind}:
             raise StreamError("Responses event/data type mismatch")
+        if kind == "error":
+            raise StreamError("upstream Responses stream reported an error")
         sequence = _index(body.get("sequence_number"), "Responses sequence_number")
         if self.sequence is not None and sequence <= self.sequence:
             raise StreamError("Responses sequence_number did not increase")
