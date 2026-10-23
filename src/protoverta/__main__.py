@@ -19,6 +19,7 @@ def main() -> int:
     parser.add_argument("--client-profile", choices=["strict", "codex", "claude"], default="strict")
     parser.add_argument("--messages-usage-policy", choices=["strict", "deferred"], default="strict")
     parser.add_argument("--default-max-output-tokens", type=int)
+    parser.add_argument("--upstream-reasoning", choices=["provider_default", "disabled", "openrouter_disabled"], default="provider_default", help="Explicit upstream override; disabled replaces request effort, not output filtering")
     parser.add_argument("--port", type=int, default=0)
     args = parser.parse_args()
     key = os.environ.get(args.upstream_key_env, "")
@@ -26,7 +27,7 @@ def main() -> int:
     if not key or not token:
         parser.error("both configured environment variables must contain nonempty secrets")
     try:
-        config = GatewayConfig(Protocol(args.upstream_protocol), args.upstream_base_url, key, token, args.auth_style, client_profile=args.client_profile, default_max_output_tokens=args.default_max_output_tokens, messages_usage_policy=args.messages_usage_policy)
+        config = GatewayConfig(Protocol(args.upstream_protocol), args.upstream_base_url, key, token, args.auth_style, client_profile=args.client_profile, default_max_output_tokens=args.default_max_output_tokens, messages_usage_policy=args.messages_usage_policy, upstream_reasoning=args.upstream_reasoning)
     except ValueError as exc:
         parser.error(str(exc))
     server = serve(config, port=args.port)

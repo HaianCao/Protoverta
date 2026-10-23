@@ -56,6 +56,15 @@ python -m protoverta --upstream-protocol chat --upstream-base-url https://provid
 
 The gateway accepts `POST /v1/chat/completions`, `POST /v1/messages`, and `POST /v1/responses`. It binds to `127.0.0.1`, prints its URL on startup, and requires `Authorization: Bearer <local-token>`. Use `--auth-style x-api-key` for upstreams that require that header.
 
+`--upstream-reasoning provider_default` preserves client settings (the default).
+Choose `disabled` to override effort with `none` on Chat/Responses or disabled
+thinking on Messages. For OpenRouter, choose `openrouter_disabled`, which sends
+`reasoning: {enabled: false}` on Chat/Responses instead. These explicit overrides
+apply after conversion, also on native routes; they request disabling computation,
+not hiding reasoning output. Models requiring reasoning may reject them; the
+gateway does not retry with a different setting or discard unsupported output.
+The equivalent Python option is `GatewayConfig(..., upstream_reasoning="openrouter_disabled")`.
+
 Streaming supports all six directions for text and client-side function calls. Chat/Responses → Messages requires the explicit `--messages-usage-policy deferred` option (or `StreamTranscoder(..., messages_usage_policy="deferred")`). Initial usage is provisionally zero, then corrected with measured usage in `message_delta`; final input and output counts are mandatory. Overlapping tool calls are serialized in first-start order with bounded buffering. The default `strict` policy still rejects these two routes.
 
 Native streams preserve feature payloads, including thinking/signatures, while validating framing and lifecycle. Successful terminal events are held until upstream EOF is verified. Cross-protocol conversion rejects unsupported content, annotations, logprobs and interrupted streams. The upstream base URL is the exact API prefix: include `/v1` or another version when required; Protoverta only appends the endpoint suffix. Native upstream API errors and allowed retry headers are preserved.
@@ -87,5 +96,10 @@ python scripts/smoke_clients.py --client claude --upstream responses --tool-loop
 Use `--adapter-source PATH` to include a source launcher, or `--installed-adapter` to test a launcher installed in the active Python environment. These fixtures verify client/protocol interoperability, not a real provider's model capabilities.
 
 Provider checks and limits: [OpenRouter text/tool conformance](docs/compatibility/openrouter.md).
+
+For an opt-in real OpenRouter text round trip through a source launcher, use
+`scripts/probe_clients.py --client claude --upstream chat --model MODEL_ID --key-env KEY_VARIABLE --adapter-source PATH --allow-live`.
+This uses temporary client state, explicitly disables upstream reasoning, and may
+incur API charges. It does not test tools or resume; never use private prompts as fixtures.
 
 See [SECURITY.md](SECURITY.md) for reporting security issues. Licensed under [MIT](LICENSE).

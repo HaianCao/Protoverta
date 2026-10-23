@@ -38,6 +38,7 @@ class GatewayConfig:
     client_profile: str = "strict"
     default_max_output_tokens: int | None = None
     messages_usage_policy: str = "strict"
+    upstream_reasoning: str = "provider_default"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "upstream_protocol", Protocol(self.upstream_protocol))
@@ -60,6 +61,8 @@ class GatewayConfig:
             raise ValueError("client_profile must be strict, codex or claude")
         if self.messages_usage_policy not in {"strict", "deferred"}:
             raise ValueError("messages_usage_policy must be strict or deferred")
+        if self.upstream_reasoning not in ("provider_default", "disabled", "openrouter_disabled"):
+            raise ValueError("upstream_reasoning must be provider_default, disabled or openrouter_disabled")
         if self.default_max_output_tokens is not None and (isinstance(self.default_max_output_tokens, bool) or not isinstance(self.default_max_output_tokens, int) or self.default_max_output_tokens <= 0):
             raise ValueError("default_max_output_tokens must be a positive integer")
 
@@ -68,6 +71,40 @@ class GatewayConfig:
         base = self.upstream_base_url.rstrip("/")
         path = {Protocol.CHAT: "/chat/completions", Protocol.MESSAGES: "/messages", Protocol.RESPONSES: "/responses"}[self.upstream_protocol]
         return base + path
+
+
+def apply_upstream_reasoning(payload: dict, protocol: Protocol, policy: str) -> dict:
+    """Apply an explicit operator override after conversion, without hiding output.
+
+    provider_default leaves the request untouched. Disabled policies override any
+    request-level effort/budget; unsupported models must return their own error.
+    OpenRouter's vendor extension is opt-in, never inferred from the hostname.
+    """
+    if policy == "provider_default":
+        return payload
+    if policy not in ("disabled", "openrouter_disabled"):
+        raise ValueError("invalid upstream reasoning policy")
+    outbound = dict(payload)
+    for key in ("reasoning", "reasoning_effort", "thinking"):
+        outbound.pop(key, None)
+    if protocol == Protocol.MESSAGES:
+        outbound["thinking"] = {"type": "disabled"}
+        if "output_config" in outbound:
+            if not isinstance(outbound["output_config"], dict):
+                raise ConversionError("output_config must be an object")
+            output_config = dict(outbound["output_config"])
+            output_config.pop("effort", None)
+            if output_config:
+                outbound["output_config"] = output_config
+            else:
+                outbound.pop("output_config")
+    elif policy == "openrouter_disabled":
+        outbound["reasoning"] = {"enabled": False}
+    elif protocol == Protocol.CHAT:
+        outbound["reasoning_effort"] = "none"
+    else:
+        outbound["reasoning"] = {"effort": "none"}
+    return outbound
 
 
 class _RedirectBlocker(HTTPRedirectHandler):
@@ -186,6 +223,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                     elif config.client_profile == "claude" and protocol == Protocol.MESSAGES:
                         payload = prepare_claude_request(payload)
                     outbound = convert_request(payload, protocol, config.upstream_protocol)
+                outbound = apply_upstream_reasoning(outbound, config.upstream_protocol, config.upstream_reasoning)
             except (json.JSONDecodeError, UnicodeError, ConversionError) as exc:
                 self._json(422, {"error": {"message": str(exc)}})
                 return

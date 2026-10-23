@@ -97,6 +97,7 @@ def run_smoke(
     installed_adapter: bool = False,
     timeout: int = 45,
     model: str | None = None,
+    upstream_reasoning: str = "provider_default",
 ) -> dict:
     executable = shutil.which(client)
     if not executable:
@@ -231,6 +232,7 @@ def run_smoke(
                 "smoke-local-token",
                 client_profile="codex" if client == "codex" else "claude",
                 default_max_output_tokens=4096,
+                upstream_reasoning=upstream_reasoning,
                 messages_usage_policy="deferred"
                 if client == "claude" and upstream != Protocol.MESSAGES
                 else "strict",
@@ -359,7 +361,7 @@ def run_client(
                     str(Path(__file__).resolve().parents[1] / "src"),
                 ]
             )
-        env["SMOKE_TOKEN"] = "fake-upstream-key"
+        env["SMOKE_TOKEN"] = config.upstream_api_key
         if client == "codex":
             protocol = {
                 Protocol.CHAT: "chat_completions",
@@ -367,7 +369,7 @@ def run_client(
                 Protocol.RESPONSES: "responses",
             }[upstream]
             config_path.write_text(
-                f'schema_version = 1\n[providers.smoke]\ndisplay_name = "Smoke"\nbase_url = "{upstream_origin}/v1"\nprotocol = "{protocol}"\nexecution_mode = "gateway"\nauth_secret_ref = "smoke-main"\n[secrets.smoke-main]\nbackend = "environment"\nenv_var = "SMOKE_TOKEN"\n',
+                f'schema_version = 1\n[providers.smoke]\ndisplay_name = "Smoke"\nbase_url = "{upstream_origin}/v1"\nprotocol = "{protocol}"\nexecution_mode = "gateway"\nupstream_reasoning = "{config.upstream_reasoning}"\nauth_secret_ref = "smoke-main"\n[secrets.smoke-main]\nbackend = "environment"\nenv_var = "SMOKE_TOKEN"\n',
                 encoding="utf-8",
             )
             options = [
@@ -402,7 +404,7 @@ def run_client(
                 else upstream_origin + "/v1"
             )
             config_path.write_text(
-                f'schema_version = 1\n[[providers]]\nid = "smoke"\ndisplay_name = "Smoke"\nbase_url = "{base}"\nprotocol = "{upstream.value}"\nexecution_mode = "gateway"\n',
+                f'schema_version = 1\n[[providers]]\nid = "smoke"\ndisplay_name = "Smoke"\nbase_url = "{base}"\nprotocol = "{upstream.value}"\nexecution_mode = "gateway"\nupstream_reasoning = "{config.upstream_reasoning}"\n',
                 encoding="utf-8",
             )
             env["CLAUDE_CA_CONFIG"] = str(config_path)
@@ -435,6 +437,7 @@ def run_client(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--client", choices=["codex", "claude"], required=True)
+    parser.add_argument("--upstream-reasoning", choices=["provider_default", "disabled", "openrouter_disabled"], default="provider_default")
     parser.add_argument(
         "--upstream", type=Protocol, choices=list(Protocol), required=True
     )
@@ -466,6 +469,7 @@ def main() -> int:
         adapter_source=args.adapter_source,
         installed_adapter=args.installed_adapter,
         model=args.model,
+        upstream_reasoning=args.upstream_reasoning,
     )
     print(json.dumps(result, indent=2))
     return 0 if result["passed"] else 1

@@ -9,14 +9,29 @@ function call, a matching tool result, and the final text marker. Messages outpu
 deferred-usage policy. Test requests explicitly disabled upstream reasoning:
 `reasoning: {enabled: false}` for Chat/Responses, or
 `thinking: {type: "disabled"}` for Messages. These provider-specific controls were
-applied by the test transport, not silently added by the production gateway.
+originally applied by the test transport. The production gateway now exposes
+the same explicit control as `upstream_reasoning="openrouter_disabled"` (or
+`--upstream-reasoning openrouter_disabled`); it remains opt-in.
 
 Default reasoning is enabled on this model. Native Messages/Responses can carry
 its thinking/reasoning payloads unchanged; converting those payloads is outside
 the current subset and is deliberately rejected. A successful text/tool probe
 with reasoning disabled does not prove default Claude Code/Codex compatibility
-or hidden-state resume. The consumer launchers must expose or propagate suitable
-upstream controls before this model is advertised as working out of the box.
+or hidden-state resume.
+
+Actual CLI verification on the same date used Codex CLI 0.163.0 and Claude Code
+2.1.308 through each consumer launcher from source, with synthetic text prompts
+and temporary client/config directories. All six client/upstream combinations
+(Codex and Claude, each with Chat, Responses and Messages) returned the expected
+marker and exit code zero using the production `openrouter_disabled` policy.
+No transport injection was used. This verifies fresh-session text round trips,
+not real-provider CLI tool execution or cross-provider resume. The earlier
+six-direction function-call probes remain separate protocol-level checks.
+
+Both preview setup pages expose **Upstream reasoning → Disabled — OpenRouter**
+and persist it per provider. Gateway mode is required, including native routes;
+direct mode is not silently modified. The saved policy overrides selected effort.
+Existing configurations keep `provider_default` and their previous behavior.
 
 Transport compatibility covered by synthetic regression tests:
 
