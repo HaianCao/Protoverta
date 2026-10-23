@@ -77,3 +77,13 @@ def test_trace_records_only_shapes_not_instruction_contents(monkeypatch):
     assert result["developer_messages"] == [{"index": 0, "tags": ["model_switch"]}]
     assert result["tools"][0]["child_types"] == ["function"]
     assert "private" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("content", [None, "opaque", {"unexpected": "private"}, [{"type": "private-type", "text": "private"}]])
+def test_trace_handles_opaque_or_malformed_shapes_without_content_leak(monkeypatch, content):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "scripts"))
+    module = importlib.import_module("trace_adapter")
+    result = module.summarize({"input": [{"type": "reasoning", "content": content, "encrypted_content": "private"}, {"role": "developer", "content": None}], "tools": None})
+    assert result["public_reasoning_items"] == 0
+    assert result["reasoning_shapes"][0]["opaque_present"] is True
+    assert "private" not in json.dumps(result)

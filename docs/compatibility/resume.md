@@ -146,8 +146,10 @@ then a target public-reasoning response, then its replay on a third turn,
 unchanged session ID and exact token recall. No goal was created or updated.
 
 NIM `z-ai/glm-5.3-flash` passed a direct short Chat JSON baseline but its Claude
-resume probe timed out, so resume is unverified. `openai/gpt-oss-20b` timed out
-on two direct Chat JSON baselines, so it has no passing new integration result.
+resume probe timed out, so resume is unverified. `openai/gpt-oss-20b` failed two
+direct Chat JSON baselines with the coarse `transport_or_json_error` category;
+these do not distinguish timeout/network failure from invalid JSON, so it has
+no passing new integration result.
 OpenRouter `thinkingmachines/inkling:free` returned 403 on a real Claude resume
 attempt, reporting a harness-access restriction. It was not retried with fake
 app identity or a paid fallback. These are failures/unverified cases, not passes.

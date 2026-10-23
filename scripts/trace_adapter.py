@@ -12,17 +12,22 @@ from protoverta import server
 from protoverta.streaming import StreamDecoder, StreamError
 
 
+def _array(value):
+    return value if isinstance(value, list) else []
+
+
 def summarize(body: dict) -> dict:
     messages = []
-    for index, item in enumerate(body.get("input", [])):
+    inputs = _array(body.get("input"))
+    for index, item in enumerate(inputs):
         if not isinstance(item, dict) or item.get("role") != "developer":
             continue
         content = item.get("content", "")
-        text = content if isinstance(content, str) else "".join(block.get("text", "") for block in content if isinstance(block, dict))
+        text = content if isinstance(content, str) else "".join(block["text"] for block in _array(content) if isinstance(block, dict) and isinstance(block.get("text"), str))
         messages.append({"index": index, "tags": sorted(set(re.findall(r"</?([a-zA-Z_][a-zA-Z0-9_]*)", text)))})
-    public_reasoning_items = sum(isinstance(item, dict) and item.get("type") == "reasoning" and bool(item.get("content")) for item in body.get("input", []))
-    reasoning_shapes = [{"known_fields": sorted(set(item) & {"type", "id", "summary", "content", "status", "encrypted_content"}), "unknown_fields": bool(set(item) - {"type", "id", "summary", "content", "status", "encrypted_content"}), "opaque_present": item.get("encrypted_content") is not None, "summary_is_empty": item.get("summary") == [], "content_types": [part.get("type") for part in item.get("content", []) if isinstance(part, dict)]} for item in body.get("input", []) if isinstance(item, dict) and item.get("type") == "reasoning"]
-    return {"model": body.get("model"), "public_reasoning_items": public_reasoning_items, "reasoning_shapes": reasoning_shapes, "developer_messages": messages, "tools": [{"type": tool.get("type"), "name": tool.get("name"), "child_types": sorted({str(child.get("type")) for child in tool.get("tools", []) if isinstance(child, dict)})} for tool in body.get("tools", []) if isinstance(tool, dict)]}
+    public_reasoning_items = sum(isinstance(item, dict) and item.get("type") == "reasoning" and any(isinstance(part, dict) and part.get("type") == "reasoning_text" and isinstance(part.get("text"), str) for part in _array(item.get("content"))) for item in inputs)
+    reasoning_shapes = [{"known_fields": sorted(set(item) & {"type", "id", "summary", "content", "status", "encrypted_content"}), "unknown_fields": bool(set(item) - {"type", "id", "summary", "content", "status", "encrypted_content"}), "opaque_present": item.get("encrypted_content") is not None, "summary_is_empty": item.get("summary") == [], "content_types": ["reasoning_text" if part.get("type") == "reasoning_text" else "other" for part in _array(item.get("content")) if isinstance(part, dict)]} for item in inputs if isinstance(item, dict) and item.get("type") == "reasoning"]
+    return {"model": body.get("model"), "public_reasoning_items": public_reasoning_items, "reasoning_shapes": reasoning_shapes, "developer_messages": messages, "tools": [{"type": tool.get("type"), "name": tool.get("name"), "child_types": sorted({str(child.get("type")) for child in _array(tool.get("tools")) if isinstance(child, dict)})} for tool in _array(body.get("tools")) if isinstance(tool, dict)]}
 
 
 def main() -> int:
