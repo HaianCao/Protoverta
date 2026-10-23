@@ -25,8 +25,23 @@ and temporary client/config directories. All six client/upstream combinations
 (Codex and Claude, each with Chat, Responses and Messages) returned the expected
 marker and exit code zero using the production `openrouter_disabled` policy.
 No transport injection was used. This verifies fresh-session text round trips,
-not real-provider CLI tool execution or cross-provider resume. The earlier
-six-direction function-call probes remain separate protocol-level checks.
+not cross-provider resume. The earlier six-direction function-call probes remain
+separate protocol-level checks.
+
+Follow-up real CLI tool checks passed in all four cross-protocol routes:
+Claude → Chat/Responses read a random nonce from a temporary file and returned it
+in the final answer. Codex → Chat/Messages used the read-only `get_goal` tool;
+the real transport observed its matching call/result ID in the second upstream
+request, followed by the final marker and exit code zero. A first attempt at
+Codex shell file reads was blocked by local execution policy, so no shell policy
+was weakened. Native real-provider tool routes and resume are not covered by
+these four results.
+
+The real Codex → Chat loop exposed whitespace-only assistant placeholders after
+a function call. The explicit Codex profile omits only these validated request
+placeholders; meaningful text, annotations and unknown fields still fail.
+Standalone strict conversion is unchanged. Probe instrumentation observes the
+production transport and does not rewrite provider requests or responses.
 
 Both preview setup pages expose **Upstream reasoning → Disabled — OpenRouter**
 and persist it per provider. Gateway mode is required, including native routes;

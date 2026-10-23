@@ -285,6 +285,7 @@ def run_client(
     upstream,
     timeout,
     model,
+    prompt: str | None = None,
 ):
     if client == "codex":
         settings = {
@@ -318,7 +319,7 @@ def run_client(
             args.remove("--ephemeral")
         for key, value in settings.items():
             args += ["-c", f"{key}={json.dumps(value)}"]
-        args.append("Reply with PROTOVERTA_SMOKE_OK. Do not use tools.")
+        args.append(prompt or "Reply with PROTOVERTA_SMOKE_OK. Do not use tools.")
     else:
         env["ANTHROPIC_BASE_URL"] = origin
         env["ANTHROPIC_AUTH_TOKEN"] = config.inbound_token
@@ -350,7 +351,7 @@ def run_client(
             "This is a local protocol smoke test.",
             "--output-format",
             "json",
-            "Reply with PROTOVERTA_SMOKE_OK.",
+            prompt or "Reply with PROTOVERTA_SMOKE_OK.",
         ]
     if adapter_source is not None or installed_adapter:
         config_path = Path(directory) / "adapter.toml"
@@ -395,7 +396,7 @@ def run_client(
                 model or "protoverta-smoke",
                 "--",
                 *options,
-                "Reply with PROTOVERTA_SMOKE_OK.",
+                prompt or "Reply with PROTOVERTA_SMOKE_OK.",
             ]
         else:
             base = (

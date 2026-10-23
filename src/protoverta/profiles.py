@@ -7,6 +7,22 @@ import copy
 from .core import ConversionError, Protocol
 
 
+def _blank_assistant_message(item: dict) -> bool:
+    """Recognize only validated, whitespace-only Codex text placeholders."""
+    if item.get("type", "message") != "message" or item.get("role") != "assistant" or set(item) - {"type", "id", "status", "role", "content"} or item.get("status") not in (None, "completed"):
+        return False
+    content = item.get("content")
+    if isinstance(content, str):
+        return not content.strip()
+    return isinstance(content, list) and all(
+        isinstance(block, dict) and block.get("type") in ("input_text", "output_text")
+        and not (set(block) - {"type", "text", "annotations", "logprobs"})
+        and isinstance(block.get("text"), str) and not block["text"].strip()
+        and block.get("annotations") in (None, []) and block.get("logprobs") in (None, [])
+        for block in content
+    )
+
+
 def prepare_claude_request(body: dict) -> dict:
     """Opt-in text/function policy, never a silent thinking/feature downgrade.
 
@@ -67,6 +83,23 @@ def prepare_codex_request(body: dict, target: Protocol, *, default_max_output_to
     launcher. Namespaced/hosted tools remain errors in the strict converter.
     """
     result = copy.deepcopy(body)
+    if target == Protocol.CHAT and isinstance(result.get("input"), list):
+        # Codex may replay a whitespace-only assistant placeholder between a
+        # function call and its result. Chat cannot represent this ordering.
+        # This explicit client profile omits only those validated placeholders;
+        # meaningful text, annotations and unknown features still fail strictly.
+        inputs = []
+        after_call = False
+        for item in result["input"]:
+            if isinstance(item, dict):
+                if after_call and _blank_assistant_message(item):
+                    continue
+                if item.get("type") == "function_call":
+                    after_call = True
+                elif item.get("role") != "assistant":
+                    after_call = False
+            inputs.append(item)
+        result["input"] = inputs
     if "client_metadata" in result:
         if not isinstance(result["client_metadata"], dict):
             raise ConversionError("Codex client_metadata must be an object")

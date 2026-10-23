@@ -75,6 +75,11 @@ For Codex's stateless text/function subset, opt in with `--client-profile codex`
 
 For Claude Code translation, use `--client-profile claude --messages-usage-policy deferred`. Disable thinking, experimental betas, structured output and tool search in the client before sending requests. The profile omits cache hints and client metadata, accepts the SDK's `beta=true` query marker without forwarding it to another protocol, and represents tool-result errors as explicitly labelled text. Thinking/signature blocks, compaction and hosted tools remain unsupported. Native Messages does not apply this profile's rewriting. See [the streaming policy decision](docs/decisions/ADR-001-messages-streaming-rejection.md).
 
+The Codex profile also omits validated whitespace-only assistant placeholders
+between a function call and its result when targeting Chat. Meaningful post-call
+text, annotations and unknown fields are not discarded; strict conversion without
+this client profile remains unchanged.
+
 ## Contributing
 
 PRs should include sanitized fixtures and tests for both directions of any protocol change. Never commit API keys or private conversations.
@@ -100,6 +105,9 @@ Provider checks and limits: [OpenRouter text/tool conformance](docs/compatibilit
 For an opt-in real OpenRouter text round trip through a source launcher, use
 `scripts/probe_clients.py --client claude --upstream chat --model MODEL_ID --key-env KEY_VARIABLE --adapter-source PATH --allow-live`.
 This uses temporary client state, explicitly disables upstream reasoning, and may
-incur API charges. It does not test tools or resume; never use private prompts as fixtures.
+incur API charges. Add `--tool-loop` to verify Claude's read-only nonce-file tool
+round trip, or Codex's read-only `get_goal` query with its matching tool result
+observed in the outbound request. Shell permissions are not relaxed. These probes
+do not test resume; never use private prompts as fixtures.
 
 See [SECURITY.md](SECURITY.md) for reporting security issues. Licensed under [MIT](LICENSE).
