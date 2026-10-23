@@ -161,9 +161,12 @@ def test_gateway_reports_interrupted_sse_without_done_marker():
         url = f"http://127.0.0.1:{server.server_port}/v1/chat/completions"
         body = {"model": "m", "messages": [], "max_tokens": 8, "stream": True}
         request = Request(url, data=json.dumps(body).encode(), headers={"Authorization": "Bearer local"}, method="POST")
-        with urlopen(request) as response:
-            wire = response.read()
-        assert b"event: error" in wire
+        with pytest.raises(HTTPError) as caught:
+            urlopen(request)
+        assert caught.value.code == 502
+        wire = caught.value.read()
+        caught.value.close()
+        assert b"api_error" in wire
         assert b"[DONE]" not in wire
     finally:
         server.shutdown()
@@ -259,6 +262,8 @@ def test_client_disconnect_stops_upstream_stream_processing():
     first = encode_sse("message_start", json.dumps({
         "type": "message_start", "message": {"model": "m", "content": [], "usage": {"input_tokens": 1, "output_tokens": 1}},
     }))
+    first += encode_sse("content_block_start", json.dumps({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}))
+    first += encode_sse("content_block_delta", json.dumps({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "visible"}}))
     upstream = Upstream(first + b"irrelevant trailing bytes")
     handler._stream(upstream, Protocol.MESSAGES, Protocol.CHAT)
     assert upstream.tell() < len(first) + len(b"irrelevant trailing bytes")

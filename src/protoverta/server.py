@@ -20,7 +20,7 @@ from .namespaces import NamespaceMap
 from .profiles import prepare_claude_request, prepare_codex_request
 from .sse import encode_sse
 from .stream_pipe import StreamTranscoder, StreamValidator
-from .streaming import StreamError
+from .streaming import StreamError, UnsupportedReasoningError
 
 _PATHS = {
     "/v1/chat/completions": Protocol.CHAT,
@@ -166,6 +166,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
         def _stream(self, response, source: Protocol, target: Protocol, response_transform=None) -> None:
             pipeline = StreamTranscoder(source, target, messages_usage_policy=config.messages_usage_policy, max_pending_bytes=config.max_body_bytes, response_transform=response_transform, public_reasoning=config.public_reasoning) if source != target else StreamValidator(source)
             headers_sent = False
+            initial = bytearray()
 
             def send_headers() -> None:
                 nonlocal headers_sent
@@ -185,25 +186,45 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                         break
                     output = pipeline.feed(chunk)
                     if output:
+                        if not headers_sent:
+                            initial.extend(output)
+                            if len(initial) > config.max_body_bytes:
+                                raise StreamError("initial stream metadata exceeds size limit")
+                            # Do not commit HTTP 200 for metadata-only starts.
+                            # Reject an unsupported first content block as a
+                            # non-retryable HTTP error, without buffering text.
+                            if not getattr(pipeline, "has_payload", True):
+                                continue
+                            output = bytes(initial)
+                            initial.clear()
                         send_headers()
                         self.wfile.write(output)
                         self.wfile.flush()
                 tail = pipeline.finish()
+                if initial:
+                    tail = bytes(initial) + tail
+                    initial.clear()
                 if tail:
                     send_headers()
                     self.wfile.write(tail)
                     self.wfile.flush()
                 send_headers()
             except (StreamError, UnicodeError, OSError) as exc:
-                if not headers_sent:
-                    self._json(502, {"error": {"message": f"upstream stream error: {type(exc).__name__}"}})
-                else:
-                    try:
-                        error = json.dumps({"type": "error", "error": {"type": "api_error", "message": f"upstream stream error: {type(exc).__name__}"}})
+                unsupported = isinstance(exc, UnsupportedReasoningError)
+                detail = {"type": "invalid_request_error" if unsupported else "api_error", "message": f"upstream stream error: {type(exc).__name__}"}
+                if unsupported:
+                    hint = "Messages requires its own thinking/signature contract; use native Messages or a compatible Responses route." if target == Protocol.MESSAGES else "For unsigned Chat reasoning_content, enable public_reasoning explicitly on a Chat/Responses route; summaries, signed or encrypted state remain unsupported."
+                    detail.update(code="unsupported_reasoning", message="Upstream reasoning cannot be preserved on this route. " + hint + " No reasoning was dropped or given a fabricated signature.")
+                payload = {"type": "error", "error": detail}
+                try:
+                    if not headers_sent:
+                        self._json(422 if unsupported else 502, payload, {"x-should-retry": "false"} if unsupported else None)
+                    else:
+                        error = json.dumps(payload)
                         self.wfile.write(encode_sse("error", error))
                         self.wfile.flush()
-                    except (BrokenPipeError, ConnectionResetError):
-                        pass
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
 
         def do_POST(self) -> None:
             target_url = urlsplit(self.path)

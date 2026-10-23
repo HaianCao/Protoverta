@@ -20,6 +20,14 @@ class StreamError(ValueError):
     """Malformed, unsupported, or prematurely terminated upstream stream."""
 
 
+class UnsupportedReasoningError(StreamError):
+    """A known reasoning feature has no enabled, lossless target mapping."""
+
+    def __init__(self):
+        # Fixed text only: upstream field values must not enter client errors.
+        super().__init__("unsupported reasoning output (reasoning_content/thinking/opaque state) under the current strict policy")
+
+
 @dataclass(frozen=True, slots=True)
 class Delta:
     kind: str
@@ -243,6 +251,8 @@ class StreamDecoder:
                             raise StreamError("interleaved public reasoning cannot be preserved")
                         deltas.append(Delta("reasoning_text", text=value))
                 continue
+            if field in {"reasoning", "reasoning_content", "reasoning_details"} and value not in (None, "", []):
+                raise UnsupportedReasoningError()
             if field not in {"role", "content", "tool_calls"} and (field not in {"refusal", "annotations", "reasoning", "reasoning_content", "reasoning_details"} or value not in (None, "", [])):
                 raise StreamError(f"unsupported Chat delta field: {field}")
         if delta.get("role") not in {None, "assistant"}:
@@ -321,6 +331,8 @@ class StreamDecoder:
             self.seen_blocks.add(index)
             block = _obj(body.get("content_block"), "content_block")
             block_type = block.get("type")
+            if block_type in ("thinking", "redacted_thinking"):
+                raise UnsupportedReasoningError()
             if block_type == "text":
                 _only(block, {"type", "text", "citations"}, "Messages text block")
                 if block.get("citations") not in (None, []):
@@ -413,6 +425,8 @@ class StreamDecoder:
             _response_item(item)
             item_type = item.get("type")
             item_id = _str(item.get("id"), "output item ID")
+            if item_type == "reasoning" and not self.public_reasoning:
+                raise UnsupportedReasoningError()
             if item_type == "reasoning" and self.public_reasoning:
                 if self.reasoning_closed or self.reasoning_items:
                     raise StreamError("only one public reasoning prefix item is portable")

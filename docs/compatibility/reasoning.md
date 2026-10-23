@@ -36,6 +36,14 @@ assistant text. A provider returning such output on a translated Messages route
 can therefore still fail. The successful text-only CLI probes do not remove
 that boundary.
 
+For translated SSE, unsupported reasoning detected before any answer/tool
+payload returns HTTP 422 with `code: unsupported_reasoning` and
+`x-should-retry: false`. Initial metadata-only events are held in a bounded
+buffer so an empty stream start does not prematurely commit HTTP 200. If
+answer/tool output has already been sent, the stream ends with an error event,
+never a fabricated successful terminal event. Malformed or truncated upstream
+streams remain upstream errors, not reasoning-policy errors.
+
 CodexApter's integration branch exposes the option only for a Chat gateway
 provider. In TOML it is `public_reasoning = true`; setup has an advanced checkbox.
 ClaudApter does not expose it because its downstream protocol is Messages.

@@ -10,7 +10,7 @@ from dataclasses import dataclass, field, replace
 from .core import Protocol
 from .sse import SSEParser, encode_sse
 from .stream_encoder import StreamEncoder
-from .streaming import Delta, StreamDecoder, StreamError
+from .streaming import Delta, StreamDecoder, StreamError, UnsupportedReasoningError
 
 
 @dataclass
@@ -55,6 +55,8 @@ class _MessagesOrder:
         elif delta.kind == "text":
             block = _PendingBlock(closed=True)
             self.blocks.append(block)
+        elif delta.kind == "reasoning_text":
+            raise UnsupportedReasoningError()
         else:
             raise StreamError("unsupported Messages ordering delta")
         block.deltas.append(delta)
@@ -97,6 +99,7 @@ class StreamTranscoder:
         self.encoder = StreamEncoder(self.target, response_transform=response_transform, public_reasoning=public_reasoning)
         self._terminal = b""
         self._closed = False
+        self.has_payload = False
 
     def feed(self, chunk: bytes) -> bytes:
         if self._closed:
@@ -110,6 +113,8 @@ class StreamTranscoder:
             for decoded in self.decoder.feed(event):
                 for delta in self.order.feed(decoded) if self.order else [decoded]:
                     for encoded in self.encoder.feed(delta):
+                        if delta.kind in {"tool_start", "reasoning_text"} or delta.kind == "text" and bool(delta.text):
+                            self.has_payload = True
                         wire = encode_sse(encoded.event, encoded.data, id=encoded.id)
                         if delta.kind == "finish":
                             self._terminal += wire

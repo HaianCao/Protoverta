@@ -158,6 +158,22 @@ NIM's GLM page uses `/glm-5-3-flash` in its URL, while its documented API model
 ID is `z-ai/glm-5.3-flash`. See the
 [NVIDIA sample](https://build.nvidia.com/z-ai/glm-5-3-flash).
 
+Follow-up GLM checks passed the three-turn Codex vendor/model switch with
+unsigned public reasoning enabled: the target returned public reasoning, the
+next request replayed it, and the same session recalled the synthetic token.
+This does not make that reasoning portable to Messages. A fresh Claude
+Chat-to-Messages probe instead reproduced unsupported reasoning; after error
+classification was corrected, it exited with an actionable HTTP 422 in about
+six seconds rather than exhausting the 120-second probe timeout. Claude GLM
+resume is still not a passing case.
+
+[NVIDIA's reference](https://docs.api.nvidia.com/nim/reference/z-ai-glm-5-3-flash)
+documents `reasoning_effort` values `low`, `high`, and `max`, not `none`.
+The [model maintainer discussion](https://huggingface.co/zai-org/GLM-5.3-Flash/discussions/23)
+also describes the lack of a thinking-off mode. `clear_thinking` is a history
+setting, not a lossless conversion to Messages signed thinking. No reasoning
+is discarded, relabelled as ordinary text, or assigned a fabricated signature.
+
 `scripts/probe_clients.py` accepts `--target-base-url`, `--target-key-env`,
 `--target-model`, `--source-reasoning`, `--target-reasoning` and the Codex-only
 `--target-public-reasoning`. The source/target keys stay in environment variables;

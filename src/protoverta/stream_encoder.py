@@ -15,7 +15,7 @@ from typing import Any
 from .core import ConversionError, Protocol, _encode_usage
 from .reasoning import reasoning_item
 from .sse import SSEEvent
-from .streaming import Delta, StreamError
+from .streaming import Delta, StreamError, UnsupportedReasoningError
 
 
 def _event(kind: str, body: dict[str, Any]) -> SSEEvent:
@@ -117,7 +117,9 @@ class StreamEncoder:
         raise StreamError(f"unsupported canonical delta: {delta.kind}")
 
     def _reasoning(self, delta: Delta) -> list[SSEEvent]:
-        if not self.public_reasoning or self.protocol == Protocol.MESSAGES or self.reasoning_closed or not isinstance(delta.text, str):
+        if self.protocol == Protocol.MESSAGES:
+            raise UnsupportedReasoningError()
+        if not self.public_reasoning or self.reasoning_closed or not isinstance(delta.text, str):
             raise StreamError("unsigned public reasoning requires an enabled Chat/Responses prefix; Messages signatures cannot be fabricated")
         if self.protocol == Protocol.CHAT:
             return [self._chat_chunk([{"index": 0, "delta": {"reasoning_content": delta.text}, "finish_reason": None}])]
