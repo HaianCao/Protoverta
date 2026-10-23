@@ -19,9 +19,8 @@ def prepare_claude_request(body: dict) -> dict:
         if not isinstance(result["metadata"], dict):
             raise ConversionError("Claude metadata must be an object")
         result.pop("metadata")
-    if "thinking" in result:
-        if result.pop("thinking") != {"type": "disabled"}:
-            raise ConversionError("Claude cross-protocol gateway requires thinking disabled")
+    if "thinking" in result and result.pop("thinking") != {"type": "disabled"}:
+        raise ConversionError("Claude cross-protocol gateway requires thinking disabled")
 
     def strip_cache(value):
         if not isinstance(value, dict) or "cache_control" not in value:

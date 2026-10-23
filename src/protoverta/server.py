@@ -93,9 +93,9 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
         def _forward_headers(self, headers) -> None:
             for name, value in (headers.items() if headers else []):
                 lower = name.lower()
-                if lower in {"retry-after", "x-should-retry", "request-id", "x-request-id", "x-accel-buffering"} or lower.startswith("anthropic-ratelimit-"):
-                    if "\r" not in str(value) and "\n" not in str(value):
-                        self.send_header(name, value)
+                allowed = lower in {"retry-after", "x-should-retry", "request-id", "x-request-id", "x-accel-buffering"} or lower.startswith("anthropic-ratelimit-")
+                if allowed and "\r" not in str(value) and "\n" not in str(value):
+                    self.send_header(name, value)
 
         def _raw_json(self, status: int, raw: bytes, headers=None) -> None:
             self.send_response(status)
@@ -225,13 +225,13 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                         raise ValueError("upstream error is too large")
                     error = json.loads(raw)
                     if not isinstance(error, dict) or not isinstance(error.get("error"), dict):
-                        raise ValueError("not an API error object")
+                        raise TypeError("not an API error object")
                     if protocol == config.upstream_protocol and 400 <= exc.code < 600:
                         self._raw_json(exc.code, raw, exc.headers)
                     else:
                         detail = error["error"]
                         self._json(exc.code if 400 <= exc.code < 600 else 502, {"type": "error", "error": {"type": "api_error", "message": str(detail.get("message", f"upstream HTTP {exc.code}"))}}, exc.headers)
-                except (ValueError, UnicodeError, OSError):
+                except (ValueError, TypeError, UnicodeError, OSError):
                     self._json(502 if not 400 <= exc.code < 600 else exc.code, {"error": {"message": f"upstream HTTP {exc.code}"}}, exc.headers)
                 finally:
                     exc.close()

@@ -85,8 +85,8 @@ def _decode_usage(usage: dict[str, Any], source: Protocol) -> dict[str, int | No
         raise ConversionError("cached input tokens exceed total input tokens")
     if outputs is not None and (reasoning or 0) > outputs:
         raise ConversionError("reasoning tokens exceed total output tokens")
-    return dict(input_tokens=inputs, output_tokens=outputs, cached_input_tokens=read,
-                cache_creation_input_tokens=creation, reasoning_output_tokens=reasoning)
+    return {"input_tokens": inputs, "output_tokens": outputs, "cached_input_tokens": read,
+            "cache_creation_input_tokens": creation, "reasoning_output_tokens": reasoning}
 
 
 def _encode_usage(value: Any, target: Protocol) -> dict[str, Any]:

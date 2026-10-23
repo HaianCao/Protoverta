@@ -24,7 +24,7 @@ jobs:
       - name: Test and lint
         run: |
           python -m pytest
-          ruff check src tests scripts
+          python -m ruff check src tests scripts
       - name: Build and validate distributions
         run: |
           python -m build
