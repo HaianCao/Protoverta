@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .core import ConversionError, Protocol, convert_request, convert_response
+from .namespaces import NamespaceMap
 from .profiles import prepare_claude_request, prepare_codex_request
 from .sse import encode_sse
 from .stream_pipe import StreamTranscoder, StreamValidator
@@ -39,6 +40,8 @@ class GatewayConfig:
     default_max_output_tokens: int | None = None
     messages_usage_policy: str = "strict"
     upstream_reasoning: str = "provider_default"
+    namespace_tools: str = "reject"
+    messages_system_models: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "upstream_protocol", Protocol(self.upstream_protocol))
@@ -63,6 +66,12 @@ class GatewayConfig:
             raise ValueError("messages_usage_policy must be strict or deferred")
         if self.upstream_reasoning not in ("provider_default", "disabled", "openrouter_disabled"):
             raise ValueError("upstream_reasoning must be provider_default, disabled or openrouter_disabled")
+        if self.namespace_tools not in ("reject", "flatten"):
+            raise ValueError("namespace_tools must be reject or flatten")
+        if not isinstance(self.messages_system_models, tuple) or any(not isinstance(model, str) or not model or any(char.isspace() for char in model) for model in self.messages_system_models):
+            raise ValueError("messages_system_models must be a tuple of exact model IDs")
+        if self.messages_system_models and self.upstream_protocol != Protocol.MESSAGES:
+            raise ValueError("messages_system_models requires a Messages upstream")
         if self.default_max_output_tokens is not None and (isinstance(self.default_max_output_tokens, bool) or not isinstance(self.default_max_output_tokens, int) or self.default_max_output_tokens <= 0):
             raise ValueError("default_max_output_tokens must be a positive integer")
 
@@ -143,8 +152,8 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
             self.end_headers()
             self.wfile.write(raw)
 
-        def _stream(self, response, source: Protocol, target: Protocol) -> None:
-            pipeline = StreamTranscoder(source, target, messages_usage_policy=config.messages_usage_policy, max_pending_bytes=config.max_body_bytes) if source != target else StreamValidator(source)
+        def _stream(self, response, source: Protocol, target: Protocol, namespace_map: NamespaceMap | None = None) -> None:
+            pipeline = StreamTranscoder(source, target, messages_usage_policy=config.messages_usage_policy, max_pending_bytes=config.max_body_bytes, response_transform=namespace_map.restore if namespace_map else None) if source != target else StreamValidator(source)
             headers_sent = False
 
             def send_headers() -> None:
@@ -217,12 +226,18 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                     raise ConversionError("query parameters cannot be translated between protocols")
                 if protocol == config.upstream_protocol:
                     outbound = payload
+                    namespace_map = None
                 else:
+                    namespace_map = None
+                    mid_system = config.upstream_protocol == Protocol.MESSAGES and payload.get("model") in config.messages_system_models
+                    if protocol == Protocol.RESPONSES and config.namespace_tools == "flatten":
+                        namespace_map = NamespaceMap()
+                        payload = namespace_map.prepare(payload)
                     if config.client_profile == "codex" and protocol == Protocol.RESPONSES:
-                        payload = prepare_codex_request(payload, config.upstream_protocol, default_max_output_tokens=config.default_max_output_tokens)
+                        payload = prepare_codex_request(payload, config.upstream_protocol, default_max_output_tokens=config.default_max_output_tokens, messages_mid_system=mid_system)
                     elif config.client_profile == "claude" and protocol == Protocol.MESSAGES:
                         payload = prepare_claude_request(payload)
-                    outbound = convert_request(payload, protocol, config.upstream_protocol)
+                    outbound = convert_request(payload, protocol, config.upstream_protocol, messages_mid_system=mid_system)
                 outbound = apply_upstream_reasoning(outbound, config.upstream_protocol, config.upstream_reasoning)
             except (json.JSONDecodeError, UnicodeError, ConversionError) as exc:
                 self._json(422, {"error": {"message": str(exc)}})
@@ -245,7 +260,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
             try:
                 with open_upstream(request, timeout=config.timeout) as response:
                     if streaming:
-                        self._stream(response, config.upstream_protocol, protocol)
+                        self._stream(response, config.upstream_protocol, protocol, namespace_map)
                         return
                     raw = response.read(config.max_body_bytes + 1)
                     if len(raw) > config.max_body_bytes:
@@ -255,6 +270,8 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                         raise ConversionError("upstream returned a non-object JSON response")
                     if protocol != config.upstream_protocol:
                         result = convert_response(result, config.upstream_protocol, protocol)
+                        if namespace_map:
+                            result = namespace_map.restore(result)
                     self._json(200, result, getattr(response, "headers", None))
             except HTTPError as exc:
                 try:

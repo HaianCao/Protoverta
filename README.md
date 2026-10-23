@@ -71,7 +71,26 @@ Native streams preserve feature payloads, including thinking/signatures, while v
 
 Usage normalizes total input tokens, including Messages cache reads and writes, and preserves reported cache/reasoning subtotals where the target can represent them. Generated Responses usage includes zero-valued cache/reasoning subtotals only when the source does not provide them; these are compatibility defaults, not measured values. Interim deferred usage is not accurate context accounting. Effort levels `low`, `medium` and `high` map between each API's effort option; models determine their effect and availability.
 
-For Codex's stateless text/function subset, opt in with `--client-profile codex`. This policy omits client telemetry, cache hints and the encrypted-reasoning include hint. It requires reasoning summaries to be disabled, maps initial developer instructions to Messages system text, and accepts an explicit Messages fallback limit via `--default-max-output-tokens`. Namespaced/hosted tools and hidden reasoning replay remain unsupported. The default `strict` profile does not perform these client-specific adjustments.
+For Codex's stateless text/function subset, opt in with `--client-profile codex`. This policy omits client telemetry, cache hints and the encrypted-reasoning include hint. It requires reasoning summaries to be disabled, maps initial developer instructions to Messages system text, and accepts an explicit Messages fallback limit via `--default-max-output-tokens`. Hosted tools and hidden reasoning replay remain unsupported. The default `strict` profile does not perform these client-specific adjustments.
+
+`--namespace-tools flatten` explicitly converts Responses function namespaces to
+deterministic, collision-checked flat aliases for Chat/Messages. Each request
+rebuilds its own mapping from definitions and historical calls; JSON responses
+and SSE call items restore the original `name` and `namespace`, preserving call
+IDs and arguments. Namespace descriptions are prepended to function descriptions.
+Nested namespaces, custom/strict/hosted tools and forced namespaced tool choices
+remain unsupported. The default is `reject`; native forwarding is unchanged.
+Use `GatewayConfig(..., namespace_tools="flatten")` from Python.
+
+For a Messages model whose provider explicitly supports mid-conversation system
+text, opt in with repeatable `--messages-system-model EXACT_MODEL_ID` or
+`GatewayConfig(..., messages_system_models=("EXACT_MODEL_ID",))`. No model is
+enabled by default. Instructions stay in place and must follow a complete user
+turn (including all tool results) and precede assistant or end the array. The
+Codex profile maps developer text to system text only under this explicit policy;
+this does not make every Codex model-switch transcript valid. The library-level
+equivalent is `convert_request(..., messages_mid_system=True)` after capability
+verification. See [the placement rules](https://platform.claude.com/docs/en/build-with-claude/mid-conversation-system-messages).
 
 For Claude Code translation, use `--client-profile claude --messages-usage-policy deferred`. Disable thinking, experimental betas, structured output and tool search in the client before sending requests. The profile omits cache hints and client metadata, accepts the SDK's `beta=true` query marker without forwarding it to another protocol, and represents tool-result errors as explicitly labelled text. Thinking/signature blocks, compaction and hosted tools remain unsupported. Native Messages does not apply this profile's rewriting. See [the streaming policy decision](docs/decisions/ADR-001-messages-streaming-rejection.md).
 

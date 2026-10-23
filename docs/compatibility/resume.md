@@ -28,8 +28,9 @@ and upstreams in this test are synthetic.
 | Chat → Responses, different provider and model | Pass | Pass |
 | Messages → Chat, different provider and model | Pass | Pass |
 | Messages → Responses, different provider and model | Pass | Pass |
-| Responses → Chat, different provider and model | Rejected: namespaced tools | Pass |
-| Responses → Messages, different provider and model | Rejected: namespaced tools | Pass |
+| Responses → Chat, different provider and model | Pass with namespace mapping | Pass |
+| Responses → Messages, different provider and model | Rejected: mid-conversation instructions | Pass |
+| Responses → Messages, different provider, same model | Pass with namespace mapping | Not separately tested |
 
 Additional Codex controls passed: changing both provider/model on Chat, resuming
 Messages without changes, and Chat → Messages while retaining the model.
@@ -41,8 +42,10 @@ and not proof that these features are impossible to adapt. Protoverta's portable
 Messages baseline only maps initial system/developer instructions; moving later
 developer messages to that field would change their position/meaning.
 Some current Claude models support mid-conversation `role: "system"` messages
-under model-specific placement rules, but Protoverta does not implement a
-capability-gated mapping for that extension. Support on arbitrary compatible
+under model-specific placement rules. Protoverta now offers an explicit exact-model
+allowlist for that extension, while still rejecting invalid placement. Codex's
+observed post-assistant `model_switch` placement does not meet those rules.
+Support on arbitrary compatible
 providers, including the selected OpenRouter Nemotron model, is not established.
 See [Anthropic's current capability documentation](https://platform.claude.com/docs/en/build-with-claude/mid-conversation-system-messages).
 
@@ -52,8 +55,12 @@ the conversation history when Codex changed models. Another trace confirmed
 definitions, with function children, despite the translated launcher's
 multi-agent setting being disabled. This proves the request shape; it does not
 establish whether Codex persisted or rebuilt that definition internally.
-Protoverta does not yet flatten namespaces with a reversible call-name mapping,
-and does not remove those tools to force replay.
+The translated Codex launcher now enables reversible, request-scoped namespace
+aliases for synchronous function tools. Follow-up fixture/real-CLI checks passed
+Responses → Chat with changed provider/model and Responses → Messages with a
+changed provider and unchanged model. Schemas and history are retained, not
+removed to force replay. JSON/SSE namespace tool round trips are also covered
+with synthetic upstreams; no subagent tool was executed by the CLI probes.
 The gateway returns an actionable error before forwarding the incompatible
 request. Codex may repeat the local failed request under its own retry policy.
 

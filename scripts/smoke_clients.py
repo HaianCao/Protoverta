@@ -106,9 +106,9 @@ def run_smoke(
     rounds = 0
     tool_result_count = 0
 
-    def inspect_conversion(body, source, target):
+    def inspect_conversion(body, source, target, **options):
         requests.append({"inbound": summarize_request(body)})
-        return convert_request(body, source, target)
+        return convert_request(body, source, target, **options)
 
     def open_upstream(request, *, timeout):
         nonlocal rounds, tool_result_count

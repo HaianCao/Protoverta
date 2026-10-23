@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 
 from .core import Protocol
@@ -80,7 +81,7 @@ class StreamTranscoder:
     Calling code must not emit a successful terminal event after an exception.
     """
 
-    def __init__(self, source: Protocol | str, target: Protocol | str, *, messages_usage_policy: str = "strict", max_pending_bytes: int = 8 * 1024 * 1024) -> None:
+    def __init__(self, source: Protocol | str, target: Protocol | str, *, messages_usage_policy: str = "strict", max_pending_bytes: int = 8 * 1024 * 1024, response_transform: Callable[[dict], dict] | None = None) -> None:
         self.source = Protocol(source)
         self.target = Protocol(target)
         if messages_usage_policy not in {"strict", "deferred"}:
@@ -93,7 +94,7 @@ class StreamTranscoder:
         self.order = _MessagesOrder(max_pending_bytes) if cross_messages else None
         self.parser = SSEParser()
         self.decoder = StreamDecoder(self.source)
-        self.encoder = StreamEncoder(self.target)
+        self.encoder = StreamEncoder(self.target, response_transform=response_transform)
         self._terminal = b""
         self._closed = False
 

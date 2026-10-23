@@ -75,12 +75,13 @@ def prepare_claude_request(body: dict) -> dict:
     return result
 
 
-def prepare_codex_request(body: dict, target: Protocol, *, default_max_output_tokens: int | None = None) -> dict:
+def prepare_codex_request(body: dict, target: Protocol, *, default_max_output_tokens: int | None = None, messages_mid_system: bool = False) -> dict:
     """Adapt Codex's stateless text/function subset under an opt-in policy.
 
     Cache hints and client telemetry have no cross-provider equivalent. Hidden
     reasoning state is not replayed. Summary generation must be disabled by the
-    launcher. Namespaced/hosted tools remain errors in the strict converter.
+    launcher. Namespace flattening is a separate gateway policy; hosted tools
+    remain errors in the strict converter.
     """
     result = copy.deepcopy(body)
     if target == Protocol.CHAT and isinstance(result.get("input"), list):
@@ -126,7 +127,7 @@ def prepare_codex_request(body: dict, target: Protocol, *, default_max_output_to
         result.pop("text")
     for tool in result.get("tools", []) if isinstance(result.get("tools"), list) else []:
         if isinstance(tool, dict) and (tool.get("type") == "namespace" or "tools" in tool):
-            raise ConversionError("Codex gateway cannot translate namespaced tools in this session; start a fresh gateway session or use a native Responses provider")
+            raise ConversionError("Codex gateway cannot translate namespaced tools without namespace_tools='flatten'; enable mapping for synchronous function tools or use native Responses")
     if target == Protocol.MESSAGES:
         if "max_output_tokens" not in result and default_max_output_tokens is not None:
             result["max_output_tokens"] = default_max_output_tokens
@@ -142,7 +143,7 @@ def prepare_codex_request(body: dict, target: Protocol, *, default_max_output_to
                 if not isinstance(item, dict):
                     continue  # The strict decoder reports invalid items.
                 if item.get("role") in {"system", "developer"}:
-                    if conversation_started:
+                    if conversation_started and not messages_mid_system:
                         raise ConversionError("Codex gateway cannot relocate mid-conversation instructions into Messages system text; start a fresh session or use a Chat/Responses provider")
                     item["role"] = "system"
                 else:

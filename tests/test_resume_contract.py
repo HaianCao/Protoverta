@@ -61,6 +61,6 @@ def test_codex_resume_namespaced_tools_have_actionable_error_and_are_not_removed
     body = history()
     body["tools"] = [{"type": "namespace", "name": "functions", "tools": []}]
     original = copy.deepcopy(body)
-    with pytest.raises(ConversionError, match="fresh gateway session"):
+    with pytest.raises(ConversionError, match="namespace_tools='flatten'"):
         prepare_codex_request(body, Protocol.CHAT)
     assert body == original

@@ -383,15 +383,17 @@ def _decode_responses(body: dict[str, Any]) -> Request:
 _DECODERS = {Protocol.CHAT: _decode_chat, Protocol.MESSAGES: _decode_messages, Protocol.RESPONSES: _decode_responses}
 
 
-def _check_turns(request: Request, target: Protocol) -> None:
+def _check_turns(request: Request, target: Protocol, *, messages_mid_system: bool = False) -> None:
     if target == Protocol.MESSAGES:
         seen_conversation = False
         for turn in request.turns:
             if turn.role in {"system", "developer"}:
-                if seen_conversation or turn.role == "developer":
+                if (seen_conversation and not messages_mid_system) or turn.role == "developer":
                     raise ConversionError("Messages cannot preserve developer or mid-conversation instruction roles")
             else:
                 seen_conversation = True
+        if messages_mid_system:
+            _check_mid_system_placement(request.turns)
     calls: set[str] = set()
     for turn in request.turns:
         if target in {Protocol.CHAT, Protocol.RESPONSES}:
@@ -408,6 +410,31 @@ def _check_turns(request: Request, target: Protocol) -> None:
                 calls.add(part.call_id)
             elif part.kind == "tool_result" and part.call_id not in calls:
                 raise ConversionError(f"tool result has no matching call: {part.call_id}")
+
+
+def _check_mid_system_placement(turns: list[Turn]) -> None:
+    """Validate Anthropic's text-only mid-system placement, never relocate it."""
+    pending: set[str] = set()
+    conversation_started = False
+    following: list[str | None] = [None] * len(turns)
+    next_role = None
+    for index in range(len(turns) - 1, -1, -1):
+        following[index] = next_role
+        if turns[index].role != "system":
+            next_role = turns[index].role
+    previous_role = None
+    for index, turn in enumerate(turns):
+        if turn.role == "system" and conversation_started:
+            if previous_role != "user" or following[index] not in (None, "assistant") or pending:
+                raise ConversionError("mid-conversation Messages system text must follow a complete user/tool-result turn and precede assistant or end the array; history was not relocated")
+        elif turn.role != "system":
+            conversation_started = True
+            previous_role = turn.role
+        for part in turn.parts:
+            if part.kind == "tool_call":
+                pending.add(part.call_id)
+            elif part.kind == "tool_result":
+                pending.discard(part.call_id)
 
 
 def _encode_chat(req: Request) -> dict[str, Any]:
@@ -448,7 +475,7 @@ def _encode_messages(req: Request) -> dict[str, Any]:
     system: list[dict[str, str]] = []
     messages: list[dict[str, Any]] = []
     for turn in req.turns:
-        if turn.role == "system":
+        if turn.role == "system" and not messages:
             system.extend({"type": "text", "text": p.text} for p in turn.parts)
             continue
         blocks: list[dict[str, Any]] = []
@@ -535,13 +562,15 @@ def _encode_responses(req: Request) -> dict[str, Any]:
 _ENCODERS = {Protocol.CHAT: _encode_chat, Protocol.MESSAGES: _encode_messages, Protocol.RESPONSES: _encode_responses}
 
 
-def convert_request(body: dict[str, Any], source: Protocol | str, target: Protocol | str) -> dict[str, Any]:
+def convert_request(body: dict[str, Any], source: Protocol | str, target: Protocol | str, *, messages_mid_system: bool = False) -> dict[str, Any]:
     """Convert a non-streaming text/function request; reject unsupported semantics."""
     source, target = Protocol(source), Protocol(target)
+    if not isinstance(messages_mid_system, bool):
+        raise TypeError("messages_mid_system must be a boolean")
     if source == target:
         return body.copy()
     request = _DECODERS[source](_object(body, "request"))
-    _check_turns(request, target)
+    _check_turns(request, target, messages_mid_system=messages_mid_system)
     return _ENCODERS[target](request)
 
 

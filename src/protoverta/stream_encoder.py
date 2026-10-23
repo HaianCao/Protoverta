@@ -9,9 +9,10 @@ from __future__ import annotations
 import json
 import time
 import uuid
+from collections.abc import Callable
 from typing import Any
 
-from .core import Protocol, _encode_usage
+from .core import ConversionError, Protocol, _encode_usage
 from .sse import SSEEvent
 from .streaming import Delta, StreamError
 
@@ -23,8 +24,11 @@ def _event(kind: str, body: dict[str, Any]) -> SSEEvent:
 class StreamEncoder:
     """Convert ordered canonical deltas to one target protocol's SSE events."""
 
-    def __init__(self, protocol: Protocol | str) -> None:
+    def __init__(self, protocol: Protocol | str, *, response_transform: Callable[[dict], dict] | None = None) -> None:
         self.protocol = Protocol(protocol)
+        if response_transform is not None and self.protocol != Protocol.RESPONSES:
+            raise ValueError("response_transform is only supported for Responses output")
+        self.response_transform = response_transform
         self.started = False
         self.ended = False
         self.model = ""
@@ -97,7 +101,13 @@ class StreamEncoder:
     def _response_event(self, kind: str, **body: Any) -> SSEEvent:
         sequence = self.sequence
         self.sequence += 1
-        return _event(kind, {"type": kind, "sequence_number": sequence, **body})
+        payload = {"type": kind, "sequence_number": sequence, **body}
+        if self.response_transform is not None:
+            try:
+                payload = self.response_transform(payload)
+            except ConversionError as exc:
+                raise StreamError(str(exc)) from exc
+        return _event(kind, payload)
 
     def _response_snapshot(self, status: str, *, usage: dict[str, int] | None = None, incomplete_details: dict[str, str] | None = None) -> dict[str, Any]:
         return {
