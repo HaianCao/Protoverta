@@ -109,3 +109,12 @@ def test_historical_flat_function_cannot_collide_with_generated_alias():
     request["input"] = [{"type": "function_call", "name": NamespaceMap().alias("crm", "lookup"), "call_id": "old", "arguments": "{}"}]
     with pytest.raises(ConversionError, match="collides"):
         NamespaceMap().prepare(request)
+
+
+def test_messages_direct_caller_is_portable_but_server_caller_is_not():
+    response = {"model": "m", "role": "assistant", "content": [{"type": "tool_use", "id": "c1", "name": "add", "input": {"a": 2, "b": 3}, "caller": {"type": "direct"}}], "stop_reason": "tool_use", "usage": {"input_tokens": 4, "output_tokens": 5}}
+    converted = convert_response(response, "messages", "responses")
+    assert converted["output"][0]["name"] == "add"
+    response["content"][0]["caller"] = {"type": "server_tool", "tool_id": "hosted"}
+    with pytest.raises(ConversionError, match="non-direct"):
+        convert_response(response, "messages", "responses")

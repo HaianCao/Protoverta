@@ -255,7 +255,9 @@ def _message_parts(content: Any, label: str) -> list[Part]:
                 raise ConversionError("Messages citations cannot be preserved across protocols")
             parts.append(Part("text", text=_string(block.get("text"), "text")))
         elif kind == "tool_use":
-            _only(block, {"type", "id", "name", "input"}, label)
+            _only(block, {"type", "id", "name", "input", "caller"}, label)
+            if "caller" in block and block["caller"] != {"type": "direct"}:
+                raise ConversionError("non-direct Messages tool callers cannot be preserved across protocols")
             inputs = _object(block.get("input"), "tool_use.input")
             parts.append(Part("tool_call", call_id=_string(block.get("id"), "tool_use.id"), name=_string(block.get("name"), "tool_use.name"), arguments=json.dumps(inputs, ensure_ascii=False)))
         elif kind == "tool_result":

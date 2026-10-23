@@ -81,7 +81,7 @@ same session ID, and the final response. Tools were `get_goal` (Codex) and a
 temporary fixture file `Read` (Claude); no shell permissions were weakened.
 All four use scripted upstreams, not real-provider resume.
 
-## Real-provider text resume
+## Real-provider resume
 
 Two follow-up text resume probes passed on OpenRouter with
 `nvidia/nemotron-3-ultra-550b-a55b:free`, using production
@@ -98,9 +98,17 @@ real vendor credentials or changing to a different real model. The prompts were
 synthetic, tools were not used, and existing user configuration/session files
 were untouched. No production transport rewriting was injected.
 
-Real-provider resume **after** tool calls is still not covered. The real-provider
-fresh-session tool checks and the scripted tool-history resume checks are
-separate evidence; neither proves that remaining combination.
+Follow-up real-provider checks also passed after a completed read-only tool
+call on the same model/vendor and a changed provider configuration ID:
+
+- Codex: `get_goal`, then Chat → Messages resume.
+- Claude: `Read` on a synthetic temporary file, then Chat → Responses resume.
+
+The probes required a real tool completion, unchanged session ID and exact
+nonce recall in the resumed answer. They did not verify changing the real model
+or vendor, hidden reasoning, or every protocol pair. Reproduce with
+`scripts/probe_clients.py --tool-loop --resume-target TARGET --allow-live` and
+the corresponding client, source protocol, adapter source and key environment.
 
 Encrypted reasoning,
 signed thinking, server-owned `previous_response_id`, multimodal history and

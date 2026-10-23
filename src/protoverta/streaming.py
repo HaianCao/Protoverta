@@ -291,6 +291,8 @@ class StreamDecoder:
                 initial = _str(block.get("text", ""), "initial text")
                 return [Delta("text", index=index, text=initial)] if initial else []
             if block_type == "tool_use":
+                if "caller" in block and block["caller"] != {"type": "direct"}:
+                    raise StreamError("non-direct Messages tool callers cannot be preserved across protocols")
                 call_id = _str(block.get("id"), "tool_use.id")
                 name = _str(block.get("name"), "tool_use.name")
                 initial = _obj(block.get("input", {}), "tool_use.input")

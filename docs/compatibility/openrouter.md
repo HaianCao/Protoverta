@@ -67,7 +67,19 @@ Follow-up text resume also passed for Codex Chat → Messages and Claude
 Chat → Responses on the same model, with explicit upstream reasoning disabled.
 The tests retained the session ID and recalled a synthetic token from the prior
 turn. See [resume checks and remaining boundaries](resume.md); these results do
-not establish real-provider resume after tool calls or changing real models.
+not establish changing real models.
+
+Subsequent real-provider checks passed after a completed `get_goal` (Codex)
+or temporary-file `Read` (Claude), followed by resume on the same model with
+the upstream protocol changed. See [resume compatibility](resume.md).
+
+Request-scoped Responses namespace aliases were also checked using a synthetic
+`calculator.add(2, 3)` tool. Both Chat and Messages upstreams returned a call
+whose name and namespace were restored, and accepted the matching result in a
+second request. The Messages response included `caller: {type: "direct"}` on its
+`tool_use` block; Protoverta accepts this direct client-tool marker but rejects
+non-direct/server callers during conversion. These checks do not execute hosted
+tools or establish compatibility with arbitrary namespace extensions.
 
 References: [reasoning controls](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens),
 [model](https://openrouter.ai/nvidia/nemotron-3-ultra-550b-a55b:free).

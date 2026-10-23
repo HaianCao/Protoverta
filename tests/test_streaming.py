@@ -169,6 +169,18 @@ def test_messages_cannot_reopen_block_index():
         decoder.feed(messages("content_block_start", index=0, content_block={"type": "text", "text": ""}))
 
 
+def test_messages_stream_accepts_direct_tool_caller_only():
+    decoder = StreamDecoder("messages")
+    decoder.feed(messages("message_start", message={"model": "m", "usage": {"input_tokens": 1}}))
+    event = messages("content_block_start", index=0, content_block={"type": "tool_use", "id": "c1", "name": "add", "input": {}, "caller": {"type": "direct"}})
+    assert decoder.feed(event)[0].kind == "tool_start"
+    other = StreamDecoder("messages")
+    other.feed(messages("message_start", message={"model": "m", "usage": {"input_tokens": 1}}))
+    event = messages("content_block_start", index=0, content_block={"type": "tool_use", "id": "c1", "name": "add", "input": {}, "caller": {"type": "server_tool", "tool_id": "hosted"}})
+    with pytest.raises(StreamError, match="non-direct"):
+        other.feed(event)
+
+
 def test_responses_reject_out_of_order_sequence():
     decoder = StreamDecoder("responses")
     decoder.feed(responses("response.created", 1, response={"model": "example-model"}))
