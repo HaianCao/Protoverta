@@ -212,7 +212,7 @@ def _arguments(value: Any, label: str) -> str:
     raw = _string(value, label)
     try:
         parsed = json.loads(raw)
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, RecursionError) as exc:
         raise ConversionError(f"{label} is not valid JSON") from exc
     if not isinstance(parsed, dict):
         raise ConversionError(f"{label} must contain a JSON object")
@@ -417,7 +417,7 @@ def _response_content(content: Any, label: str) -> list[Part]:
         if block.get("type") == "input_image":
             parts.append(Part("image", image=decode_image(block, "responses")))
             continue
-        if block.get("type") not in {"input_text", "output_text"}:
+        if block.get("type") not in ("input_text", "output_text"):
             raise ConversionError(f"unsupported Responses content type: {block.get('type')}")
         _only(block, {"type", "text", "annotations", "logprobs"}, label)
         if block.get("annotations") or block.get("logprobs"):
@@ -447,7 +447,7 @@ def _decode_responses(body: dict[str, Any], *, public_reasoning: bool = False) -
                 role = _string(item.get("role"), "input.role")
                 if role not in {"system", "developer", "user", "assistant"}:
                     raise ConversionError(f"unsupported Responses role: {role}")
-                if item.get("status") not in {None, "completed"}:
+                if item.get("status") not in (None, "completed"):
                     raise ConversionError("incomplete Responses history message")
                 turns.append(Turn(role, _response_content(item.get("content"), "input.content")))
             elif kind == "reasoning" and public_reasoning:
@@ -813,20 +813,20 @@ def _decode_result(body: dict[str, Any], source: Protocol, *, public_reasoning: 
             parts.append(_chat_call(call, index))
         usage = _object(body.get("usage") or {}, "usage")
         reason = choice.get("finish_reason")
-        if reason not in {"stop", "tool_calls", "length"}:
+        if reason not in ("stop", "tool_calls", "length"):
             raise ConversionError(f"unsupported Chat finish_reason: {reason}")
         if reason != "length" and (reason == "tool_calls") != any(p.kind == "tool_call" for p in parts):
             raise ConversionError("Chat tool_calls finish reason does not match output")
         return Result(_string(body.get("model"), "model"), parts, reason, **_decode_usage(usage, source))
     if source == Protocol.MESSAGES:
-        if body.get("role") not in {None, "assistant"}:
+        if body.get("role") not in (None, "assistant"):
             raise ConversionError("Messages response must have assistant role")
         parts = _message_parts(body.get("content"), "content")
         if any(p.kind == "tool_result" for p in parts):
             raise ConversionError("tool result is not a valid Messages response")
         usage = _object(body.get("usage") or {}, "usage")
         reason = body.get("stop_reason")
-        if reason not in {"end_turn", "tool_use", "max_tokens"}:
+        if reason not in ("end_turn", "tool_use", "max_tokens"):
             raise ConversionError(f"unsupported Messages stop_reason: {reason}")
         if reason != "max_tokens" and (reason == "tool_use") != any(p.kind == "tool_call" for p in parts):
             raise ConversionError("Messages tool_use stop reason does not match output")
@@ -836,8 +836,8 @@ def _decode_result(body: dict[str, Any], source: Protocol, *, public_reasoning: 
         item = _object(item, "output item")
         _validate_response_item(item, "output item")
         if item.get("type") == "message":
-            allowed_status = {None, "completed", "incomplete"} if body.get("status") == "incomplete" else {None, "completed"}
-            if item.get("role") not in {None, "assistant"} or item.get("status") not in allowed_status:
+            allowed_status = (None, "completed", "incomplete") if body.get("status") == "incomplete" else (None, "completed")
+            if item.get("role") not in (None, "assistant") or item.get("status") not in allowed_status:
                 raise ConversionError("Responses output message must be a completed assistant message")
             parts.extend(_response_content(item.get("content"), "message.content"))
         elif item.get("type") == "reasoning" and public_reasoning:
@@ -845,7 +845,7 @@ def _decode_result(body: dict[str, Any], source: Protocol, *, public_reasoning: 
                 raise ConversionError("incomplete public reasoning in a completed response")
             parts.append(Part("reasoning_text", text=response_reasoning(item)))
         elif item.get("type") == "function_call":
-            if item.get("status") not in {None, "completed"}:
+            if item.get("status") not in (None, "completed"):
                 raise ConversionError("Responses function call is incomplete")
             parts.append(Part("tool_call", call_id=_string(item.get("call_id"), "call_id"), name=_string(item.get("name"), "name"), arguments=_arguments(item.get("arguments"), "arguments")))
         elif item.get("type") == "custom_tool_call":
@@ -856,7 +856,7 @@ def _decode_result(body: dict[str, Any], source: Protocol, *, public_reasoning: 
             raise ConversionError(f"unsupported Responses output item: {item.get('type')}")
     usage = _object(body.get("usage") or {}, "usage")
     status = body.get("status")
-    if status not in {"completed", "incomplete"}:
+    if status not in ("completed", "incomplete"):
         raise ConversionError(f"unsupported Responses status: {status}")
     if status == "incomplete":
         details = _object(body.get("incomplete_details"), "incomplete_details")

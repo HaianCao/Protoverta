@@ -105,6 +105,32 @@ def test_loaded_custom_grammar_and_native_passthrough_remain_intact():
     assert convert_request(request, "responses", "responses") == request
 
 
+def test_namespace_deferred_children_require_explicit_search_output():
+    from protoverta.namespaces import NamespaceMap
+
+    request = body()
+    namespace = {"type": "namespace", "name": "ns", "tools": [
+        {"type": "function", "name": "immediate", "parameters": {"type": "object"}},
+        {"type": "function", "name": "not_loaded", "parameters": {"type": "object"}, "defer_loading": True}]}
+    request["tools"].append(namespace)
+    before = copy.deepcopy(request)
+    prepared = ClientToolSearchMap().prepare(request)
+    assert [child["name"] for child in prepared["tools"][0]["tools"]] == ["immediate"]
+    wire = convert_request(NamespaceMap().prepare(prepared), "responses", "chat")
+    assert len(wire["tools"]) == 2  # one immediate child plus client search
+    request["input"] = history()
+    request["input"][1]["tools"] = [{"type": "namespace", "name": "ns", "tools": [namespace["tools"][1]]}]
+    prepared = ClientToolSearchMap().prepare(request)
+    assert [child["name"] for child in prepared["tools"][0]["tools"]] == ["immediate", "not_loaded"]
+    assert before["tools"] == request["tools"]
+
+
+def test_namespace_with_only_unloaded_children_is_omitted():
+    request = body()
+    request["tools"].append({"type": "namespace", "name": "ns", "tools": [loaded()]})
+    assert len(ClientToolSearchMap().prepare(request)["tools"]) == 1
+
+
 @pytest.mark.parametrize("policy", ["reject", "function"])
 def test_gateway_opt_in_json_search_round_trip(policy):
     captured = []

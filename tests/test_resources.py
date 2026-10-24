@@ -15,7 +15,11 @@ from protoverta.server import GatewayConfig, gateway_session
 from protoverta.sse import SSEEvent, encode_sse
 from protoverta.stream_pipe import StreamTranscoder, StreamValidator
 from protoverta.streaming import StreamError
-from protoverta.transport import DeadlineHTTPSHandler, _TimedResponse
+from protoverta.transport import (
+    DeadlineHTTPHandler,
+    DeadlineHTTPSHandler,
+    _TimedResponse,
+)
 
 
 def test_deadline_https_transport_keeps_certificate_and_hostname_verification():
@@ -53,6 +57,74 @@ def test_progress_does_not_reset_total_deadline():
     with pytest.raises(DeadlineExceeded) as caught:
         budget.remaining()
     assert caught.value.kind == "request_deadline"
+
+
+def test_os_timer_rounding_does_not_make_deadlines_retryable_io_timeouts():
+    now = [0]
+    budget = RequestBudget(2, 0.2, 3, clock=lambda: now[0])
+    limit = budget.remaining()
+    now[0] = 0.1999
+    with pytest.raises(DeadlineExceeded) as caught:
+        budget.on_timeout(limit)
+    assert caught.value.kind == "request_deadline"
+    budget = RequestBudget(0.1, 5, 5, clock=lambda: now[0])
+    # A genuine shorter I/O timeout retains its transport classification.
+    assert budget.on_timeout(budget.remaining()) is None
+
+
+@pytest.mark.parametrize("framing", ["chunk_header", "chunk_terminator", "trailer", "body"])
+@pytest.mark.parametrize("deadline", ["total", "progress"])
+def test_deadlines_bound_chunked_framing_and_body(framing, deadline):
+    from urllib.request import build_opener
+
+    started_drip = threading.Event()
+    release = threading.Event()
+
+    class Upstream(BaseHTTPRequestHandler):
+        def log_message(self, *_args):
+            pass
+
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Transfer-Encoding", "chunked")
+            self.end_headers()
+            prefixes = {"chunk_header": b"", "chunk_terminator": b"1\r\nX", "trailer": b"0\r\n", "body": b"100\r\n"}
+            drip = b"1;extension=" + b"a" * 60 if framing == "chunk_header" else b"X-Trailer: " + b"a" * 60 if framing == "trailer" else b"\r\n" if framing == "chunk_terminator" else b"x" * 60
+            try:
+                self.wfile.write(prefixes[framing])
+                self.wfile.flush()
+                started_drip.set()
+                if framing == "chunk_terminator":
+                    release.wait(2)
+                    return
+                for char in drip:
+                    self.wfile.write(bytes([char]))
+                    self.wfile.flush()
+                    if release.wait(0.02):
+                        break
+            except OSError:
+                pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Upstream)
+    server.daemon_threads = True
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        budget = RequestBudget(2, 0.2 if deadline == "total" else 3, 0.2 if deadline == "progress" else 3)
+        request = Request(f"http://127.0.0.1:{server.server_port}")
+        request.protoverta_budget = budget
+        start = time.monotonic()
+        with build_opener(DeadlineHTTPHandler()).open(request, timeout=budget.remaining()) as response, pytest.raises(DeadlineExceeded) as caught:
+            assert started_drip.wait(1)
+            while budget.read(response, 4096, streaming=framing != "body"):
+                pass
+        assert caught.value.kind == ("request_deadline" if deadline == "total" else "progress_timeout")
+        assert time.monotonic() - start < 0.75
+    finally:
+        release.set()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
 
 
 def test_heartbeats_and_repeated_function_metadata_are_not_progress():

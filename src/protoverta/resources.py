@@ -39,6 +39,17 @@ class RequestBudget:
         self.remaining()
         self.last_progress = self.clock()
 
+    def on_timeout(self, limit):
+        """Classify an OS-rounded timeout using the bound that armed the read."""
+        self.remaining()
+        if limit < self.io_timeout:
+            # Windows socket timers can fire slightly before monotonic reaches
+            # the exact boundary. Do not turn a deadline into a retryable I/O
+            # timeout (or retry a buffered reader already marked timed out).
+            total_end = self.started + self.total_timeout
+            progress_end = self.last_progress + self.progress_timeout
+            raise DeadlineExceeded("request_deadline" if total_end <= progress_end else "progress_timeout")
+
     def read(self, response, size, *, streaming=False):
         timeout = self.remaining()
         setter = getattr(response, "set_read_timeout", None)
@@ -48,7 +59,7 @@ class RequestBudget:
         try:
             result = method(size)
         except TimeoutError:
-            self.remaining()
+            self.on_timeout(timeout)
             raise
         self.remaining()
         return result
@@ -76,7 +87,7 @@ class StreamLimits:
             return
         try:
             body = json.loads(event.data)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, RecursionError):
             return  # The protocol validator owns malformed JSON errors.
         if not isinstance(body, dict):
             return

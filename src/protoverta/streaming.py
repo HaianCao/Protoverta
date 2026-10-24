@@ -85,7 +85,7 @@ def _tokens(value: Any, label: str) -> int | None:
 def _valid_arguments(raw: str, label: str) -> None:
     try:
         parsed = json.loads(raw)
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, RecursionError) as exc:
         raise StreamError(f"{label} is not valid JSON") from exc
     if not isinstance(parsed, dict):
         raise StreamError(f"{label} must be a JSON object")
@@ -94,7 +94,7 @@ def _valid_arguments(raw: str, label: str) -> None:
 def _json_event(event: SSEEvent, label: str) -> dict[str, Any]:
     try:
         body = json.loads(event.data)
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, RecursionError) as exc:
         raise StreamError(f"{label} contains invalid JSON") from exc
     return _obj(body, label)
 
@@ -259,7 +259,7 @@ class StreamDecoder:
                 raise UnsupportedReasoningError()
             if field not in {"role", "content", "tool_calls"} and (field not in {"refusal", "annotations", "reasoning", "reasoning_content", "reasoning_details"} or value not in (None, "", [])):
                 raise StreamError(f"unsupported Chat delta field: {field}")
-        if delta.get("role") not in {None, "assistant"}:
+        if delta.get("role") not in (None, "assistant"):
             raise StreamError("Chat delta has a non-assistant role")
         if delta.get("refusal") or delta.get("audio") or delta.get("function_call"):
             raise StreamError("unsupported Chat delta field")
@@ -308,7 +308,7 @@ class StreamDecoder:
         if reason is not None:
             if self.reason is not None:
                 raise StreamError("duplicate Chat finish_reason")
-            if reason not in {"stop", "tool_calls", "length"}:
+            if reason not in ("stop", "tool_calls", "length"):
                 raise StreamError(f"unsupported Chat finish_reason: {reason}")
             self.reason = reason
         return deltas
@@ -392,7 +392,7 @@ class StreamDecoder:
             if self.reason is not None or self.blocks:
                 raise StreamError("Messages message_delta out of order")
             delta = _obj(body.get("delta"), "message_delta.delta")
-            reason = delta.get("stop_reason")
+            reason = _str(delta.get("stop_reason"), "Messages stop_reason")
             self.reason = {"end_turn": "stop", "tool_use": "tool_calls", "max_tokens": "length"}.get(reason)
             if self.reason is None:
                 raise StreamError(f"unsupported Messages stop_reason: {reason}")
@@ -542,7 +542,7 @@ class StreamDecoder:
                 raise StreamError("Responses output_item.done without added")
             item = _obj(body.get("item"), "completed output item")
             _response_item(item)
-            if item.get("id") != item_id or item.get("status") not in {"completed", "incomplete"}:
+            if item.get("id") != item_id or item.get("status") not in ("completed", "incomplete"):
                 raise StreamError("Responses output item identity/status changed")
             self.incomplete_items |= item.get("status") == "incomplete"
             if item_type == "reasoning":

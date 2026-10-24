@@ -18,17 +18,14 @@ class _TimedResponse(HTTPResponse):
     def begin(self):
         if self._budget is None or self.headers is not None:
             return super().begin()
-        original = self.fp
-        self.fp = _HeaderReader(original, self._deadline_socket, self._budget)
-        try:
-            return super().begin()
-        finally:
-            if self.fp is not None:
-                self.fp = original
+        # Keep the wrapper for the body too: http.client reads chunk-size lines,
+        # chunk terminators and trailers internally, outside RequestBudget.read.
+        self.fp = _HeaderReader(self.fp, self._deadline_socket, self._budget)
+        return super().begin()
 
 
 class _HeaderReader:
-    """Check budgets between header bytes; a slow drip cannot reset deadlines."""
+    """Deadline-aware buffered reader for headers AND chunked framing/body."""
 
     def __init__(self, stream, sock, budget):
         self.stream, self.sock, self.budget = stream, sock, budget
@@ -36,16 +33,38 @@ class _HeaderReader:
     def __getattr__(self, name):
         return getattr(self.stream, name)
 
+    def read1(self, size=-1):
+        timeout = self.budget.remaining()
+        self.sock.settimeout(timeout)
+        try:
+            result = self.stream.read1(size)
+        except TimeoutError:
+            self.budget.on_timeout(timeout)
+            raise
+        self.budget.remaining()
+        return result
+
+    def read(self, size=-1):
+        chunks = []
+        remaining = size
+        while remaining != 0:
+            chunk = self.read1(min(remaining, 65536) if remaining > 0 else 65536)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            if remaining > 0:
+                remaining -= len(chunk)
+        return b"".join(chunks)
+
+    def readinto(self, buffer):
+        data = self.read(len(buffer))
+        buffer[:len(data)] = data
+        return len(data)
+
     def readline(self, limit=-1):
         result = bytearray()
         while limit < 0 or len(result) < limit:
-            self.sock.settimeout(self.budget.remaining())
-            try:
-                char = self.stream.read(1)
-            except TimeoutError:
-                self.budget.remaining()
-                raise
-            self.budget.remaining()
+            char = self.read1(1)
             result.extend(char)
             if not char or char == b"\n":
                 break

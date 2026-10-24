@@ -187,7 +187,7 @@ class _LifecycleValidator:
             return
         try:
             body = json.loads(event.data)
-        except (ValueError, TypeError) as exc:
+        except (ValueError, TypeError, RecursionError) as exc:
             raise StreamError("native stream event is not valid JSON") from exc
         if not isinstance(body, dict):
             raise StreamError("native stream event must be an object")

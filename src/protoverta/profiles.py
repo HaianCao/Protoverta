@@ -43,7 +43,7 @@ def prepare_claude_request(body: dict) -> dict:
         if not isinstance(value, dict) or "cache_control" not in value:
             return
         hint = value.pop("cache_control")
-        if not isinstance(hint, dict) or hint.get("type") != "ephemeral" or set(hint) - {"type", "ttl"} or hint.get("ttl", "5m") not in {"5m", "1h"}:
+        if not isinstance(hint, dict) or hint.get("type") != "ephemeral" or set(hint) - {"type", "ttl"} or hint.get("ttl", "5m") not in ("5m", "1h"):
             raise ConversionError("unsupported Claude cache hint")
 
     def content(blocks):
@@ -143,7 +143,7 @@ def prepare_codex_request(body: dict, target: Protocol, *, default_max_output_to
             for item in inputs:
                 if not isinstance(item, dict):
                     continue  # The strict decoder reports invalid items.
-                if item.get("role") in {"system", "developer"}:
+                if item.get("role") in ("system", "developer"):
                     if conversation_started and not messages_mid_system:
                         raise ConversionError("Codex gateway cannot relocate mid-conversation instructions into Messages system text; start a fresh session or use a Chat/Responses provider")
                     item["role"] = "system"

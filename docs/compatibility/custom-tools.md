@@ -55,6 +55,10 @@ Search arguments and results retain JSON objects, IDs and tool definitions.
 Unloaded deferred definitions are not sent as callable tools. Loaded function,
 custom or namespace definitions pass through the normal strict converter and
 optional namespace policy; conflicting definitions are rejected.
+Deferred namespace children stay unavailable until a matching completed search
+output explicitly loads them. Immediate children and loaded subsets are merged
+without dropping schema/description conflicts; an entirely unloaded namespace
+is omitted from the callable upstream tool list.
 
 Returned calls are restored to `tool_search_call` with object arguments and
 client execution. Hosted/server search, missing execution, incomplete/unpaired

@@ -43,7 +43,9 @@ Separate upstream budgets are now available: `--total-timeout` (600 seconds)
 and `--progress-timeout` (120 seconds). The former never resets; the latter
 resets for content/tool-argument progress, not pings, usage or repeated function
 metadata. Deadlines cover header/body reads in the default HTTP(S) transport,
-including slow-drip headers/JSON bodies. Connection establishment uses the
+including slow-drip headers/JSON bodies, HTTP chunk-size lines, chunk terminators
+and trailers. OS-rounded deadline timeouts retain non-retryable deadline codes;
+a shorter socket I/O timeout keeps its transport classification. Connection establishment uses the
 smaller remaining socket budget; OS DNS resolution is not forcibly cancellable.
 Custom injected transports must implement bounded I/O themselves; checks around
 their reads cannot interrupt arbitrary blocking Python callbacks.
@@ -57,5 +59,10 @@ The budget limits retained data asymptotically, not an exact process-RSS ceiling
 Oversized streams fail with `stream_limit`; explicit elapsed budgets use
 `request_deadline` or `progress_timeout`. No success terminal is fabricated.
 Local policy-limit failures are non-retryable before headers are sent.
+
+Malformed enum types produce structured validation errors (422 for client
+requests, 502 for upstream output). JSON recursion failures and truncated HTTP
+bodies also fail explicitly; partial HTTP payload bytes are not copied into
+generated error messages.
 
 Reference: [OpenAI Responses error events](https://developers.openai.com/api/reference/resources/responses/streaming-events).

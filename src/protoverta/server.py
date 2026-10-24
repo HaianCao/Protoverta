@@ -10,6 +10,7 @@ import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from http.client import HTTPException
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
@@ -250,7 +251,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                     self.wfile.write(tail)
                     self.wfile.flush()
                 send_headers()
-            except (StreamError, UnicodeError, OSError) as exc:
+            except (StreamError, UnicodeError, OSError, HTTPException) as exc:
                 unsupported = isinstance(exc, UnsupportedReasoningError)
                 message = f"upstream stream error: {type(exc).__name__}"
                 if unsupported:
@@ -343,6 +344,9 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                 outbound = apply_upstream_reasoning(outbound, config.upstream_protocol, config.upstream_reasoning)
                 if config.capabilities is not None:
                     config.capabilities.preflight(config.upstream_base_url, config.upstream_protocol, outbound, require_verified=config.require_verified_capabilities)
+            except RecursionError:
+                self._error(422, "request nesting exceeds the supported depth", protocol, headers={"x-should-retry": "false"})
+                return
             except (json.JSONDecodeError, UnicodeError, ConversionError) as exc:
                 self._error(422, str(exc), protocol, headers={"x-should-retry": "false"})
                 return
@@ -425,15 +429,15 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                         detail = error["error"]
                         message = detail.get("message")
                         self._error(exc.code, message if isinstance(message, str) else f"upstream HTTP {exc.code}", protocol, code=detail.get("code") if isinstance(detail.get("code"), str) else None, headers=exc.headers)
-                except (ValueError, TypeError, UnicodeError, OSError):
+                except (ValueError, TypeError, UnicodeError, OSError, HTTPException, RecursionError):
                     self._error(exc.code, f"upstream HTTP {exc.code}", protocol, headers=exc.headers)
                 finally:
                     exc.close()
-            except (URLError, TimeoutError, OSError) as exc:
+            except (URLError, TimeoutError, OSError, HTTPException) as exc:
                 timeout = isinstance(exc, TimeoutError) or isinstance(exc, URLError) and isinstance(exc.reason, TimeoutError)
                 cause = exc.reason if isinstance(exc, URLError) else exc
                 self._error(504 if timeout else 502, f"upstream transport error: {type(exc).__name__}", protocol, code=cause.kind if isinstance(cause, DeadlineExceeded) else "upstream_timeout" if timeout else "upstream_transport", headers={"x-should-retry": "false"} if isinstance(cause, DeadlineExceeded) else None)
-            except (json.JSONDecodeError, UnicodeError, ConversionError, StreamError) as exc:
+            except (json.JSONDecodeError, UnicodeError, ConversionError, StreamError, RecursionError) as exc:
                 self._error(502, str(exc), protocol)
 
     return Handler

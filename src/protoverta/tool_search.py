@@ -27,18 +27,38 @@ def _call_id(value):
     return result
 
 
-def _definition(tool):
+def _definition(tool, *, loaded=False):
     if not isinstance(tool, dict) or tool.get("type") not in ("function", "custom", "namespace"):
         raise ConversionError("loaded search tools must be function, custom or namespace definitions")
     result = copy.deepcopy(tool)
+    if not isinstance(result.get("name"), str) or not result["name"]:
+        raise ConversionError("loaded tool name must be nonempty")
     if "defer_loading" in result and not isinstance(result.pop("defer_loading"), bool):
         raise ConversionError("defer_loading must be a boolean")
     if result.get("name") == _NAME:
         raise ConversionError("reserved client tool search name collision")
     if result["type"] == "namespace":
+        if "defer_loading" in tool:
+            raise ConversionError("defer_loading applies to namespace children, not the namespace")
         if not isinstance(result.get("tools"), list):
             raise ConversionError("search namespace requires a tools array")
-        result["tools"] = [_definition(child) for child in result["tools"]]
+        children = []
+        names = set()
+        for child in result["tools"]:
+            if not isinstance(child, dict) or child.get("type") not in ("function", "custom"):
+                raise ConversionError("search namespace children must be function or custom tools")
+            normalized = _definition(child, loaded=loaded)
+            name = child.get("name")
+            if name in names:
+                raise ConversionError("duplicate namespace tool name")
+            names.add(name)
+            if normalized is not None:
+                children.append(normalized)
+        result["tools"] = children
+        if not children:
+            return None
+    elif not loaded and tool.get("defer_loading") is True:
+        return None
     return result
 
 
@@ -72,21 +92,32 @@ class ClientToolSearchMap:
         self._available = bool(searches)
         definitions = {}
 
-        def add(tool):
-            normalized = _definition(tool)
+        def add(tool, *, loaded=False):
+            normalized = _definition(tool, loaded=loaded)
+            if normalized is None:
+                return
             name = normalized.get("name")
             if not isinstance(name, str) or not name:
                 raise ConversionError("loaded tool name must be nonempty")
             if name in definitions and definitions[name] != normalized:
-                raise ConversionError("conflicting loaded tool definitions")
+                previous = definitions[name]
+                if previous.get("type") != "namespace" or normalized["type"] != "namespace":
+                    raise ConversionError("conflicting loaded tool definitions")
+                for key in (set(previous) & set(normalized)) - {"tools"}:
+                    if previous[key] != normalized[key]:
+                        raise ConversionError("conflicting loaded namespace definitions")
+                children = {child["name"]: child for child in previous["tools"]}
+                for child in normalized["tools"]:
+                    if child["name"] in children and children[child["name"]] != child:
+                        raise ConversionError("conflicting loaded tool definitions")
+                    children[child["name"]] = child
+                normalized = {**previous, **normalized, "tools": list(children.values())}
             definitions[name] = normalized
 
         for tool in tools:
             if tool in searches:
                 continue
-            normalized = _definition(tool)
-            if tool.get("defer_loading") is not True:
-                add(normalized)
+            add(tool)
         pending = set()
         seen = set()
         rewritten = []
@@ -110,7 +141,7 @@ class ClientToolSearchMap:
                     raise ConversionError("search output has no unique preceding call or tools array")
                 pending.remove(call_id)
                 for tool in item["tools"]:
-                    add(tool)
+                    add(tool, loaded=True)
                 rewritten.append({"type": "function_call_output", "call_id": call_id, "output": json.dumps({"tools": item["tools"]}, ensure_ascii=False)})
         if pending:
             raise ConversionError("unfinished client search history must not be replayed")
