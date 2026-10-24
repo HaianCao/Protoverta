@@ -86,7 +86,7 @@ class StreamTranscoder:
     Calling code must not emit a successful terminal event after an exception.
     """
 
-    def __init__(self, source: Protocol | str, target: Protocol | str, *, messages_usage_policy: str = "strict", max_pending_bytes: int = 8 * 1024 * 1024, response_transform: Callable[[dict], dict] | None = None, public_reasoning: bool = False, tool_name_transform: Callable[[str], str] | None = None, max_stream_bytes=32 * 1024 * 1024, max_stream_items=1024, max_tool_argument_bytes=8 * 1024 * 1024) -> None:
+    def __init__(self, source: Protocol | str, target: Protocol | str, *, messages_usage_policy: str = "strict", max_pending_bytes: int = 8 * 1024 * 1024, response_transform: Callable[[dict], dict] | None = None, public_reasoning: bool = False, tool_name_transform: Callable[[str], str] | None = None, max_stream_bytes=32 * 1024 * 1024, max_stream_items=1024, max_tool_argument_bytes=8 * 1024 * 1024, delta_transform: Callable[[Delta], Delta] | None = None) -> None:
         self.source = Protocol(source)
         self.target = Protocol(target)
         if messages_usage_policy not in {"strict", "deferred"}:
@@ -101,6 +101,7 @@ class StreamTranscoder:
         self.decoder = StreamDecoder(self.source, public_reasoning=public_reasoning)
         self.encoder = StreamEncoder(self.target, response_transform=response_transform, public_reasoning=public_reasoning)
         self.tool_name_transform = tool_name_transform
+        self.delta_transform = delta_transform
         self._terminal = b""
         self._closed = False
         self.has_payload = False
@@ -129,8 +130,13 @@ class StreamTranscoder:
                     except ConversionError as exc:
                         raise StreamError("upstream function alias cannot be restored") from exc
                 for delta in self.order.feed(decoded) if self.order else [decoded]:
+                    if self.delta_transform is not None:
+                        try:
+                            delta = self.delta_transform(delta)
+                        except ConversionError as exc:
+                            raise StreamError(str(exc)) from exc
                     for encoded in self.encoder.feed(delta):
-                        if delta.kind in {"tool_start", "reasoning_text"} or delta.kind == "text" and bool(delta.text):
+                        if delta.kind in {"tool_start", "reasoning_text"} or delta.kind == "text" and bool(delta.text) or encoded.event == "response.output_item.added" and delta.kind == "tool_end":
                             self.has_payload = True
                         wire = encode_sse(encoded.event, encoded.data, id=encoded.id)
                         if delta.kind == "finish":

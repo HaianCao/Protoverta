@@ -2,6 +2,8 @@
 
 import json
 import math
+import socket
+import threading
 import time
 
 from .streaming import StreamError
@@ -17,6 +19,10 @@ class DeadlineExceeded(TimeoutError):
         super().__init__("Upstream request deadline exceeded." if kind == "request_deadline" else "Upstream made no content progress before the deadline.")
 
 
+class ClientDisconnected(ConnectionAbortedError):
+    pass
+
+
 class RequestBudget:
     def __init__(self, io_timeout, total_timeout, progress_timeout, *, clock=None):
         if not all(positive_number(value) for value in (io_timeout, total_timeout, progress_timeout)):
@@ -24,8 +30,37 @@ class RequestBudget:
         self.clock = clock or time.monotonic
         self.io_timeout, self.total_timeout, self.progress_timeout = io_timeout, total_timeout, progress_timeout
         self.started = self.last_progress = self.clock()
+        self._cancelled = threading.Event()
+        self._sockets = []
+        self._lock = threading.Lock()
+
+    def register_socket(self, sock):
+        with self._lock:
+            self._sockets.append(sock)
+            if self._cancelled.is_set():
+                self._shutdown(sock)
+
+    @staticmethod
+    def _shutdown(sock):
+        try:
+            sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+
+    def cancel(self):
+        self._cancelled.set()
+        with self._lock:
+            for sock in self._sockets:
+                self._shutdown(sock)
+
+    def wait(self, seconds):
+        if self._cancelled.wait(seconds):
+            raise ClientDisconnected("Local HTTP client disconnected.")
+        self.remaining()
 
     def remaining(self):
+        if self._cancelled.is_set():
+            raise ClientDisconnected("Local HTTP client disconnected.")
         now = self.clock()
         total = self.total_timeout - (now - self.started)
         progress = self.progress_timeout - (now - self.last_progress)
@@ -97,9 +132,11 @@ class StreamLimits:
         if kind in {"response.output_item.added", "content_block_start"}:
             self.items += 1
             block = body.get("item", body.get("content_block", {}))
-            if isinstance(block, dict) and isinstance(block.get("type"), str) and block["type"] in {"function_call", "tool_use", "custom_tool_call", "server_tool_use"}:
+            if isinstance(block, dict) and isinstance(block.get("type"), str) and block["type"] in {"function_call", "tool_use", "custom_tool_call", "server_tool_use", "tool_search_call"}:
                 self.progress += 1
-                if block["type"] in {"tool_use", "server_tool_use"} and isinstance(block.get("input"), dict) and block["input"]:
+                if block["type"] == "tool_search_call" and isinstance(block.get("arguments"), dict):
+                    self._arguments(json.dumps(block["arguments"], ensure_ascii=False))
+                elif block["type"] in {"tool_use", "server_tool_use"} and isinstance(block.get("input"), dict) and block["input"]:
                     self._arguments(json.dumps(block["input"], ensure_ascii=False))
                 else:
                     self._arguments(block.get("input", "") if block["type"] == "custom_tool_call" else block.get("arguments", ""))

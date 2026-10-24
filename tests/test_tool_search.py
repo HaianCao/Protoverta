@@ -66,7 +66,7 @@ def test_paired_history_loads_definitions_and_preserves_result_identity():
     assert request == original
 
 
-@pytest.mark.parametrize("mutation", ["stream", "hosted", "missing_execution", "missing_output", "orphan", "duplicate", "conflict", "reserved", "schema", "unknown"])
+@pytest.mark.parametrize("mutation", ["hosted", "missing_execution", "missing_output", "orphan", "duplicate", "conflict", "reserved", "schema", "unknown"])
 def test_ambiguous_lossy_or_unverified_search_shapes_fail_closed(mutation):
     request = body()
     request["input"] = history()

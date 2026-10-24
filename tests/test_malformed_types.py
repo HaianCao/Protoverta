@@ -17,6 +17,8 @@ from protoverta.streaming import StreamDecoder, StreamError
 @pytest.mark.parametrize("invalid", [[], {}, ["completed"], {"value": "completed"}])
 def test_invalid_json_enums_raise_conversion_error_not_python_type_error(invalid):
     requests = [
+        ("messages", {"model": "m", "max_tokens": 8, "messages": [{"role": invalid, "content": "hi"}]}),
+        ("responses", {"model": "m", "input": [{"role": invalid, "content": "hi"}]}),
         ("responses", {"model": "m", "input": [{"role": "user", "content": "hi", "status": invalid}]}),
         ("responses", {"model": "m", "input": [{"role": "user", "content": [{"type": invalid, "text": "hi"}]}]}),
         ("chat", {"model": "m", "messages": [], "tool_choice": {"type": invalid}})]

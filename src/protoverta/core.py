@@ -16,7 +16,12 @@ from typing import Any
 
 from .custom_tools import custom_definition, encode_custom
 from .errors import ConversionError
-from .formats import OutputFormat, decode_output_format, encode_output_format
+from .formats import (
+    OutputFormat,
+    decode_output_format,
+    encode_output_format,
+    validate_strict_tool_schema,
+)
 from .images import Image, decode_image
 from .reasoning import reasoning_item, response_reasoning
 
@@ -387,14 +392,14 @@ def _decode_messages(body: dict[str, Any]) -> Request:
         item = _object(item, "message")
         _only(item, {"role", "content"}, "message")
         role = item.get("role")
-        if role not in {"user", "assistant", "system"}:
+        if not isinstance(role, str) or role not in {"user", "assistant", "system"}:
             raise ConversionError("Messages role must be user, assistant or system")
         turns.append(Turn(role, _message_parts(item.get("content"), "message.content")))
     tools: list[dict[str, Any]] = []
     for item in _list(body.get("tools") or [], "tools"):
         item = _object(item, "tool")
-        _only(item, {"name", "description", "input_schema"}, "tool")
-        tools.append({"name": _string(item.get("name"), "tool name"), "description": item.get("description", ""), "parameters": _object(item.get("input_schema"), "input_schema")})
+        _only(item, {"name", "description", "input_schema", "strict"}, "tool")
+        tools.append({"name": _string(item.get("name"), "tool name"), "description": item.get("description", ""), "parameters": _object(item.get("input_schema"), "input_schema"), **_strict_tool(item)})
     choice = body.get("tool_choice")
     parallel = None
     if choice is not None:
@@ -445,7 +450,7 @@ def _decode_responses(body: dict[str, Any], *, public_reasoning: bool = False) -
             if kind == "message":
                 _only(item, {"type", "id", "status", "role", "content"}, "input message")
                 role = _string(item.get("role"), "input.role")
-                if role not in {"system", "developer", "user", "assistant"}:
+                if not isinstance(role, str) or role not in {"system", "developer", "user", "assistant"}:
                     raise ConversionError(f"unsupported Responses role: {role}")
                 if item.get("status") not in (None, "completed"):
                     raise ConversionError("incomplete Responses history message")
@@ -511,8 +516,6 @@ def _check_turns(request: Request, target: Protocol, *, messages_mid_system: boo
         raise ConversionError("cross-protocol custom-tool streaming is not verified")
     if request.stop_sequences is not None and target == Protocol.RESPONSES:
         raise ConversionError("Responses has no equivalent stop-sequence setting")
-    if target == Protocol.MESSAGES and any(tool.get("strict") is True for tool in request.tools):
-        raise ConversionError("strict function enforcement is supported only between Chat and Responses")
     names = [tool["name"] for tool in request.tools]
     wire_names = names + [part.name for turn in request.turns for part in turn.parts if part.kind == "tool_call"]
     _check_function_names(wire_names, target)
@@ -661,7 +664,7 @@ def _encode_messages(req: Request) -> dict[str, Any]:
     if system:
         out["system"] = system
     if req.tools:
-        out["tools"] = [{"name": t["name"], "description": t["description"], "input_schema": t["parameters"]} for t in req.tools]
+        out["tools"] = [{"name": t["name"], "description": t["description"], "input_schema": t["parameters"], **_strict_tool(t)} for t in req.tools]
     if req.temperature is not None:
         out["temperature"] = req.temperature
     if req.top_p is not None:
@@ -750,6 +753,10 @@ def convert_request(body: dict[str, Any], source: Protocol | str, target: Protoc
         return body.copy()
     options = {"public_reasoning": public_reasoning} if source in {Protocol.CHAT, Protocol.RESPONSES} else {}
     request = _DECODERS[source](_object(body, "request"), **options)
+    if Protocol.MESSAGES in (source, target):
+        for tool in request.tools:
+            if tool.get("strict") is True:
+                validate_strict_tool_schema(tool["parameters"])
     call_types = {}
     for turn in request.turns:
         for part in turn.parts:

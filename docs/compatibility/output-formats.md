@@ -24,8 +24,11 @@ It is not added to requests sent to a native Responses upstream.
 ## Structured output
 
 Ordinary function definitions preserve explicit boolean `strict` between Chat
-and Responses without changing the schema. Strict functions targeting Messages,
-and strict namespaced functions under flattening, remain rejected. Enforcement
+and Responses without changing the schema. Strict ordinary functions also map
+to/from Messages on the conservative shared schema subset described below.
+Optional properties, references and unverified constraints are rejected rather
+than stripped. Explicit false remains false. Strict namespaced functions under
+flattening remain rejected. Enforcement
 is owned by the selected upstream model; capability records can separately
 require `strict_tools`. This does not enable custom/hosted tools.
 When generating Responses functions from non-strict Chat/Messages definitions,
@@ -88,4 +91,5 @@ References checked 2026-10-23:
 - [OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling)
 - [OpenAI structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs)
 - [Anthropic tool selection](https://platform.claude.com/docs/en/agents-and-tools/tool-use/define-tools)
+- [Anthropic strict tool use](https://platform.claude.com/docs/en/agents-and-tools/tool-use/strict-tool-use)
 - [Anthropic structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)

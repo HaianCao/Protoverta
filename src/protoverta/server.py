@@ -6,6 +6,7 @@ import copy
 import json
 import math
 import secrets
+import sqlite3
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -16,18 +17,23 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from .capabilities import CapabilityRegistry
+from .admission import AdmissionDenied, AdmissionPolicyError, SharedAdmission
+from .capabilities import CapabilityRegistry, _prefix
 from .core import ConversionError, Protocol, convert_request, convert_response
 from .failures import gateway_failure
+from .lifetime import DisconnectWatch
 from .namespaces import NamespaceMap
 from .profiles import prepare_claude_request, prepare_codex_request
+from .provider_profiles import ProviderProfiles
 from .resources import (
+    ClientDisconnected,
     DeadlineExceeded,
     RequestBudget,
     StreamLimitError,
     StreamLimits,
     positive_number,
 )
+from .retry import open_with_retry
 from .sse import encode_sse
 from .stream_pipe import StreamTranscoder, StreamValidator
 from .streaming import StreamError, UnsupportedReasoningError
@@ -68,8 +74,23 @@ class GatewayConfig:
     max_stream_items: int = 1024
     max_tool_argument_bytes: int = 8 * 1024 * 1024
     client_tool_search: str = "reject"
+    provider_profiles: ProviderProfiles | None = None
+    shared_admission_db: str | None = None
+    shared_requests: int = 40
+    shared_window: float = 60.0
+    shared_concurrency: int = 5
+    retry_attempts: int = 1
+    retry_max_wait: float = 5.0
 
     def __post_init__(self) -> None:
+        if type(self.retry_attempts) is not int or not 1 <= self.retry_attempts <= 4 or not positive_number(self.retry_max_wait):
+            raise ValueError("retry_attempts must be 1-4 and retry_max_wait must be finite and positive")
+        if self.shared_admission_db is not None:
+            if not isinstance(self.shared_admission_db, str) or not self.shared_admission_db.strip():
+                raise ValueError("shared_admission_db must be a nonempty path")
+            SharedAdmission(self.shared_admission_db, "validation", requests=self.shared_requests, window=self.shared_window, concurrency=self.shared_concurrency)
+        if self.provider_profiles is not None and not isinstance(self.provider_profiles, ProviderProfiles):
+            raise ValueError("provider_profiles must be a ProviderProfiles registry")
         if self.client_tool_search not in ("reject", "function"):
             raise ValueError("client_tool_search must be reject or function")
         if not isinstance(self.public_reasoning, bool):
@@ -168,6 +189,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
     opener = build_opener(_RedirectBlocker(), DeadlineHTTPHandler(), DeadlineHTTPSHandler())
     open_upstream = upstream_open or opener.open
     admission = threading.BoundedSemaphore(config.max_concurrent_requests)
+    shared_admission = SharedAdmission(config.shared_admission_db, _prefix(config.upstream_base_url) + "\0" + config.upstream_api_key, requests=config.shared_requests, window=config.shared_window, concurrency=config.shared_concurrency, lease=config.total_timeout + config.timeout + 5) if config.shared_admission_db is not None else None
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "Protoverta/0.3"
@@ -200,9 +222,9 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
             self.end_headers()
             self.wfile.write(raw)
 
-        def _stream(self, response, source: Protocol, target: Protocol, response_transform=None, tool_name_transform=None, budget=None) -> None:
+        def _stream(self, response, source: Protocol, target: Protocol, response_transform=None, tool_name_transform=None, budget=None, delta_transform=None) -> None:
             limits = {"max_stream_bytes": config.max_stream_bytes, "max_stream_items": config.max_stream_items, "max_tool_argument_bytes": config.max_tool_argument_bytes}
-            pipeline = StreamTranscoder(source, target, messages_usage_policy=config.messages_usage_policy, max_pending_bytes=config.max_body_bytes, response_transform=response_transform, public_reasoning=config.public_reasoning, tool_name_transform=tool_name_transform, **limits) if source != target else StreamValidator(source, **limits)
+            pipeline = StreamTranscoder(source, target, messages_usage_policy=config.messages_usage_policy, max_pending_bytes=config.max_body_bytes, response_transform=response_transform, public_reasoning=config.public_reasoning, tool_name_transform=tool_name_transform, delta_transform=delta_transform, **limits) if source != target else StreamValidator(source, **limits)
             budget = budget or RequestBudget(config.timeout, config.total_timeout, config.progress_timeout)
             headers_sent = False
             initial = bytearray()
@@ -252,6 +274,8 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                     self.wfile.flush()
                 send_headers()
             except (StreamError, UnicodeError, OSError, HTTPException) as exc:
+                if isinstance(exc, ClientDisconnected):
+                    return
                 unsupported = isinstance(exc, UnsupportedReasoningError)
                 message = f"upstream stream error: {type(exc).__name__}"
                 if unsupported:
@@ -342,6 +366,8 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                         payload = prepare_claude_request(payload)
                     outbound = convert_request(payload, protocol, config.upstream_protocol, messages_mid_system=mid_system, public_reasoning=config.public_reasoning)
                 outbound = apply_upstream_reasoning(outbound, config.upstream_protocol, config.upstream_reasoning)
+                if config.provider_profiles is not None:
+                    outbound = config.provider_profiles.apply(config.upstream_base_url, config.upstream_protocol, outbound)
                 if config.capabilities is not None:
                     config.capabilities.preflight(config.upstream_base_url, config.upstream_protocol, outbound, require_verified=config.require_verified_capabilities)
             except RecursionError:
@@ -386,14 +412,19 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                                 snapshot[option] = payload[option]
                 return mapped
 
+            lease = None
+            watch = None
             try:
                 budget = RequestBudget(config.timeout, config.total_timeout, config.progress_timeout)
+                watch = DisconnectWatch(self.connection, budget.cancel)
+                watch.__enter__()
                 request.protoverta_budget = budget
-                with open_upstream(request, timeout=budget.remaining()) as response:
+                response, lease = open_with_retry(open_upstream, request, budget, attempts=config.retry_attempts, max_wait=config.retry_max_wait, admission=shared_admission)
+                with response:
                     budget.remaining()
                     if streaming:
                         transform = restore_response if protocol == Protocol.RESPONSES and (namespace_map or "text" in payload or any(payload.get(option) is not None for option in ("top_p", "temperature"))) else None
-                        self._stream(response, config.upstream_protocol, protocol, transform, tool_name_map.decode if tool_name_map is not None else None, budget)
+                        self._stream(response, config.upstream_protocol, protocol, transform, tool_name_map.decode if tool_name_map is not None else None, budget, search_map.stream_delta if search_map is not None else None)
                         return
                     raw = bytearray()
                     while len(raw) <= config.max_body_bytes:
@@ -410,6 +441,12 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                         result = convert_response(result, config.upstream_protocol, protocol, public_reasoning=config.public_reasoning)
                         result = restore_response(result)
                     self._json(200, result, getattr(response, "headers", None))
+            except AdmissionDenied as exc:
+                self._error(429, str(exc), protocol, headers={"Retry-After": str(exc.retry_after)})
+            except ClientDisconnected:
+                return
+            except (sqlite3.Error, AdmissionPolicyError):
+                self._error(503, "Shared provider admission is unavailable or has conflicting policy.", protocol, headers={"x-should-retry": "false"})
             except HTTPError as exc:
                 try:
                     raw = bytearray()
@@ -439,6 +476,14 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                 self._error(504 if timeout else 502, f"upstream transport error: {type(exc).__name__}", protocol, code=cause.kind if isinstance(cause, DeadlineExceeded) else "upstream_timeout" if timeout else "upstream_transport", headers={"x-should-retry": "false"} if isinstance(cause, DeadlineExceeded) else None)
             except (json.JSONDecodeError, UnicodeError, ConversionError, StreamError, RecursionError) as exc:
                 self._error(502, str(exc), protocol)
+            finally:
+                if watch is not None:
+                    watch.__exit__(None, None, None)
+                if shared_admission is not None and lease is not None:
+                    try:
+                        shared_admission.release(lease)
+                    except sqlite3.Error:
+                        pass  # A crashed/busy writer cannot retain a lease beyond its TTL.
 
     return Handler
 

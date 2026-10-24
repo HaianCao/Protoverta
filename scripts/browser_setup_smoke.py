@@ -1,0 +1,137 @@
+"""Real-browser setup checks against isolated consumer servers; no live APIs."""
+
+from __future__ import annotations
+
+import argparse
+import importlib
+import json
+import os
+import queue
+import tempfile
+import threading
+from contextlib import ExitStack
+from http.server import ThreadingHTTPServer
+from pathlib import Path
+from unittest.mock import patch
+
+
+def run(source: Path, package: str, browser_executable: str | None = None):
+    import sys
+
+    from playwright.sync_api import sync_playwright
+
+    sys.path.insert(0, str(source.resolve() / "src"))
+    web = importlib.import_module(package + ".web")
+    config_module = importlib.import_module(package + ".config")
+    codex = package == "codex_adapter"
+    urls, servers, launches, failures = queue.Queue(), [], [], []
+    with tempfile.TemporaryDirectory(prefix="protoverta-browser-") as temporary, ExitStack() as stack:
+        root = Path(temporary)
+        safe = {key: value for key, value in os.environ.items() if key.upper() in {"PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP"}}
+        safe.update(APPDATA=str(root / "roaming"), LOCALAPPDATA=str(root / "local"), USERPROFILE=str(root / "profile"))
+        safe.update({("CODEX_CA_ENV_FILE" if codex else "CLAUDE_CA_ENV_FILE"): str(root / ".env")})
+        stack.enter_context(patch.dict(os.environ, safe, clear=True))
+        config = config_module.Config(path=root / "config.toml")
+
+        def server(address, handler):
+            result = ThreadingHTTPServer(address, handler)
+            servers.append(result)
+            return result
+
+        stack.enter_context(patch.object(web, "ThreadingHTTPServer", side_effect=server))
+        stack.enter_context(patch.object(web.webbrowser, "open", side_effect=urls.put))
+        stack.enter_context(patch.object(web, "fetch_models", return_value=["model-" + str(i) for i in range(20)] if codex else [{"id": "model-" + str(i), "display_name": "Model " + str(i)} for i in range(20)]))
+        stack.enter_context(patch.object(web, "preflight"))
+        stack.enter_context(patch.object(web, "launch", side_effect=lambda *args: launches.append(args) or 0))
+
+        def serve():
+            try:
+                web.serve(config)
+            except (OSError, ValueError, RuntimeError) as exc:
+                failures.append(type(exc).__name__)
+
+        worker = threading.Thread(target=serve, daemon=True)
+        worker.start()
+        try:
+            url = urls.get(timeout=5)
+            with sync_playwright() as playwright:
+                browser = playwright.chromium.launch(headless=True, **({"executable_path": browser_executable} if browser_executable else {}))
+                try:
+                    page = browser.new_page(viewport={"width": 1280, "height": 900})
+                    errors = []
+                    page.on("pageerror", lambda exc: errors.append(str(exc)))
+                    # Local setup/assets only; never contact a real provider.
+                    page.route("**/*", lambda route: route.continue_() if route.request.url.startswith(url.split("/?")[0] + "/") else route.abort())
+                    page.goto(url)
+                    select = "#providerSelect" if codex else "#provider"
+                    page.locator(select).wait_for()
+                    assert page.locator(select).is_disabled()
+                    page.locator("#addBtn" if codex else "#add").click()
+                    page.locator("#providerId" if codex else "#id").fill("fixture")
+                    page.locator("#displayName").fill("Fixture <b>Provider</b>")
+                    page.locator("#baseUrl").fill("https://example.invalid/v1")
+                    page.locator("#apiKey").fill("synthetic-browser-key")
+                    page.locator("#gatewayRuntimeFields").evaluate("(el) => el.closest('details').open = true")
+                    page.locator("#runtime_retry_attempts").fill("2")
+                    with page.expect_response(lambda response: "/api/provider" in response.url and response.request.method == "POST") as saved:
+                        page.locator("#saveProvider" if codex else "#providerForm button[type=submit]").click()
+                    assert saved.value.ok
+                    page.wait_for_function("selector => document.querySelector(selector).options.length === 1", arg=select)
+                    assert page.locator(select + " option").inner_text() == "Fixture <b>Provider</b>"
+                    assert page.locator(select + " b").count() == 0
+                    model = "#modelInput" if codex else "#model"
+                    page.locator(model).fill("")
+                    page.wait_for_function("document.querySelectorAll('.model-option').length === 20")
+                    page.locator(model).fill("model-19")
+                    page.wait_for_function("document.querySelectorAll('.model-option').length === 1")
+                    page.locator("#editBtn" if codex else "#edit").click()
+                    assert page.locator("#baseUrl").input_value() == "https://example.invalid/v1"
+                    assert page.locator("#authMode").input_value() == "bearer"
+                    assert page.locator("#runtime_retry_attempts").input_value() == "2"
+                    page.locator("#authMode").select_option("api_key")
+                    with page.expect_response(lambda response: "/api/provider" in response.url and response.request.method == "POST") as saved:
+                        # Same-task assertions cannot race the HTTP response: both
+                        # model entry and Run must stay disabled until save settles.
+                        assert page.evaluate("""codex => {
+                            if (codex) document.querySelector('#saveProvider').click();
+                            else document.querySelector('#providerForm').requestSubmit();
+                            return document.querySelector(codex ? '#modelInput' : '#model').disabled
+                                && document.querySelector(codex ? '#runBtn' : '#run').disabled;
+                        }""", codex)
+                    assert saved.value.ok
+                    page.locator(model).fill("manual-model")
+                    before = page.locator("html").get_attribute("data-theme")
+                    page.locator("#themeToggle").click()
+                    assert page.locator("html").get_attribute("data-theme") != before
+                    assert "_icon.png" in page.locator("#favicon").get_attribute("href")
+                    assert "_icon" not in page.locator("#brandLogo").get_attribute("src")
+                    with page.expect_response(lambda response: "/api/run" in response.url) as started:
+                        page.locator("#runBtn" if codex else "#run").click()
+                    assert started.value.ok
+                    worker.join(timeout=5)
+                    assert not worker.is_alive() and launches and not failures
+                    restored = config_module.load(config.path).providers["fixture"]
+                    assert restored.auth_mode == "api_key"
+                    assert restored.gateway_runtime["retry_attempts"] == 2
+                    assert not errors, errors
+                    return {"package": package, "passed": True, "launch_stubbed": True}
+                finally:
+                    browser.close()
+        finally:
+            if worker.is_alive():
+                for running in servers:
+                    running.shutdown()
+                worker.join(timeout=5)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--source", type=Path, required=True)
+    parser.add_argument("--package", choices=["codex_adapter", "claudapter"], required=True)
+    parser.add_argument("--browser-executable")
+    args = parser.parse_args()
+    print(json.dumps(run(args.source, args.package, args.browser_executable)))
+
+
+if __name__ == "__main__":
+    main()

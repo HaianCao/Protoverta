@@ -56,8 +56,9 @@ matched-stop response metadata remains nonportable; see
 
 Completed JSON custom tools map directly between Chat and Responses, preserving
 raw input and text/grammar formats. Cross-protocol custom streaming and custom
-tools targeting Messages remain rejected. The gateway also offers opt-in JSON
-client tool search via `--client-tool-search function`; it does not execute
+tools targeting Messages remain rejected. The gateway also offers opt-in
+client tool search via `--client-tool-search function`, including SSE with
+bounded per-call argument buffering; it does not execute
 searches or emulate hosted search. See [custom tools and client search](docs/compatibility/custom-tools.md)
 for the provider-support requirements and exact limits.
 
@@ -128,6 +129,11 @@ features too. Records are scoped to the exact API prefix, protocol and model.
 Version-2 capability records can also declare output-token limits, context-window
 metadata and allowed reasoning efforts. Explicit incompatible budgets/efforts
 are rejected, not silently reduced. See the registry documentation for scope.
+
+Optional [runtime policies](docs/compatibility/runtime.md) provide exact-model
+wire profiles, cross-process request budgets and bounded pre-response HTTP
+retries. These remain off unless explicitly configured; no model fallback or
+stream replay is introduced.
 
 The gateway bounds active requests with `--max-concurrent-requests` (default 16)
 and socket I/O with `--timeout` (default 120 seconds). See

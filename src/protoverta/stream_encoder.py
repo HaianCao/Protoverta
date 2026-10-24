@@ -6,6 +6,7 @@ into deferred usage and serialize concurrent blocks before feeding this encoder.
 
 from __future__ import annotations
 
+import copy
 import json
 import time
 import uuid
@@ -96,8 +97,10 @@ class StreamEncoder:
                 raise StreamError("text delta has no text")
             return self._text(delta)
         if delta.kind == "tool_start":
-            if delta.tool_type not in ("function", "custom"):
+            if delta.tool_type not in ("function", "custom", "tool_search"):
                 raise StreamError("unknown canonical tool type")
+            if delta.tool_type == "tool_search" and self.protocol != Protocol.RESPONSES:
+                raise StreamError("client search output requires Responses")
             if delta.tool_type == "custom" and self.protocol == Protocol.MESSAGES:
                 raise StreamError("Messages cannot preserve native custom-tool formats")
             if delta.tool_type == "custom" and self.protocol == Protocol.CHAT:
@@ -270,13 +273,21 @@ class StreamEncoder:
         tool = self.tools[delta.index]
         tool["target_index"] = index
         item = {"id": tool["item_id"], "type": "custom_tool_call" if kind == "custom" else "function_call", "status": "in_progress", "call_id": delta.call_id, "name": delta.name, arg: ""}
+        if kind == "tool_search":
+            item = {"id": tool["item_id"], "type": "tool_search_call", "status": "in_progress", "call_id": delta.call_id, "execution": "client", "arguments": {}}
         self.output.append(item)
+        if kind == "tool_search":
+            # No documented search-argument delta wire. Hold only this bounded
+            # call until it is a complete object, not the entire response.
+            return events
         events.append(self._response_event("response.output_item.added", output_index=index, item=item.copy()))
         return events
 
     def _tool_delta(self, delta: Delta) -> list[SSEEvent]:
         tool = self.tools[delta.index]
         custom = tool["tool_type"] == "custom"
+        if tool["tool_type"] == "tool_search":
+            return []
         if self.protocol == Protocol.CHAT:
             return [self._chat_chunk([{"index": 0, "delta": {"tool_calls": [{"index": delta.index, "custom" if custom else "function": {"input" if custom else "arguments": delta.text}}]}, "finish_reason": None}])]
         if self.protocol == Protocol.MESSAGES:
@@ -290,6 +301,18 @@ class StreamEncoder:
         if self.protocol == Protocol.MESSAGES:
             return [_event("content_block_stop", {"type": "content_block_stop", "index": tool["target_index"]})]
         item = self.output[tool["target_index"]]
+        if tool["tool_type"] == "tool_search":
+            try:
+                arguments = json.loads(tool["arguments"])
+            except (ValueError, TypeError, RecursionError) as exc:
+                raise StreamError("invalid client search arguments") from exc
+            if not isinstance(arguments, dict):
+                raise StreamError("client search arguments must be an object")
+            item.update(status="completed", arguments=arguments)
+            return [
+                self._response_event("response.output_item.added", output_index=tool["target_index"], item=copy.deepcopy(item)),
+                self._response_event("response.output_item.done", output_index=tool["target_index"], item=copy.deepcopy(item)),
+            ]
         custom = tool["tool_type"] == "custom"
         arg = "input" if custom else "arguments"
         item.update(status="completed", **{arg: tool["arguments"]})

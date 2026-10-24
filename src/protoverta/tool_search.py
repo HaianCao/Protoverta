@@ -1,12 +1,14 @@
-"""Opt-in JSON client-search adaptation, not hosted search or a tool executor.
+"""Opt-in client-search adaptation, not hosted search or a tool executor.
 
 Each request reconstructs the active tool set from explicit, paired history.
 Loaded definitions are exposed eagerly for this generation; native cache/context
-placement is not reproduced. Streaming is rejected until its wire is verified.
+placement is not reproduced. Search arguments are buffered per call, not exposed
+as invented function-argument events on the Responses search item.
 """
 
 import copy
 import json
+from dataclasses import replace
 
 from .errors import ConversionError
 
@@ -63,7 +65,7 @@ def _definition(tool, *, loaded=False):
 
 
 class ClientToolSearchMap:
-    """One-use request map for explicit client-side JSON tool search."""
+    """One-use request map for explicit client-side tool search."""
 
     def __init__(self):
         self.enabled = False
@@ -86,8 +88,6 @@ class ClientToolSearchMap:
             return result
         if len(searches) > 1:
             raise ConversionError("at most one client tool search definition is supported")
-        if result.get("stream") is True:
-            raise ConversionError("client tool search streaming is not verified")
         self.enabled = True
         self._available = bool(searches)
         definitions = {}
@@ -157,6 +157,13 @@ class ClientToolSearchMap:
         if isinstance(inputs, list):
             result["input"] = rewritten
         return result
+
+    def stream_delta(self, delta):
+        if self.enabled and delta.kind == "tool_start" and delta.name == _NAME:
+            if not self._available or delta.tool_type != "function":
+                raise ConversionError("upstream called an unavailable client search tool")
+            return replace(delta, tool_type="tool_search")
+        return delta
 
     def restore(self, body: dict) -> dict:
         result = copy.deepcopy(body)

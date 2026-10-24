@@ -65,8 +65,7 @@ def test_explicit_strict_tool_flag_and_schema_are_preserved(source, target, stri
     assert tool["parameters"] == fn["parameters"] and tool["strict"] is strict
     assert ("strict_tools" in request_features(out, target)) == strict
     if strict:
-        with pytest.raises(ConversionError, match="strict function"):
-            convert_request(body, source, "messages")
+        assert convert_request(body, source, "messages")["tools"][0]["strict"] is True
 
 
 def test_matched_stop_sequence_metadata_still_fails_closed():

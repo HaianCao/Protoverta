@@ -9,6 +9,8 @@ class _TimedResponse(HTTPResponse):
     def __init__(self, sock, *args, budget=None, **kwargs):
         self._deadline_socket = sock
         self._budget = budget
+        if budget is not None:
+            budget.register_socket(sock)
         super().__init__(sock, *args, **kwargs)
 
     def set_read_timeout(self, seconds):

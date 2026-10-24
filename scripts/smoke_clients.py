@@ -30,6 +30,17 @@ from protoverta.streaming import Delta
 MARKER = "PROTOVERTA_SMOKE_OK"
 
 
+def tool_execution_failed(client, stdout, stderr):
+    """Do not count tool error results as a successful agent tool round trip."""
+    if client == "codex":
+        return "ERROR codex_core::tools::router" in stderr or "Goal tools require a persistent thread" in stderr
+    try:
+        result = json.loads(stdout)
+    except (ValueError, TypeError):
+        return True
+    return not isinstance(result, dict) or result.get("is_error") is True or bool(result.get("permission_denials"))
+
+
 @contextmanager
 def fixture_server(open_upstream):
     class Handler(BaseHTTPRequestHandler):
@@ -262,7 +273,7 @@ def run_smoke(
             else (str(adapter_source) if adapter_source else None),
             "passed": result.returncode == 0
             and MARKER in result.stdout
-            and (not tool_loop or (rounds == 2 and tool_result_count == 2)),
+            and (not tool_loop or (rounds == 2 and tool_result_count == 2 and not tool_execution_failed(client, result.stdout, result.stderr))),
             "returncode": result.returncode,
             "requests": requests,
             "rounds": rounds,

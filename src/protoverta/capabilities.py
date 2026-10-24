@@ -87,12 +87,15 @@ def request_features(body: dict, protocol: Protocol | str) -> frozenset[str]:
     protocol = Protocol(protocol)
     if not isinstance(body, dict):
         raise ConversionError("capability preflight requires an object request")
+    tools = body.get("tools")
+    if tools is not None and (not isinstance(tools, list) or any(not isinstance(tool, dict) for tool in tools)):
+        raise ConversionError("capability preflight requires tools to be an array of objects")
     features = {"text"}
     if body.get("top_p") is not None:
         features.add("top_p")
     if body.get("stream") is True:
         features.add("streaming")
-    if body.get("tools"):
+    if tools:
         features.add("tools")
         if any(isinstance(tool, dict) and tool.get("type") == "custom" for tool in body["tools"]):
             features.add("custom_tools")

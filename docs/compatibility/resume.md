@@ -111,8 +111,10 @@ or vendor, hidden reasoning, or every protocol pair. Reproduce with
 the corresponding client, source protocol, adapter source and key environment.
 
 Encrypted reasoning,
-signed thinking, server-owned `previous_response_id`, image tool results and
+signed thinking, server-owned `previous_response_id`, nonportable image tool results and
 compaction are not portable under the current contract and remain errors.
+Image tool results have a codec-level Messages/Responses mapping; this does not
+certify real-client resume with those results. Chat relocation remains rejected.
 Ordinary user image history now has a [limited portable contract](images.md);
 the original resume matrix did not exercise it. Unsigned public reasoning has
 an explicit [Chat/Responses extension](reasoning.md), not hidden-state migration.

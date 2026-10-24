@@ -67,6 +67,11 @@ def _portable_schema(schema, *, root=True, depth=0):
             _portable_schema(child, root=False, depth=depth + 1)
 
 
+def validate_strict_tool_schema(schema: dict) -> None:
+    """Validate the conservative shared strict-tool subset without rewriting."""
+    _portable_schema(schema)
+
+
 def decode_output_format(body: dict, protocol: str) -> OutputFormat | None:
     if protocol == "chat":
         value = body.get("response_format")

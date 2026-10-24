@@ -57,10 +57,12 @@ behavior. Requiring verified capabilities without a registry is an error.
 
 Recognized features: `text`, `streaming`, `tools`, `forced_tool_choice`,
 `json_object`, `json_schema`, `strict_json_schema`, `reasoning_effort`, `public_reasoning`, `images`,
-`top_p`, and `mid_conversation_system`. Feature detection inspects content, not arbitrary
+`top_p`, `mid_conversation_system`, `custom_tools`, `strict_tools`,
+`stop_sequences`, and `image_tool_results`. Feature detection inspects content, not arbitrary
 tool schema properties. Records cannot enable conversions the core does not
-implement: for example, an image-capable model does not enable translated
-image tool results or provider-owned Files API IDs. Ordinary user image inputs
+implement: for example, an image-capable model does not enable image tool results
+targeting Chat or provider-owned Files API IDs. Messages/Responses image tool
+results require their separate feature observation. Ordinary user image inputs
 have a separate [portable contract](images.md).
 
 Both consumer development branches expose the registry path and strict option

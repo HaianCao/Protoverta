@@ -34,13 +34,14 @@ stream fails without a fabricated terminal success. Do not infer compatibility
 from synthetic round-trip fixtures. Grammar is never silently converted into a
 function's JSON schema.
 
-## Explicit JSON client search policy
+## Explicit client search policy
 
 Set `GatewayConfig(..., client_tool_search="function")` or
 `--client-tool-search function` to adapt Responses client-executed search to an
-ordinary function on a Chat/Messages upstream. The default is `reject`; native
-Responses forwarding is unchanged. Consumer setup controls do not expose this
-new option yet.
+ordinary function on a Chat/Messages upstream for JSON or SSE. The default is `reject`; native
+Responses forwarding is unchanged. CodexApter's integration editor exposes the
+policy for Chat/Messages gateways. ClaudApter has no Responses client and does
+not expose this policy.
 
 This compatibility policy is **not exact native deferred-loading semantics**:
 tools returned in explicit search history are exposed eagerly for the current
@@ -62,9 +63,21 @@ is omitted from the callable upstream tool list.
 
 Returned calls are restored to `tool_search_call` with object arguments and
 client execution. Hosted/server search, missing execution, incomplete/unpaired
-history, `additional_tools` injection and streaming search are not emulated.
+history and `additional_tools` injection are not emulated.
 No unspecified execution mode is guessed from a call ID. No fallback, retry or
 external lookup is introduced.
+
+For translated SSE, text remains incremental. Only each search call's arguments
+are buffered under the ordinary tool-argument limit until a complete JSON object
+is available. The encoder then emits the documented output_item.added and
+output_item.done lifecycle with a completed client tool_search_call, preserving
+call ID, output index and arguments. No function-argument delta events or
+invented search-argument delta events are emitted for that item. The terminal
+snapshot matches the completed item and is held until verified upstream EOF.
+Malformed/truncated/oversized calls cannot produce successful completion.
+This is an explicit function-emulation policy, not native provider search or
+a guarantee of native deferred-loading/cache placement. Real-client search
+fixtures are a separate gate from codec tests.
 
 ## Sources
 
