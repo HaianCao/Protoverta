@@ -34,6 +34,7 @@ class Part:
     name: str = ""
     arguments: str = ""
     image: Image | None = None
+    result_parts: list[Part] | None = None
 
 
 @dataclass(slots=True)
@@ -55,6 +56,7 @@ class Request:
     reasoning_effort: str | None = None
     output_format: OutputFormat | None = None
     top_p: float | None = None
+    stop_sequences: list[str] | None = None
 
 
 @dataclass(slots=True)
@@ -171,6 +173,21 @@ def _optional_top_p(value: Any) -> float | None:
     return float(value)
 
 
+def _stops(value):
+    if value is None:
+        return None
+    values = [value] if isinstance(value, str) else value
+    if not isinstance(values, list) or not 1 <= len(values) <= 4 or any(not isinstance(item, str) or not item for item in values):
+        raise ConversionError("portable stop sequences require 1-4 nonempty strings")
+    return list(values)
+
+
+def _strict_tool(tool):
+    if "strict" in tool and tool["strict"] is not None and not isinstance(tool["strict"], bool):
+        raise ConversionError("tool strict must be a boolean")
+    return {"strict": tool["strict"]} if tool.get("strict") is not None else {}
+
+
 def _parallel_flag(value: Any) -> bool | None:
     if value is not None and not isinstance(value, bool):
         raise ConversionError("parallel_tool_calls must be a boolean")
@@ -256,7 +273,7 @@ def _validate_chat_call(call: dict, index: int) -> None:
 
 
 def _decode_chat(body: dict[str, Any], *, public_reasoning: bool = False) -> Request:
-    _only(body, {"model", "messages", "tools", "tool_choice", "max_completion_tokens", "max_tokens", "temperature", "top_p", "stream", "parallel_tool_calls", "reasoning_effort", "response_format"}, "Chat request")
+    _only(body, {"model", "messages", "tools", "tool_choice", "max_completion_tokens", "max_tokens", "temperature", "top_p", "stream", "parallel_tool_calls", "reasoning_effort", "response_format", "stop"}, "Chat request")
     if "max_completion_tokens" in body and "max_tokens" in body:
         raise ConversionError("choose one Chat token limit field")
     turns: list[Turn] = []
@@ -289,9 +306,7 @@ def _decode_chat(body: dict[str, Any], *, public_reasoning: bool = False) -> Req
             raise ConversionError("only function tools are supported")
         fn = _object(item.get("function"), "tool.function")
         _only(fn, {"name", "description", "parameters", "strict"}, "tool.function")
-        if fn.get("strict"):
-            raise ConversionError("strict tool schemas have no universal equivalent")
-        tools.append({"name": _string(fn.get("name"), "tool name"), "description": fn.get("description", ""), "parameters": fn.get("parameters", {"type": "object", "properties": {}})})
+        tools.append({"name": _string(fn.get("name"), "tool name"), "description": fn.get("description", ""), "parameters": fn.get("parameters", {"type": "object", "properties": {}}), **_strict_tool(fn)})
     return Request(_string(body.get("model"), "model"), turns, tools, _optional_positive_int(body.get("max_completion_tokens", body.get("max_tokens")), "max_completion_tokens"), _optional_temperature(body.get("temperature")), _stream_flag(body.get("stream", False)), _tool_choice(body.get("tool_choice"), Protocol.CHAT), _parallel_flag(body.get("parallel_tool_calls")), _effort(body.get("reasoning_effort")), top_p=_optional_top_p(body.get("top_p")))
 
 
@@ -320,19 +335,22 @@ def _message_parts(content: Any, label: str) -> list[Part]:
             if block.get("is_error"):
                 raise ConversionError("tool_result.is_error cannot be preserved in other protocols")
             result = block.get("content", "")
+            rich = None
             if not isinstance(result, str):
                 text_blocks = _message_parts(result, "tool_result.content")
-                if any(part.kind != "text" for part in text_blocks):
-                    raise ConversionError("non-text tool results are unsupported")
+                if any(part.kind not in {"text", "image"} for part in text_blocks):
+                    raise ConversionError("tool results support text/image content only")
+                if any(part.kind == "image" for part in text_blocks):
+                    rich = text_blocks
                 result = "".join(part.text for part in text_blocks)
-            parts.append(Part("tool_result", call_id=_string(block.get("tool_use_id"), "tool_use_id"), text=result))
+            parts.append(Part("tool_result", call_id=_string(block.get("tool_use_id"), "tool_use_id"), text=result, result_parts=rich))
         else:
             raise ConversionError(f"unsupported Messages block: {kind}")
     return parts
 
 
 def _decode_messages(body: dict[str, Any]) -> Request:
-    _only(body, {"model", "system", "messages", "tools", "tool_choice", "max_tokens", "temperature", "top_p", "stream", "output_config"}, "Messages request")
+    _only(body, {"model", "system", "messages", "tools", "tool_choice", "max_tokens", "temperature", "top_p", "stream", "output_config", "stop_sequences"}, "Messages request")
     output_config = _object(body.get("output_config", {}), "output_config")
     _only(output_config, {"effort", "format"}, "output_config")
     turns: list[Turn] = []
@@ -421,8 +439,9 @@ def _decode_responses(body: dict[str, Any], *, public_reasoning: bool = False) -
                 output = item.get("output")
                 if isinstance(output, list):
                     output_parts = _response_content(output, "function_call_output.output")
-                    if any(part.kind != "text" for part in output_parts):
-                        raise ConversionError("non-text tool results are unsupported")
+                    if any(part.kind == "image" for part in output_parts):
+                        turns.append(Turn("user", [Part("tool_result", call_id=_string(item.get("call_id"), "call_id"), result_parts=output_parts)]))
+                        continue
                     output = "".join(part.text for part in output_parts)
                 turns.append(Turn("user", [Part("tool_result", call_id=_string(item.get("call_id"), "call_id"), text=_string(output, "output"))]))
             else:
@@ -438,9 +457,9 @@ def _decode_responses(body: dict[str, Any], *, public_reasoning: bool = False) -
     for item in _list(body.get("tools") or [], "tools"):
         item = _object(item, "tool")
         _only(item, {"type", "name", "description", "parameters", "strict"}, "tool")
-        if item.get("type") != "function" or item.get("strict"):
-            raise ConversionError("only non-strict function tools are supported")
-        tools.append({"name": _string(item.get("name"), "tool name"), "description": item.get("description", ""), "parameters": item.get("parameters", {"type": "object", "properties": {}})})
+        if item.get("type") != "function":
+            raise ConversionError("only function tools are supported")
+        tools.append({"name": _string(item.get("name"), "tool name"), "description": item.get("description", ""), "parameters": item.get("parameters", {"type": "object", "properties": {}}), **_strict_tool(item)})
     return Request(_string(body.get("model"), "model"), turns, tools, _optional_positive_int(body.get("max_output_tokens"), "max_output_tokens"), _optional_temperature(body.get("temperature")), _stream_flag(body.get("stream", False)), _tool_choice(body.get("tool_choice"), Protocol.RESPONSES), _parallel_flag(body.get("parallel_tool_calls")), _effort(reasoning.get("effort")), top_p=_optional_top_p(body.get("top_p")))
 
 
@@ -453,6 +472,10 @@ def _check_function_names(names, target: Protocol) -> None:
 
 
 def _check_turns(request: Request, target: Protocol, *, messages_mid_system: bool = False) -> None:
+    if request.stop_sequences is not None and target == Protocol.RESPONSES:
+        raise ConversionError("Responses has no equivalent stop-sequence setting")
+    if target == Protocol.MESSAGES and any(tool.get("strict") is True for tool in request.tools):
+        raise ConversionError("strict function enforcement is supported only between Chat and Responses")
     names = [tool["name"] for tool in request.tools]
     wire_names = names + [part.name for turn in request.turns for part in turn.parts if part.kind == "tool_call"]
     _check_function_names(wire_names, target)
@@ -476,6 +499,8 @@ def _check_turns(request: Request, target: Protocol, *, messages_mid_system: boo
     for turn in request.turns:
         seen_ordinary = False
         for part in turn.parts:
+            if part.result_parts is not None and target == Protocol.CHAT:
+                raise ConversionError("Chat cannot preserve image-bearing tool results without relocating their role")
             if part.kind == "reasoning_text":
                 if target == Protocol.MESSAGES or turn.role != "assistant" or seen_ordinary:
                     raise ConversionError("unsigned public reasoning requires a Chat/Responses assistant prefix; Messages signatures cannot be fabricated")
@@ -550,7 +575,9 @@ def _encode_chat(req: Request) -> dict[str, Any]:
     if req.reasoning_effort is not None:
         out["reasoning_effort"] = req.reasoning_effort
     if req.tools:
-        out["tools"] = [{"type": "function", "function": {"name": t["name"], "description": t["description"], "parameters": t["parameters"]}} for t in req.tools]
+        out["tools"] = [{"type": "function", "function": {"name": t["name"], "description": t["description"], "parameters": t["parameters"], **_strict_tool(t)}} for t in req.tools]
+    if req.stop_sequences is not None:
+        out["stop"] = list(req.stop_sequences)
     if req.max_tokens is not None:
         out["max_completion_tokens"] = req.max_tokens
     if req.temperature is not None:
@@ -583,7 +610,8 @@ def _encode_messages(req: Request) -> dict[str, Any]:
             elif p.kind == "tool_call":
                 blocks.append({"type": "tool_use", "id": p.call_id, "name": p.name, "input": json.loads(p.arguments)})
             elif p.kind == "tool_result":
-                blocks.append({"type": "tool_result", "tool_use_id": p.call_id, "content": p.text})
+                content = [part.image.encode("messages") if part.kind == "image" else {"type": "text", "text": part.text} for part in p.result_parts] if p.result_parts is not None else p.text
+                blocks.append({"type": "tool_result", "tool_use_id": p.call_id, "content": content})
         messages.append({"role": turn.role, "content": blocks})
     if req.max_tokens is None:
         raise ConversionError("Messages requires max_tokens; configure an explicit limit")
@@ -598,6 +626,8 @@ def _encode_messages(req: Request) -> dict[str, Any]:
         out["temperature"] = req.temperature
     if req.top_p is not None:
         out["top_p"] = req.top_p
+    if req.stop_sequences is not None:
+        out["stop_sequences"] = list(req.stop_sequences)
     if req.tool_choice is not None:
         choice = req.tool_choice
         if choice == "auto":
@@ -640,7 +670,8 @@ def _encode_responses(req: Request) -> dict[str, Any]:
                 inputs.append({"type": "function_call", "call_id": p.call_id, "name": p.name, "arguments": p.arguments})
             elif p.kind == "tool_result":
                 _flush_response_text(inputs, turn.role, text_parts)
-                inputs.append({"type": "function_call_output", "call_id": p.call_id, "output": p.text})
+                content = [part.image.encode("responses") if part.kind == "image" else {"type": "input_text", "text": part.text} for part in p.result_parts] if p.result_parts is not None else p.text
+                inputs.append({"type": "function_call_output", "call_id": p.call_id, "output": content})
         _flush_response_text(inputs, turn.role, text_parts)
     out: dict[str, Any] = {"model": req.model, "input": inputs, "stream": req.stream, "store": False}
     if req.parallel_tool_calls is not None:
@@ -648,7 +679,7 @@ def _encode_responses(req: Request) -> dict[str, Any]:
     if req.reasoning_effort is not None:
         out["reasoning"] = {"effort": req.reasoning_effort}
     if req.tools:
-        out["tools"] = [{"type": "function", "name": t["name"], "description": t["description"], "parameters": t["parameters"]} for t in req.tools]
+        out["tools"] = [{"type": "function", "name": t["name"], "description": t["description"], "parameters": t["parameters"], "strict": t.get("strict", False)} for t in req.tools]
     if req.max_tokens is not None:
         out["max_output_tokens"] = req.max_tokens
     if req.temperature is not None:
@@ -679,6 +710,7 @@ def convert_request(body: dict[str, Any], source: Protocol | str, target: Protoc
         return body.copy()
     options = {"public_reasoning": public_reasoning} if source in {Protocol.CHAT, Protocol.RESPONSES} else {}
     request = _DECODERS[source](_object(body, "request"), **options)
+    request.stop_sequences = _stops(body.get("stop" if source == Protocol.CHAT else "stop_sequences")) if source != Protocol.RESPONSES else None
     request.output_format = decode_output_format(body, source)
     _check_turns(request, target, messages_mid_system=messages_mid_system)
     output = _ENCODERS[target](request)

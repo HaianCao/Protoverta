@@ -8,6 +8,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 
 from .core import ConversionError, Protocol, _check_function_names
+from .resources import StreamLimits
 from .sse import SSEParser, encode_sse
 from .stream_encoder import StreamEncoder
 from .streaming import Delta, StreamDecoder, StreamError, UnsupportedReasoningError
@@ -83,7 +84,7 @@ class StreamTranscoder:
     Calling code must not emit a successful terminal event after an exception.
     """
 
-    def __init__(self, source: Protocol | str, target: Protocol | str, *, messages_usage_policy: str = "strict", max_pending_bytes: int = 8 * 1024 * 1024, response_transform: Callable[[dict], dict] | None = None, public_reasoning: bool = False, tool_name_transform: Callable[[str], str] | None = None) -> None:
+    def __init__(self, source: Protocol | str, target: Protocol | str, *, messages_usage_policy: str = "strict", max_pending_bytes: int = 8 * 1024 * 1024, response_transform: Callable[[dict], dict] | None = None, public_reasoning: bool = False, tool_name_transform: Callable[[str], str] | None = None, max_stream_bytes=32 * 1024 * 1024, max_stream_items=1024, max_tool_argument_bytes=8 * 1024 * 1024) -> None:
         self.source = Protocol(source)
         self.target = Protocol(target)
         if messages_usage_policy not in {"strict", "deferred"}:
@@ -101,16 +102,19 @@ class StreamTranscoder:
         self._terminal = b""
         self._closed = False
         self.has_payload = False
+        self.limits = StreamLimits(max_stream_bytes, max_stream_items, max_tool_argument_bytes)
 
     def feed(self, chunk: bytes) -> bytes:
         if self._closed:
             raise StreamError("stream already finished")
+        self.limits.consume(chunk)
         output = bytearray()
         try:
             events = self.parser.feed(chunk)
         except (UnicodeError, ValueError) as exc:
             raise StreamError(str(exc)) from exc
         for event in events:
+            self.limits.observe(event)
             for decoded in self.decoder.feed(event):
                 if decoded.kind == "tool_start" and self.tool_name_transform is None:
                     try:
@@ -285,21 +289,24 @@ class StreamValidator:
     multimodal and hosted-tool events without interpreting their contents.
     """
 
-    def __init__(self, protocol: Protocol | str) -> None:
+    def __init__(self, protocol: Protocol | str, *, max_stream_bytes=32 * 1024 * 1024, max_stream_items=1024, max_tool_argument_bytes=8 * 1024 * 1024) -> None:
         self.parser = SSEParser()
         self.decoder = _LifecycleValidator(protocol)
+        self.limits = StreamLimits(max_stream_bytes, max_stream_items, max_tool_argument_bytes)
         self._terminal = b""
         self._closed = False
 
     def feed(self, chunk: bytes) -> bytes:
         if self._closed:
             raise StreamError("stream already finished")
+        self.limits.consume(chunk)
         try:
             events = self.parser.feed(chunk)
         except (UnicodeError, ValueError) as exc:
             raise StreamError(str(exc)) from exc
         output = bytearray()
         for event in events:
+            self.limits.observe(event)
             self.decoder.feed(event)
             wire = encode_sse(event.event, event.data, id=event.id)
             if self.decoder.ended:

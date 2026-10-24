@@ -48,6 +48,12 @@ chat_request = convert_request(messages_request, "messages", "chat")
 omitted values do not invent a sampling setting. Provider/model support remains
 subject to capability checks.
 
+Image-bearing tool results map between Messages and Responses without changing
+their role or call ID. Explicit strict function flags map between Chat and
+Responses. Stop-sequence request controls map between Chat and Messages, but
+matched-stop response metadata remains nonportable; see
+[the exact boundaries](docs/compatibility/output-formats.md).
+
 User images support URL/base64 references in ordered text/image messages on all
 six request routes. Explicit detail selectors, provider-owned file IDs and
 image tool results have portability limits; see [image inputs](docs/compatibility/images.md).

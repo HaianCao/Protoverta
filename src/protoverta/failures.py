@@ -36,7 +36,7 @@ def gateway_failure(status: int, message: str, *, code: str | None = None, secre
     kind = {400: "invalid_request", 401: "authentication", 403: "permission", 404: "not_found", 408: "invalid_request", 411: "invalid_request", 413: "too_large", 422: "invalid_request", 429: "rate_limit", 503: "overloaded", 504: "timeout", 529: "overloaded"}.get(status, "upstream")
     if status in {400, 413, 422} and code in _CONTEXT_CODES:
         kind, code = "context_window", "context_length_exceeded"
-    elif code not in {"unsupported_reasoning", "invalid_stream", "upstream_transport", "upstream_timeout"}:
+    elif code not in {"unsupported_reasoning", "invalid_stream", "upstream_transport", "upstream_timeout", "request_deadline", "progress_timeout", "stream_limit"}:
         code = kind
     # Known secrets are removed before bounding the message, including when a
     # provider embeds credentials in an otherwise valid JSON error response.

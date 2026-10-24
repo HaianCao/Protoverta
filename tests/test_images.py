@@ -97,7 +97,7 @@ def test_image_tool_results_are_rejected_not_joined_as_empty_text(source):
         body = {"model": "m", "input": [{"type": "function_call", "call_id": "c", "name": "screenshot", "arguments": "{}"}, {"type": "function_call_output", "call_id": "c", "output": [image(source)]}]}
     else:
         body = {"model": "m", "max_tokens": 32, "messages": [{"role": "assistant", "content": [{"type": "tool_use", "id": "c", "name": "screenshot", "input": {}}]}, {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "c", "content": [image(source)]}]}]}
-    with pytest.raises(ConversionError, match="non-text tool results"):
+    with pytest.raises(ConversionError, match="cannot preserve image-bearing tool results"):
         convert_request(body, source, "chat")
 
 

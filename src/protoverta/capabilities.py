@@ -16,7 +16,7 @@ from urllib.parse import urlsplit, urlunsplit
 from .core import Protocol
 from .errors import ConversionError
 
-FEATURES = frozenset({"text", "streaming", "tools", "forced_tool_choice", "json_object", "json_schema", "strict_json_schema", "reasoning_effort", "public_reasoning", "images", "mid_conversation_system", "top_p"})
+FEATURES = frozenset({"text", "streaming", "tools", "forced_tool_choice", "json_object", "json_schema", "strict_json_schema", "reasoning_effort", "public_reasoning", "images", "mid_conversation_system", "top_p", "stop_sequences", "strict_tools", "image_tool_results"})
 
 
 def _prefix(value: str) -> str:
@@ -94,6 +94,10 @@ def request_features(body: dict, protocol: Protocol | str) -> frozenset[str]:
         features.add("streaming")
     if body.get("tools"):
         features.add("tools")
+        if any(isinstance(tool, dict) and (tool.get("function", tool) if protocol == Protocol.CHAT else tool).get("strict") is True for tool in body["tools"] if isinstance(tool, dict) and (protocol != Protocol.CHAT or isinstance(tool.get("function"), dict))):
+            features.add("strict_tools")
+    if body.get("stop" if protocol == Protocol.CHAT else "stop_sequences") is not None:
+        features.add("stop_sequences")
     choice = body.get("tool_choice")
     if choice == "required" or isinstance(choice, dict) and isinstance(choice.get("type"), str) and choice["type"] in {"function", "tool", "any"}:
         features.add("forced_tool_choice")
@@ -139,6 +143,16 @@ def request_features(body: dict, protocol: Protocol | str) -> frozenset[str]:
 
     if contains_image(body.get("messages", body.get("input"))):
         features.add("images")
+    def rich_result(value):
+        if isinstance(value, list):
+            return any(rich_result(item) for item in value)
+        if isinstance(value, dict):
+            if isinstance(value.get("type"), str) and value["type"] in {"tool_result", "function_call_output"}:
+                return contains_image(value.get("content", value.get("output")))
+            return rich_result(value.get("content"))
+        return False
+    if rich_result(body.get("messages", body.get("input"))):
+        features.add("image_tool_results")
     history = body.get("messages" if protocol != Protocol.RESPONSES else "input")
     if isinstance(history, list) and any(isinstance(item, dict) and (item.get("role") == "assistant" and item.get("reasoning_content") is not None or item.get("type") == "reasoning" and bool(item.get("content"))) for item in history):
         features.add("public_reasoning")

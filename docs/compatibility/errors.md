@@ -39,4 +39,23 @@ deadline**. Incomplete client body reads time out with 408. Limits must be finit
 and positive; no timeout, sandbox, privilege or real user installation is altered
 by the test harnesses.
 
+Separate upstream budgets are now available: `--total-timeout` (600 seconds)
+and `--progress-timeout` (120 seconds). The former never resets; the latter
+resets for content/tool-argument progress, not pings, usage or repeated function
+metadata. Deadlines cover header/body reads in the default HTTP(S) transport,
+including slow-drip headers/JSON bodies. Connection establishment uses the
+smaller remaining socket budget; OS DNS resolution is not forcibly cancellable.
+Custom injected transports must implement bounded I/O themselves; checks around
+their reads cannot interrupt arbitrary blocking Python callbacks.
+
+`--max-stream-bytes` (32 MiB), `--max-stream-items` (1024), and
+`--max-tool-argument-bytes` (8 MiB) bound cumulative upstream wire data, logical
+items, and aggregate argument data before successful completion. These bounds
+also apply to native `StreamValidator`; library `StreamTranscoder` accepts the
+same Python options. Low-level direct decoders remain caller-managed.
+The budget limits retained data asymptotically, not an exact process-RSS ceiling.
+Oversized streams fail with `stream_limit`; explicit elapsed budgets use
+`request_deadline` or `progress_timeout`. No success terminal is fabricated.
+Local policy-limit failures are non-retryable before headers are sent.
+
 Reference: [OpenAI Responses error events](https://developers.openai.com/api/reference/resources/responses/streaming-events).

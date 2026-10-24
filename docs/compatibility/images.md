@@ -27,11 +27,19 @@ Messages has no equivalent selector: omitted/`auto` uses its default image
 handling; explicit `low`, `high` and `original` are rejected rather than dropped.
 This mapping does not guarantee identical resolution or token cost.
 
-Provider-owned `file_id`, assistant/generated images, image tool results,
+Provider-owned `file_id`, assistant/generated images,
 PDF/audio/video and unknown image options remain errors on translated routes.
 Native requests are forwarded unchanged, subject to gateway transport limits.
 Capability records can mark `images` false or require explicit verified support;
 a `/models` listing alone is not evidence that vision works.
+
+Image-bearing tool results now map between Messages and Responses, preserving
+call IDs, tool-result ownership, text/image ordering and URL/base64 references.
+Their input conversion is shared by JSON and SSE requests. Chat targets still
+reject them: relocating tool images into user messages is not a strict mapping.
+Image detail selectors and provider-owned file IDs retain the restrictions above.
+Capability records distinguish `image_tool_results` from ordinary `images`.
+See [OpenAI function outputs](https://developers.openai.com/api/docs/guides/function-calling).
 
 One live SSE sample passed Responses → Chat through NVIDIA NIM
 `minimaxai/minimax-m3.1-flash`, with public reasoning enabled. The probe generated

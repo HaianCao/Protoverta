@@ -12,6 +12,11 @@ protocols remain distinct. No wildcard, cross-protocol or cross-vendor inheritan
 is performed. Duplicate entries and URLs containing credentials/query/fragment
 are rejected. The JSON registry is bounded at 2 MiB and must not contain secrets.
 
+The feature vocabulary also includes `strict_tools` (ordinary strict function
+definitions), `stop_sequences` (request controls), and `image_tool_results`
+(distinct from ordinary user `images`). These are checked on the actual
+outbound representation, not inferred from a provider name or tool schema text.
+
 See [the registry example](../../configs/capabilities.example.json) for its
 versioned JSON format. The example is illustrative, not verified provider data.
 

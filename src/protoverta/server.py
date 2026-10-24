@@ -20,10 +20,18 @@ from .core import ConversionError, Protocol, convert_request, convert_response
 from .failures import gateway_failure
 from .namespaces import NamespaceMap
 from .profiles import prepare_claude_request, prepare_codex_request
+from .resources import (
+    DeadlineExceeded,
+    RequestBudget,
+    StreamLimitError,
+    StreamLimits,
+    positive_number,
+)
 from .sse import encode_sse
 from .stream_pipe import StreamTranscoder, StreamValidator
 from .streaming import StreamError, UnsupportedReasoningError
 from .tool_names import ToolNameMap
+from .transport import DeadlineHTTPHandler, DeadlineHTTPSHandler
 
 _PATHS = {
     "/v1/chat/completions": Protocol.CHAT,
@@ -52,6 +60,11 @@ class GatewayConfig:
     public_reasoning: bool = False
     tool_names: str | None = None
     max_concurrent_requests: int = 16
+    total_timeout: float = 600.0
+    progress_timeout: float = 120.0
+    max_stream_bytes: int = 32 * 1024 * 1024
+    max_stream_items: int = 1024
+    max_tool_argument_bytes: int = 8 * 1024 * 1024
 
     def __post_init__(self) -> None:
         if not isinstance(self.public_reasoning, bool):
@@ -78,6 +91,9 @@ class GatewayConfig:
             raise ValueError("timeout and max_body_bytes must be positive")
         if type(self.max_concurrent_requests) is not int or self.max_concurrent_requests <= 0:
             raise ValueError("max_concurrent_requests must be a positive integer")
+        if not positive_number(self.total_timeout) or not positive_number(self.progress_timeout):
+            raise ValueError("total_timeout and progress_timeout must be finite positive numbers")
+        StreamLimits(self.max_stream_bytes, self.max_stream_items, self.max_tool_argument_bytes)
         if self.client_profile not in {"strict", "codex", "claude"}:
             raise ValueError("client_profile must be strict, codex or claude")
         if self.messages_usage_policy not in {"strict", "deferred"}:
@@ -144,7 +160,7 @@ class _RedirectBlocker(HTTPRedirectHandler):
 
 
 def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPRequestHandler]:
-    opener = build_opener(_RedirectBlocker())
+    opener = build_opener(_RedirectBlocker(), DeadlineHTTPHandler(), DeadlineHTTPSHandler())
     open_upstream = upstream_open or opener.open
     admission = threading.BoundedSemaphore(config.max_concurrent_requests)
 
@@ -179,8 +195,10 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
             self.end_headers()
             self.wfile.write(raw)
 
-        def _stream(self, response, source: Protocol, target: Protocol, response_transform=None, tool_name_transform=None) -> None:
-            pipeline = StreamTranscoder(source, target, messages_usage_policy=config.messages_usage_policy, max_pending_bytes=config.max_body_bytes, response_transform=response_transform, public_reasoning=config.public_reasoning, tool_name_transform=tool_name_transform) if source != target else StreamValidator(source)
+        def _stream(self, response, source: Protocol, target: Protocol, response_transform=None, tool_name_transform=None, budget=None) -> None:
+            limits = {"max_stream_bytes": config.max_stream_bytes, "max_stream_items": config.max_stream_items, "max_tool_argument_bytes": config.max_tool_argument_bytes}
+            pipeline = StreamTranscoder(source, target, messages_usage_policy=config.messages_usage_policy, max_pending_bytes=config.max_body_bytes, response_transform=response_transform, public_reasoning=config.public_reasoning, tool_name_transform=tool_name_transform, **limits) if source != target else StreamValidator(source, **limits)
+            budget = budget or RequestBudget(config.timeout, config.total_timeout, config.progress_timeout)
             headers_sent = False
             initial = bytearray()
 
@@ -197,10 +215,13 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
 
             try:
                 while True:
-                    chunk = response.read1(4096) if hasattr(response, "read1") else response.read(1)
+                    chunk = budget.read(response, 4096 if hasattr(response, "read1") else 1, streaming=True)
                     if not chunk:
                         break
+                    previous_progress = pipeline.limits.progress
                     output = pipeline.feed(chunk)
+                    if pipeline.limits.progress > previous_progress:
+                        budget.progress()
                     if output:
                         if not headers_sent:
                             initial.extend(output)
@@ -232,11 +253,13 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                     hint = "Messages requires its own thinking/signature contract; use native Messages or a compatible Responses route." if target == Protocol.MESSAGES else "For unsigned Chat reasoning_content, enable public_reasoning explicitly on a Chat/Responses route; summaries, signed or encrypted state remain unsupported."
                     message = "Upstream reasoning cannot be preserved on this route. " + hint + " No reasoning was dropped or given a fabricated signature."
                 timeout = isinstance(exc, TimeoutError)
-                failure = gateway_failure(422 if unsupported else 504 if timeout else 502, message, code="unsupported_reasoning" if unsupported else "upstream_timeout" if timeout else "invalid_stream")
+                limited = isinstance(exc, StreamLimitError)
+                code = "unsupported_reasoning" if unsupported else exc.kind if isinstance(exc, DeadlineExceeded) else "upstream_timeout" if timeout else "stream_limit" if limited else "invalid_stream"
+                failure = gateway_failure(422 if unsupported else 504 if timeout else 502, message, code=code)
                 payload = failure.payload(target)
                 try:
                     if not headers_sent:
-                        self._json(failure.status, payload, {"x-should-retry": "false"} if unsupported else None)
+                        self._json(failure.status, payload, {"x-should-retry": "false"} if unsupported or limited or isinstance(exc, DeadlineExceeded) else None)
                     else:
                         sequence = pipeline.encoder.sequence if isinstance(pipeline, StreamTranscoder) else pipeline.decoder.sequence + 1
                         error = json.dumps(failure.stream_payload(target, sequence_number=max(0, sequence)))
@@ -349,12 +372,20 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                 return mapped
 
             try:
-                with open_upstream(request, timeout=config.timeout) as response:
+                budget = RequestBudget(config.timeout, config.total_timeout, config.progress_timeout)
+                request.protoverta_budget = budget
+                with open_upstream(request, timeout=budget.remaining()) as response:
+                    budget.remaining()
                     if streaming:
                         transform = restore_response if protocol == Protocol.RESPONSES and (namespace_map or "text" in payload or any(payload.get(option) is not None for option in ("top_p", "temperature"))) else None
-                        self._stream(response, config.upstream_protocol, protocol, transform, tool_name_map.decode if tool_name_map is not None else None)
+                        self._stream(response, config.upstream_protocol, protocol, transform, tool_name_map.decode if tool_name_map is not None else None, budget)
                         return
-                    raw = response.read(config.max_body_bytes + 1)
+                    raw = bytearray()
+                    while len(raw) <= config.max_body_bytes:
+                        chunk = budget.read(response, min(4096, config.max_body_bytes + 1 - len(raw)), streaming=True)
+                        if not chunk:
+                            break
+                        raw.extend(chunk)
                     if len(raw) > config.max_body_bytes:
                         raise ConversionError("upstream response is too large")
                     result = json.loads(raw)
@@ -366,14 +397,19 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                     self._json(200, result, getattr(response, "headers", None))
             except HTTPError as exc:
                 try:
-                    raw = exc.read(config.max_body_bytes + 1)
+                    raw = bytearray()
+                    while len(raw) <= config.max_body_bytes:
+                        chunk = budget.read(exc, min(4096, config.max_body_bytes + 1 - len(raw)), streaming=True)
+                        if not chunk:
+                            break
+                        raw.extend(chunk)
                     if len(raw) > config.max_body_bytes:
                         raise ValueError("upstream error is too large")
                     error = json.loads(raw)
                     if not isinstance(error, dict) or not isinstance(error.get("error"), dict):
                         raise TypeError("not an API error object")
                     if protocol == config.upstream_protocol and 400 <= exc.code < 600:
-                        self._raw_json(exc.code, raw, exc.headers)
+                        self._raw_json(exc.code, bytes(raw), exc.headers)
                     else:
                         detail = error["error"]
                         message = detail.get("message")
@@ -384,7 +420,8 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                     exc.close()
             except (URLError, TimeoutError, OSError) as exc:
                 timeout = isinstance(exc, TimeoutError) or isinstance(exc, URLError) and isinstance(exc.reason, TimeoutError)
-                self._error(504 if timeout else 502, f"upstream transport error: {type(exc).__name__}", protocol, code="upstream_timeout" if timeout else "upstream_transport")
+                cause = exc.reason if isinstance(exc, URLError) else exc
+                self._error(504 if timeout else 502, f"upstream transport error: {type(exc).__name__}", protocol, code=cause.kind if isinstance(cause, DeadlineExceeded) else "upstream_timeout" if timeout else "upstream_transport", headers={"x-should-retry": "false"} if isinstance(cause, DeadlineExceeded) else None)
             except (json.JSONDecodeError, UnicodeError, ConversionError, StreamError) as exc:
                 self._error(502, str(exc), protocol)
 

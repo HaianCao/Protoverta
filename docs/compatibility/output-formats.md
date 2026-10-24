@@ -23,6 +23,24 @@ It is not added to requests sent to a native Responses upstream.
 
 ## Structured output
 
+Ordinary function definitions preserve explicit boolean `strict` between Chat
+and Responses without changing the schema. Strict functions targeting Messages,
+and strict namespaced functions under flattening, remain rejected. Enforcement
+is owned by the selected upstream model; capability records can separately
+require `strict_tools`. This does not enable custom/hosted tools.
+When generating Responses functions from non-strict Chat/Messages definitions,
+the converter explicitly sets `strict: false`, avoiding unintended Responses
+schema normalization. The generic portable subset treats omitted/null function
+strictness as non-strict; native routes preserve provider defaults unchanged.
+
+### Stop-sequence requests
+
+Chat `stop` and Messages `stop_sequences` map for 1-4 nonempty strings, keeping
+order and content. Responses targets reject this option rather than emulate
+stopping locally. Returned Messages `stop_sequence` metadata still cannot be
+represented losslessly in Chat/Responses and remains rejected; this is request
+mapping, not a promise that every matched-stop terminal response is portable.
+
 | Format | Chat ↔ Responses | Routes involving Messages |
 | --- | --- | --- |
 | Plain text | Supported | Supported |
