@@ -13,6 +13,7 @@ import secrets
 import shutil
 import subprocess
 import tempfile
+from contextlib import nullcontext
 from pathlib import Path
 from unittest.mock import patch
 from urllib.request import build_opener
@@ -20,12 +21,13 @@ from urllib.request import build_opener
 from probe_process import run_process
 from smoke_clients import MARKER, run_client
 from smoke_resume import session_id
+from stream_diagnostics import StreamDiagnostics
 
 from protoverta.core import Protocol
 from protoverta.server import GatewayConfig
 
 
-def _probe_codex_goal(upstream, base_url, key, model, adapter_source, env, directory, timeout, *, nonce=None, reasoning="openrouter_disabled"):
+def _probe_codex_goal(upstream, base_url, key, model, adapter_source, env, directory, timeout, *, nonce=None, reasoning="openrouter_disabled", diagnostics=None):
     """Observe the real transport; use a read-only tool, never bypass shell policy."""
     import sys
 
@@ -43,6 +45,7 @@ def _probe_codex_goal(upstream, base_url, key, model, adapter_source, env, direc
     requests = 0
     real_handler = server.make_handler
     opener = build_opener(server._RedirectBlocker())
+    open_request = diagnostics.wrap_open(opener.open) if diagnostics is not None else opener.open
 
     def observed_open(request, *, timeout):
         nonlocal requests
@@ -59,7 +62,7 @@ def _probe_codex_goal(upstream, base_url, key, model, adapter_source, env, direc
             calls = {block["id"]: block["name"] for block in blocks if block.get("type") == "tool_use"}
             results = [block["tool_use_id"] for block in blocks if block.get("type") == "tool_result"]
         tool_results.update(call_id for call_id in results if calls.get(call_id) == "get_goal")
-        return opener.open(request, timeout=timeout)
+        return open_request(request, timeout=timeout)
 
     def run(args, **kwargs):
         nonlocal completed
@@ -70,7 +73,7 @@ def _probe_codex_goal(upstream, base_url, key, model, adapter_source, env, direc
         completed = run_process(args, **kwargs)
         return completed
 
-    with patch.dict(os.environ, env, clear=True), patch("protoverta.server.make_handler", side_effect=lambda config: real_handler(config, upstream_open=observed_open)), patch("codex_adapter.launcher.subprocess.run", side_effect=run):
+    with diagnostics.capture(observe_transport=False) if diagnostics is not None else nullcontext(), patch.dict(os.environ, env, clear=True), patch("protoverta.server.make_handler", side_effect=lambda config: real_handler(config, upstream_open=observed_open)), patch("codex_adapter.launcher.subprocess.run", side_effect=run):
         marker = nonce or "PROTOVERTA_SMOKE_OK"
         launch(config, provider, model, "low", ["exec", "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check", "--json", "--sandbox", "read-only", f"Call get_goal exactly once. Do not create or update any goal. Do not use shell, files, network, or other tools. After receiving the tool result, reply with {marker}."])
     return completed, bool(tool_results), requests
@@ -94,7 +97,9 @@ def _completed_answer(client: str, stdout: str) -> tuple[str, bool]:
     return "\n".join(answer), executed_tool
 
 
-def probe(client: str, upstream: Protocol, base_url: str, key: str, model: str, adapter_source: Path, *, timeout: int = 120, tool_loop: bool = False, reasoning: str = "openrouter_disabled") -> dict:
+def probe(client: str, upstream: Protocol, base_url: str, key: str, model: str, adapter_source: Path, *, timeout: int = 120, tool_loop: bool = False, reasoning: str = "openrouter_disabled", diagnostics: bool = False, max_upstream_requests: int | None = None) -> dict:
+    if max_upstream_requests is not None and not diagnostics:
+        raise ValueError("A request budget requires diagnostics mode")
     executable = shutil.which(client)
     if not executable:
         raise ValueError(f"{client} is not on PATH")
@@ -106,6 +111,8 @@ def probe(client: str, upstream: Protocol, base_url: str, key: str, model: str, 
         root = Path(directory)
         env = {name: value for name, value in os.environ.items() if name.upper() in {"PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP"}}
         env.update({"HOME": directory, "USERPROFILE": directory, "APPDATA": str(root / "roaming"), "LOCALAPPDATA": str(root / "local"), "CODEX_HOME": str(root / "codex"), "CLAUDE_CONFIG_DIR": str(root / "claude"), "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1", "CLAUDE_CODE_SIMPLE": "1"})
+        if max_upstream_requests is not None:
+            env["PROTOVERTA_PROBE_REQUEST_LIMIT"] = str(max_upstream_requests)
         for name in ("roaming", "local", "codex", "claude"):
             (root / name).mkdir()
         expected = MARKER
@@ -116,10 +123,16 @@ def probe(client: str, upstream: Protocol, base_url: str, key: str, model: str, 
             fixture.write_text(expected + "\n", encoding="utf-8")
             prompt = f"Read the file {fixture.as_posix()} using {'only the Read tool' if client == 'claude' else 'a read-only shell command'}. Then reply with exactly its full contents. Do not read any other files, write anything, use network access, or delegate."
         observed_tool, requests = False, None
+        diagnostic = StreamDiagnostics(max_upstream_requests=max_upstream_requests) if diagnostics else None
+        trace_file = root / "trace.json" if diagnostics else None
         if tool_loop and client == "codex":
-            result, observed_tool, requests = _probe_codex_goal(upstream, base_url, key, model, adapter_source, env, directory, timeout, reasoning=reasoning)
+            result, observed_tool, requests = _probe_codex_goal(upstream, base_url, key, model, adapter_source, env, directory, timeout, reasoning=reasoning, diagnostics=diagnostic)
         else:
-            result = run_client(client, executable, "http://127.0.0.1:0", base_url.removesuffix("/v1"), config, env, directory, tool_loop, adapter_source, False, upstream, timeout, model, prompt=prompt)
+            result = run_client(client, executable, "http://127.0.0.1:0", base_url.removesuffix("/v1"), config, env, directory, tool_loop, adapter_source, False, upstream, timeout, model, prompt=prompt, trace_file=trace_file)
+        report = diagnostic.snapshot() if diagnostic is not None else None
+        if trace_file is not None and trace_file.is_file():
+            observations = json.loads(trace_file.read_text(encoding="utf-8"))
+            report = next((item["stream_diagnostics"] for item in observations if "stream_diagnostics" in item), report)
         # Never print raw request/response bodies or credentials. Retain only
         # status and a bounded, key-redacted error tail on failure.
         try:
@@ -127,8 +140,18 @@ def probe(client: str, upstream: Protocol, base_url: str, key: str, model: str, 
         except (ValueError, TypeError):
             answer, executed_tool = "", False
         executed_tool = executed_tool or observed_tool
-        passed = result.returncode == 0 and expected in answer and (not tool_loop or executed_tool)
-        return {"client": client, "upstream": upstream.value, "model": model, "tool_loop": tool_loop, "passed": passed, "tool_verified": executed_tool if tool_loop else None, "requests": requests, "returncode": result.returncode, "error": "" if passed else (result.stderr + result.stdout).replace(key, "[REDACTED]")[-2500:]}
+        passed = result.returncode == 0 and expected in answer and (not tool_loop or executed_tool) and (not diagnostics or not report.get("failures"))
+        error = ""
+        if not passed:
+            if diagnostics:
+                failures = report.get("failures", [])
+                error = "client_timeout" if result.returncode == 124 else failures[0]["category"] if failures else "client_or_verification_failed"
+            else:
+                error = (result.stderr + result.stdout).replace(key, "[REDACTED]")[-2500:]
+        output = {"client": client, "upstream": upstream.value, "model": model, "tool_loop": tool_loop, "passed": passed, "tool_verified": executed_tool if tool_loop else None, "requests": requests, "returncode": result.returncode, "error": error}
+        if diagnostics:
+            output["diagnostics"] = report
+        return output
 
 
 def probe_resume(client: str, source: Protocol, target: Protocol, base_url: str, key: str, model: str, adapter_source: Path, *, timeout: int = 120, tool_loop: bool = False, target_base_url: str | None = None, target_key: str | None = None, target_model: str | None = None, source_reasoning: str = "openrouter_disabled", target_reasoning: str | None = None, target_public_reasoning: bool = False, verify_replay: bool = False) -> dict:
@@ -210,6 +233,9 @@ def main() -> int:
     parser.add_argument("--base-url", default="https://openrouter.ai/api/v1")
     parser.add_argument("--adapter-source", type=Path, required=True)
     parser.add_argument("--tool-loop", action="store_true", help="Verify a real tool round trip: Claude reads a nonce file; Codex queries get_goal")
+    parser.add_argument("--diagnostics", action="store_true", help="Fresh probes: bounded stage/transport shapes and fixed failure categories, without client output")
+    parser.add_argument("--max-upstream-requests", type=int, help="Diagnostics only: stop locally before another upstream request exceeds this budget")
+    parser.add_argument("--timeout", type=int, default=120, help="Maximum client runtime in seconds")
     parser.add_argument("--resume-target", type=Protocol, choices=list(Protocol), help="Run two persistent turns, resuming against this protocol")
     parser.add_argument("--target-base-url", help="Resume on a different real API prefix")
     parser.add_argument("--target-model", help="Resume using a different real model")
@@ -222,6 +248,12 @@ def main() -> int:
     args = parser.parse_args()
     if not args.allow_live:
         parser.error("Live API calls require --allow-live")
+    if args.timeout <= 0:
+        parser.error("Timeout must be positive")
+    if args.diagnostics and args.resume_target:
+        parser.error("Diagnostics mode currently requires a fresh probe")
+    if args.max_upstream_requests is not None and (not args.diagnostics or args.max_upstream_requests <= 0):
+        parser.error("A positive request budget requires diagnostics mode")
     key = os.environ.get(args.key_env)
     if not key:
         parser.error("The configured key environment variable is empty")
@@ -233,7 +265,7 @@ def main() -> int:
     if args.target_public_reasoning and (args.client != "codex" or args.resume_target != Protocol.CHAT):
         parser.error("Public reasoning is only portable for a Codex Chat resume target")
     try:
-        result = probe_resume(args.client, args.upstream, args.resume_target, args.base_url, key, args.model, args.adapter_source, tool_loop=args.tool_loop, target_base_url=args.target_base_url, target_key=target_key, target_model=args.target_model, source_reasoning=args.source_reasoning, target_reasoning=args.target_reasoning, target_public_reasoning=args.target_public_reasoning, verify_replay=args.verify_replay) if args.resume_target else probe(args.client, args.upstream, args.base_url, key, args.model, args.adapter_source, tool_loop=args.tool_loop, reasoning=args.source_reasoning)
+        result = probe_resume(args.client, args.upstream, args.resume_target, args.base_url, key, args.model, args.adapter_source, timeout=args.timeout, tool_loop=args.tool_loop, target_base_url=args.target_base_url, target_key=target_key, target_model=args.target_model, source_reasoning=args.source_reasoning, target_reasoning=args.target_reasoning, target_public_reasoning=args.target_public_reasoning, verify_replay=args.verify_replay) if args.resume_target else probe(args.client, args.upstream, args.base_url, key, args.model, args.adapter_source, timeout=args.timeout, tool_loop=args.tool_loop, reasoning=args.source_reasoning, diagnostics=args.diagnostics, max_upstream_requests=args.max_upstream_requests)
     except subprocess.TimeoutExpired:
         result = {"passed": False, "client": args.client, "error": "client_timeout"}
     print(json.dumps(result, indent=2))

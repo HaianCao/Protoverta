@@ -104,3 +104,52 @@ def test_three_turn_probe_observes_real_public_reasoning_replay(probe_module, mo
     assert result["passed"] and result["public_reasoning_received"] and result["replayed_public_reasoning"]
     assert len(calls) == 3 and calls[-1]["resume_id"] == "same-session"
     assert "RESUME_NONCE_synthetic" not in calls[-1]["prompt"]
+
+
+def test_fresh_diagnostics_never_return_raw_client_output(probe_module, monkeypatch, tmp_path):
+    monkeypatch.setattr(probe_module.shutil, "which", lambda name: name + ".exe")
+
+    def run(*args, **kwargs):
+        report = {"requests": 1, "failures": [{"stage": "encoder", "operation": "feed", "category": "invalid_stream"}]}
+        kwargs["trace_file"].write_text(json.dumps([{"stream_diagnostics": report}]), encoding="utf-8")
+        return SimpleNamespace(returncode=1, stdout="private-reasoning key", stderr="private-client-output")
+
+    monkeypatch.setattr(probe_module, "run_client", run)
+    result = probe_module.probe("claude", probe_module.Protocol.CHAT, "https://example.test/v1", "key", "synthetic", tmp_path, diagnostics=True)
+    assert not result["passed"] and result["error"] == "invalid_stream"
+    assert result["diagnostics"]["failures"][0]["stage"] == "encoder"
+    assert "private" not in json.dumps(result)
+
+
+def test_codex_tool_probe_receives_and_returns_bounded_diagnostics(probe_module, monkeypatch, tmp_path):
+    monkeypatch.setattr(probe_module.shutil, "which", lambda name: name + ".exe")
+
+    def run(*args, **kwargs):
+        kwargs["diagnostics"].failure("parser", "finish", ValueError("private-key"))
+        return SimpleNamespace(returncode=1, stdout="private-client-output", stderr=""), False, 1
+
+    monkeypatch.setattr(probe_module, "_probe_codex_goal", run)
+    result = probe_module.probe("codex", probe_module.Protocol.CHAT, "https://example.test/v1", "key", "synthetic", tmp_path, tool_loop=True, diagnostics=True)
+    assert result["requests"] == 1 and not result["tool_verified"]
+    assert result["diagnostics"]["failures"][0]["stage"] == "parser"
+    assert "private" not in json.dumps(result)
+
+
+def test_budget_is_passed_to_isolated_trace_child_and_failure_cannot_be_a_pass(probe_module, monkeypatch, tmp_path):
+    monkeypatch.setattr(probe_module.shutil, "which", lambda name: name + ".exe")
+
+    def run(*args, **kwargs):
+        assert args[5]["PROTOVERTA_PROBE_REQUEST_LIMIT"] == "1"
+        report = {"requests": 1, "max_upstream_requests": 1, "failures": [{"stage": "probe", "operation": "open", "category": "probe_request_budget"}]}
+        kwargs["trace_file"].write_text(json.dumps([{"stream_diagnostics": report}]), encoding="utf-8")
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"result": probe_module.MARKER, "is_error": False}), stderr="")
+
+    monkeypatch.setattr(probe_module, "run_client", run)
+    result = probe_module.probe("claude", probe_module.Protocol.CHAT, "https://example.test/v1", "key", "synthetic", tmp_path, diagnostics=True, max_upstream_requests=1)
+    assert result["returncode"] == 0 and not result["passed"]
+    assert result["error"] == "probe_request_budget"
+
+
+def test_request_limit_without_diagnostics_is_rejected_before_launch(probe_module, tmp_path):
+    with pytest.raises(ValueError, match="requires diagnostics"):
+        probe_module.probe("codex", probe_module.Protocol.CHAT, "https://example.test/v1", "key", "synthetic", tmp_path, max_upstream_requests=1)

@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import re
 import sys
 from pathlib import Path
 
+from stream_diagnostics import StreamDiagnostics
+
 from protoverta import server
-from protoverta.streaming import StreamDecoder, StreamError
+from protoverta.streaming import StreamDecoder
 
 
 def _array(value):
@@ -34,33 +37,32 @@ def main() -> int:
     module_name, output = sys.argv[1:3]
     sys.argv = [module_name, *sys.argv[3:]]
     observations = []
+    request_limit = os.environ.pop("PROTOVERTA_PROBE_REQUEST_LIMIT", None)
+    diagnostics = StreamDiagnostics(max_upstream_requests=int(request_limit) if request_limit is not None else None)
     original = server.prepare_codex_request
     original_feed = StreamDecoder.feed
 
     def prepare(body, target, **kwargs):
-        observations.append(summarize(body))
+        if len(observations) < 32:
+            observations.append(summarize(body))
         return original(body, target, **kwargs)
 
     def feed(decoder, event):
-        try:
-            deltas = original_feed(decoder, event)
-            if any(delta.kind == "reasoning_text" and delta.text for delta in deltas) and not any(item.get("public_reasoning_received") for item in observations):
-                observations.append({"public_reasoning_received": True})
-            return deltas
-        except StreamError as exc:
-            # Fixed categories only: an upstream field name/error message may
-            # contain arbitrary data and must not enter diagnostic output.
-            category = "unsupported_reasoning" if any(word in str(exc) for word in ("reasoning", "thinking")) else "invalid_stream"
-            observations.append({"stream_error": category})
-            raise
+        deltas = original_feed(decoder, event)
+        if any(delta.kind == "reasoning_text" and delta.text for delta in deltas) and not any(item.get("public_reasoning_received") for item in observations):
+            observations.append({"public_reasoning_received": True})
+        return deltas
 
     server.prepare_codex_request = prepare
     StreamDecoder.feed = feed
     try:
-        return importlib.import_module(module_name).main()
+        with diagnostics.capture():
+            return importlib.import_module(module_name).main()
     finally:
         server.prepare_codex_request = original
         StreamDecoder.feed = original_feed
+        observations.extend({"stream_error": failure["category"], "stage": failure["stage"], "operation": failure["operation"]} for failure in diagnostics.failures)
+        observations.append({"stream_diagnostics": diagnostics.snapshot()})
         Path(output).write_text(json.dumps(observations), encoding="utf-8")
 
 
