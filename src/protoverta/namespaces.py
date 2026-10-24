@@ -43,7 +43,7 @@ class NamespaceMap:
         if not isinstance(tools, list):
             raise ConversionError("tools must be an array")
         for tool in tools:
-            if isinstance(tool, dict) and tool.get("type") == "function":
+            if isinstance(tool, dict) and tool.get("type") in ("function", "custom"):
                 name = _name(tool.get("name"), "function name")
                 if name in self.flat_names:
                     raise ConversionError("duplicate function name")
@@ -51,7 +51,7 @@ class NamespaceMap:
         inputs = result.get("input")
         if isinstance(inputs, list):
             for item in inputs:
-                if isinstance(item, dict) and item.get("type") == "function_call" and item.get("namespace") is None:
+                if isinstance(item, dict) and item.get("type") in ("function_call", "custom_tool_call") and item.get("namespace") is None:
                     self.flat_names.add(_name(item.get("name"), "historical function name"))
         flattened = []
         seen: set[tuple[str, str]] = set()

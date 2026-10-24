@@ -43,6 +43,7 @@ class Delta:
     cached_input_tokens: int | None = None
     cache_creation_input_tokens: int | None = None
     reasoning_output_tokens: int | None = None
+    tool_type: str = "function"
 
 
 def _obj(value: Any, label: str) -> dict[str, Any]:
@@ -106,6 +107,8 @@ class _Tool:
     arguments: str = ""
     opened: bool = False
     closed: bool = False
+    tool_type: str = "function"
+    input_done: bool = False
 
 
 class StreamDecoder:
@@ -191,7 +194,8 @@ class StreamDecoder:
         for tool in self.tools.values():
             if not tool.opened or not tool.closed:
                 raise StreamError("stream completed with an unfinished tool call")
-            _valid_arguments(tool.arguments or "{}", "tool arguments")
+            if tool.tool_type == "function":
+                _valid_arguments(tool.arguments or "{}", "tool arguments")
         if reason == "tool_calls" and not self.saw_tool:
             raise StreamError("tool finish reason without tool calls")
         self.ended = True
@@ -267,18 +271,23 @@ class StreamDecoder:
         for partial in delta.get("tool_calls") or []:
             self.reasoning_closed = True
             partial = _obj(partial, "Chat tool delta")
-            _only(partial, {"index", "id", "type", "function"}, "Chat tool delta")
             index = _index(partial.get("index"), "Chat tool index")
             tool = self.tools.setdefault(index, _Tool())
-            if partial.get("type") not in {None, "function"}:
+            kind = partial.get("type", "function")
+            if kind != "function":
                 raise StreamError("unsupported Chat tool type")
+            _only(partial, {"index", "id", "type", kind}, "Chat tool delta")
+            if (tool.opened or tool.call_id or tool.name or tool.arguments) and tool.tool_type != kind:
+                raise StreamError("Chat tool type changed")
+            tool.tool_type = kind
             if "id" in partial:
                 if tool.call_id and tool.call_id != partial["id"]:
                     raise StreamError("Chat tool ID changed")
                 tool.call_id = _str(partial["id"], "Chat tool ID")
-            fn = partial.get("function") or {}
+            fn = partial.get(kind) or {}
             fn = _obj(fn, "Chat tool function")
-            _only(fn, {"name", "arguments"}, "Chat tool function")
+            arg = "input" if kind == "custom" else "arguments"
+            _only(fn, {"name", arg}, "Chat tool function")
             if "name" in fn:
                 if tool.name and tool.name != fn["name"]:
                     raise StreamError("Chat tool name changed")
@@ -287,9 +296,9 @@ class StreamDecoder:
                 self._check_call_id(tool.call_id, index)
                 tool.opened = True
                 self.saw_tool = True
-                deltas.append(Delta("tool_start", index=index, call_id=tool.call_id, name=tool.name))
-            if "arguments" in fn:
-                arguments = _str(fn["arguments"], "Chat tool arguments")
+                deltas.append(Delta("tool_start", index=index, call_id=tool.call_id, name=tool.name, tool_type=kind))
+            if arg in fn:
+                arguments = _str(fn[arg], "Chat tool input")
                 tool.arguments += arguments
                 if tool.opened:
                     deltas.append(Delta("tool_delta", index=index, call_id=tool.call_id, text=arguments))
@@ -446,14 +455,17 @@ class StreamDecoder:
                 self.items[index] = ("text", item_id)
                 self.text_items[index] = ""
                 return []
-            if item_type == "function_call":
+            if item_type in ("function_call", "custom_tool_call"):
+                custom = item_type == "custom_tool_call"
+                if item.get("input" if custom else "arguments", "") != "":
+                    raise StreamError("Responses tool item has nonempty initial input")
                 call_id = _str(item.get("call_id"), "function_call.call_id")
                 name = _str(item.get("name"), "function_call.name")
                 self._check_call_id(call_id, index)
                 self.items[index] = ("tool", item_id)
-                self.tools[index] = _Tool(call_id=call_id, name=name, item_id=item_id, opened=True)
+                self.tools[index] = _Tool(call_id=call_id, name=name, item_id=item_id, opened=True, tool_type="custom" if custom else "function")
                 self.saw_tool = True
-                return [Delta("tool_start", index=index, item_id=item_id, call_id=call_id, name=name)]
+                return [Delta("tool_start", index=index, item_id=item_id, call_id=call_id, name=name, tool_type="custom" if custom else "function")]
             raise StreamError(f"unsupported Responses output item: {item_type}")
         if kind in {"response.content_part.added", "response.reasoning_text.delta", "response.reasoning_text.done", "response.content_part.done"} and type(body.get("output_index")) is int and self.items.get(body["output_index"], (None,))[0] == "reasoning":
             return self._public_reasoning_event(body, kind)
@@ -477,7 +489,7 @@ class StreamDecoder:
             value = _str(body.get("delta"), "text delta")
             self.text_items[index] += value
             return [Delta("text", index=index, item_id=self.items[index][1], text=value)]
-        if kind == "response.function_call_arguments.delta":
+        if kind in ("response.function_call_arguments.delta", "response.custom_tool_call_input.delta"):
             index = _index(body.get("output_index"), "output_index")
             if self.items.get(index, (None,))[0] != "tool":
                 raise StreamError("Responses tool delta without a function_call item")
@@ -485,6 +497,10 @@ class StreamDecoder:
                 raise StreamError("Responses tool delta has wrong item ID")
             delta = _str(body.get("delta"), "function arguments delta")
             tool = self.tools[index]
+            if (tool.tool_type == "custom") != (kind == "response.custom_tool_call_input.delta"):
+                raise StreamError("Responses tool delta type differs from item")
+            if tool.closed or tool.input_done:
+                raise StreamError("Responses input delta after tool completion")
             tool.arguments += delta
             return [Delta("tool_delta", index=index, item_id=tool.item_id, call_id=tool.call_id, text=delta)]
         if kind == "response.output_text.done":
@@ -495,10 +511,16 @@ class StreamDecoder:
                 raise StreamError("unsupported Responses completed text metadata")
             self.text_parts[index] = "text_done"
             return []
-        if kind == "response.function_call_arguments.done":
+        if kind in ("response.function_call_arguments.done", "response.custom_tool_call_input.done"):
             index = _index(body.get("output_index"), "output_index")
-            if self.items.get(index, (None,))[0] != "tool" or body.get("arguments") != self.tools[index].arguments:
+            custom = kind == "response.custom_tool_call_input.done"
+            if self.items.get(index, (None,))[0] != "tool" or body.get("input" if custom else "arguments") != self.tools[index].arguments:
                 raise StreamError("Responses completed tool arguments differ from deltas")
+            if custom != (self.tools[index].tool_type == "custom"):
+                raise StreamError("Responses completed input type differs from item")
+            if self.tools[index].input_done:
+                raise StreamError("duplicate Responses completed tool input")
+            self.tools[index].input_done = True
             if body.get("item_id") != self.items[index][1]:
                 raise StreamError("Responses completed tool arguments have wrong item ID")
             return []
@@ -534,11 +556,15 @@ class StreamDecoder:
                 return []
             if item_type == "tool":
                 tool = self.tools[index]
+                custom = tool.tool_type == "custom"
+                if item.get("type") != ("custom_tool_call" if custom else "function_call"):
+                    raise StreamError("Responses tool item changed type")
                 if item.get("call_id") != tool.call_id or item.get("name") != tool.name:
                     raise StreamError("Responses tool identity changed")
-                if item.get("arguments") != tool.arguments:
+                if item.get("input" if custom else "arguments") != tool.arguments:
                     raise StreamError("Responses tool argument deltas differ from completed item")
-                _valid_arguments(tool.arguments, "tool arguments")
+                if not custom:
+                    _valid_arguments(tool.arguments, "tool arguments")
                 tool.closed = True
                 self.completed_items[index] = item
                 return [Delta("tool_end", index=index, item_id=item_id, call_id=tool.call_id)]

@@ -31,6 +31,7 @@ from .sse import encode_sse
 from .stream_pipe import StreamTranscoder, StreamValidator
 from .streaming import StreamError, UnsupportedReasoningError
 from .tool_names import ToolNameMap
+from .tool_search import ClientToolSearchMap
 from .transport import DeadlineHTTPHandler, DeadlineHTTPSHandler
 
 _PATHS = {
@@ -65,8 +66,11 @@ class GatewayConfig:
     max_stream_bytes: int = 32 * 1024 * 1024
     max_stream_items: int = 1024
     max_tool_argument_bytes: int = 8 * 1024 * 1024
+    client_tool_search: str = "reject"
 
     def __post_init__(self) -> None:
+        if self.client_tool_search not in ("reject", "function"):
+            raise ValueError("client_tool_search must be reject or function")
         if not isinstance(self.public_reasoning, bool):
             raise TypeError("public_reasoning must be a boolean")
         if self.tool_names is None:
@@ -316,9 +320,14 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                     outbound = payload
                     namespace_map = None
                     tool_name_map = None
+                    search_map = None
                 else:
                     namespace_map = None
                     tool_name_map = None
+                    search_map = None
+                    if protocol == Protocol.RESPONSES and config.client_tool_search == "function":
+                        search_map = ClientToolSearchMap()
+                        payload = search_map.prepare(payload)
                     mid_system = config.upstream_protocol == Protocol.MESSAGES and payload.get("model") in config.messages_system_models
                     if protocol == Protocol.RESPONSES and config.namespace_tools == "flatten":
                         namespace_map = NamespaceMap()
@@ -357,6 +366,8 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                 if tool_name_map is not None:
                     result = tool_name_map.restore(result, protocol)
                 mapped = namespace_map.restore(result) if namespace_map else copy.deepcopy(result)
+                if search_map is not None:
+                    mapped = search_map.restore(mapped)
                 # Generated Responses snapshots must describe the requested
                 # format instead of incorrectly echoing plain-text defaults.
                 if protocol == Protocol.RESPONSES and "text" in payload:

@@ -45,6 +45,8 @@ class _MessagesOrder:
                 raise StreamError("Messages conversion finished with queued blocks")
             return [delta]
         if delta.kind == "tool_start":
+            if delta.tool_type == "custom":
+                raise StreamError("Messages cannot preserve native custom-tool formats")
             block = _PendingBlock()
             self.tools[delta.index] = block
             self.blocks.append(block)

@@ -16,6 +16,9 @@ The feature vocabulary also includes `strict_tools` (ordinary strict function
 definitions), `stop_sequences` (request controls), and `image_tool_results`
 (distinct from ordinary user `images`). These are checked on the actual
 outbound representation, not inferred from a provider name or tool schema text.
+`custom_tools` separately covers native custom definitions and history. Ordinary
+function support does not imply custom-tool or grammar support. No actual
+provider/model has been newly certified for custom tools by these fixture tests.
 
 See [the registry example](../../configs/capabilities.example.json) for its
 versioned JSON format. The example is illustrative, not verified provider data.

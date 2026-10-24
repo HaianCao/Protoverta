@@ -96,11 +96,17 @@ class StreamEncoder:
                 raise StreamError("text delta has no text")
             return self._text(delta)
         if delta.kind == "tool_start":
+            if delta.tool_type not in ("function", "custom"):
+                raise StreamError("unknown canonical tool type")
+            if delta.tool_type == "custom" and self.protocol == Protocol.MESSAGES:
+                raise StreamError("Messages cannot preserve native custom-tool formats")
+            if delta.tool_type == "custom" and self.protocol == Protocol.CHAT:
+                raise StreamError("Chat custom-tool streaming is not verified")
             if delta.index is None or not delta.call_id or not delta.name or delta.index in self.tools:
                 raise StreamError("invalid or duplicate tool start")
             if any(tool["call_id"] == delta.call_id for tool in self.tools.values()):
                 raise StreamError("duplicate stream tool call ID")
-            self.tools[delta.index] = {"call_id": delta.call_id, "name": delta.name, "arguments": "", "item_id": delta.item_id or f"fc_{uuid.uuid4().hex}"}
+            self.tools[delta.index] = {"call_id": delta.call_id, "name": delta.name, "arguments": "", "item_id": delta.item_id or f"fc_{uuid.uuid4().hex}", "tool_type": delta.tool_type}
             self.open_blocks.add(delta.index)
             self.saw_tool = True
             return self._tool_start(delta)
@@ -245,8 +251,10 @@ class StreamEncoder:
         return []
 
     def _tool_start(self, delta: Delta) -> list[SSEEvent]:
+        kind = delta.tool_type
+        arg = "input" if kind == "custom" else "arguments"
         if self.protocol == Protocol.CHAT:
-            return [self._chat_chunk([{"index": 0, "delta": {"tool_calls": [{"index": delta.index, "id": delta.call_id, "type": "function", "function": {"name": delta.name, "arguments": ""}}]}, "finish_reason": None}])]
+            return [self._chat_chunk([{"index": 0, "delta": {"tool_calls": [{"index": delta.index, "id": delta.call_id, "type": kind, kind: {"name": delta.name, arg: ""}}]}, "finish_reason": None}])]
         if self.protocol == Protocol.MESSAGES:
             if len(self.open_blocks) > 1:
                 raise StreamError("Messages cannot interleave multiple open tool blocks")
@@ -261,18 +269,19 @@ class StreamEncoder:
         self.next_index += 1
         tool = self.tools[delta.index]
         tool["target_index"] = index
-        item = {"id": tool["item_id"], "type": "function_call", "status": "in_progress", "call_id": delta.call_id, "name": delta.name, "arguments": ""}
+        item = {"id": tool["item_id"], "type": "custom_tool_call" if kind == "custom" else "function_call", "status": "in_progress", "call_id": delta.call_id, "name": delta.name, arg: ""}
         self.output.append(item)
         events.append(self._response_event("response.output_item.added", output_index=index, item=item.copy()))
         return events
 
     def _tool_delta(self, delta: Delta) -> list[SSEEvent]:
-        if self.protocol == Protocol.CHAT:
-            return [self._chat_chunk([{"index": 0, "delta": {"tool_calls": [{"index": delta.index, "function": {"arguments": delta.text}}]}, "finish_reason": None}])]
         tool = self.tools[delta.index]
+        custom = tool["tool_type"] == "custom"
+        if self.protocol == Protocol.CHAT:
+            return [self._chat_chunk([{"index": 0, "delta": {"tool_calls": [{"index": delta.index, "custom" if custom else "function": {"input" if custom else "arguments": delta.text}}]}, "finish_reason": None}])]
         if self.protocol == Protocol.MESSAGES:
             return [_event("content_block_delta", {"type": "content_block_delta", "index": tool["target_index"], "delta": {"type": "input_json_delta", "partial_json": delta.text}})]
-        return [self._response_event("response.function_call_arguments.delta", item_id=tool["item_id"], output_index=tool["target_index"], delta=delta.text)]
+        return [self._response_event("response.custom_tool_call_input.delta" if custom else "response.function_call_arguments.delta", item_id=tool["item_id"], output_index=tool["target_index"], delta=delta.text)]
 
     def _tool_end(self, delta: Delta) -> list[SSEEvent]:
         if self.protocol == Protocol.CHAT:
@@ -281,9 +290,11 @@ class StreamEncoder:
         if self.protocol == Protocol.MESSAGES:
             return [_event("content_block_stop", {"type": "content_block_stop", "index": tool["target_index"]})]
         item = self.output[tool["target_index"]]
-        item.update(status="completed", arguments=tool["arguments"])
+        custom = tool["tool_type"] == "custom"
+        arg = "input" if custom else "arguments"
+        item.update(status="completed", **{arg: tool["arguments"]})
         return [
-            self._response_event("response.function_call_arguments.done", item_id=tool["item_id"], output_index=tool["target_index"], arguments=tool["arguments"]),
+            self._response_event("response.custom_tool_call_input.done" if custom else "response.function_call_arguments.done", item_id=tool["item_id"], output_index=tool["target_index"], **{arg: tool["arguments"]}),
             self._response_event("response.output_item.done", output_index=tool["target_index"], item=item.copy()),
         ]
 

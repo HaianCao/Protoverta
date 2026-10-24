@@ -25,16 +25,16 @@ def _name_locations(body, protocol, *, request):
     locations = []
     if protocol == Protocol.CHAT:
         if request:
-            locations.extend(tool["function"] for tool in _objects(body.get("tools")) if tool.get("type") == "function" and isinstance(tool.get("function"), dict))
+            locations.extend(tool[tool["type"]] for tool in _objects(body.get("tools")) if tool.get("type") in ("function", "custom") and isinstance(tool.get(tool["type"]), dict))
             messages = _objects(body.get("messages"))
             choice = body.get("tool_choice")
-            if isinstance(choice, dict) and choice.get("type") == "function" and isinstance(choice.get("function"), dict):
-                locations.append(choice["function"])
+            if isinstance(choice, dict) and choice.get("type") in ("function", "custom") and isinstance(choice.get(choice["type"]), dict):
+                locations.append(choice[choice["type"]])
         else:
             messages = [choice["message"] for choice in _objects(body.get("choices")) if isinstance(choice.get("message"), dict)]
         for message in messages:
             if message.get("role", "assistant") == "assistant":
-                locations.extend(call["function"] for call in _objects(message.get("tool_calls")) if call.get("type") == "function" and isinstance(call.get("function"), dict))
+                locations.extend(call[call["type"]] for call in _objects(message.get("tool_calls")) if call.get("type") in ("function", "custom") and isinstance(call.get(call["type"]), dict))
     elif protocol == Protocol.MESSAGES:
         if request:
             locations.extend(_objects(body.get("tools")))
@@ -49,11 +49,11 @@ def _name_locations(body, protocol, *, request):
                 locations.extend(block for block in _objects(message.get("content")) if block.get("type") == "tool_use")
     else:
         if request:
-            locations.extend(tool for tool in _objects(body.get("tools")) if tool.get("type") == "function")
+            locations.extend(tool for tool in _objects(body.get("tools")) if tool.get("type") in ("function", "custom"))
             choice = body.get("tool_choice")
-            if isinstance(choice, dict) and choice.get("type") == "function":
+            if isinstance(choice, dict) and choice.get("type") in ("function", "custom"):
                 locations.append(choice)
-        locations.extend(item for item in _objects(body.get("input" if request else "output")) if item.get("type") == "function_call")
+        locations.extend(item for item in _objects(body.get("input" if request else "output")) if item.get("type") in ("function_call", "custom_tool_call"))
     return locations
 
 

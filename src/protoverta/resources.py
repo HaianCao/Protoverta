@@ -120,7 +120,7 @@ class StreamLimits:
                     self.chat_tools.add(key)
                     self.items += 1
                 fn = tool.get("function")
-                if tool.get("type") == "custom" and isinstance(tool.get("custom"), dict):
+                if isinstance(tool.get("custom"), dict):
                     fn = {"name": tool["custom"].get("name"), "arguments": tool["custom"].get("input")}
                 if isinstance(fn, dict):
                     self._arguments(fn.get("arguments"))

@@ -54,6 +54,13 @@ Responses. Stop-sequence request controls map between Chat and Messages, but
 matched-stop response metadata remains nonportable; see
 [the exact boundaries](docs/compatibility/output-formats.md).
 
+Completed JSON custom tools map directly between Chat and Responses, preserving
+raw input and text/grammar formats. Cross-protocol custom streaming and custom
+tools targeting Messages remain rejected. The gateway also offers opt-in JSON
+client tool search via `--client-tool-search function`; it does not execute
+searches or emulate hosted search. See [custom tools and client search](docs/compatibility/custom-tools.md)
+for the provider-support requirements and exact limits.
+
 User images support URL/base64 references in ordered text/image messages on all
 six request routes. Explicit detail selectors, provider-owned file IDs and
 image tool results have portability limits; see [image inputs](docs/compatibility/images.md).

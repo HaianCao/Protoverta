@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from .custom_tools import custom_definition, encode_custom
 from .errors import ConversionError
 from .formats import OutputFormat, decode_output_format, encode_output_format
 from .images import Image, decode_image
@@ -35,6 +36,7 @@ class Part:
     arguments: str = ""
     image: Image | None = None
     result_parts: list[Part] | None = None
+    tool_type: str = "function"
 
 
 @dataclass(slots=True)
@@ -249,27 +251,47 @@ def _tool_choice(value: Any, source: Protocol) -> str | dict | None:
             return {"auto": "auto", "any": "required", "none": "none"}[kind]
         if kind == "tool":
             return {"type": "function", "name": _string(value.get("name"), "tool_choice.name")}
-    elif value.get("type") == "function":
+    elif value.get("type") in ("function", "custom"):
+        kind = value["type"]
         if source == Protocol.CHAT:
-            _only(value, {"type", "function"}, "tool_choice")
-            function = _object(value.get("function"), "tool_choice.function")
+            _only(value, {"type", kind}, "tool_choice")
+            function = _object(value.get(kind), "tool_choice.tool")
             _only(function, {"name"}, "tool_choice.function")
             name = function.get("name")
         else:
             _only(value, {"type", "name"}, "tool_choice")
             name = value.get("name")
-        return {"type": "function", "name": _string(name, "tool_choice.name")}
+        return {"type": kind, "name": _string(name, "tool_choice.name")}
     raise ConversionError("tool_choice is not portable")
 
 
 def _validate_chat_call(call: dict, index: int) -> None:
-    _only(call, {"id", "type", "function", "index"}, "tool_call")
+    kind = call.get("type")
+    if kind not in ("function", "custom"):
+        raise ConversionError("only client-side function/custom calls are supported")
+    _only(call, {"id", "type", kind, "index"}, "tool_call")
     # Some compatible providers include the streaming-style position in a
     # completed JSON call. Accept it only when it agrees with array ordering.
     if "index" in call and (type(call["index"]) is not int or call["index"] != index):
         raise ConversionError("Chat tool_call index must match its array position")
-    if call.get("type") != "function":
-        raise ConversionError("only client-side function calls are supported")
+
+
+def _chat_call(call: dict, index: int) -> Part:
+    _validate_chat_call(call, index)
+    kind = call["type"]
+    fn = _object(call.get(kind), "tool_call body")
+    arg = "input" if kind == "custom" else "arguments"
+    _only(fn, {"name", arg}, "tool_call body")
+    raw = _string(fn.get(arg), arg) if kind == "custom" else _arguments(fn.get(arg), arg)
+    return Part("tool_call", call_id=_string(call.get("id"), "call.id"), name=_string(fn.get("name"), "call.name"), arguments=raw, tool_type=kind)
+
+
+def _encode_chat_call(part: Part) -> dict:
+    return {"id": part.call_id, "type": part.tool_type, part.tool_type: {"name": part.name, "input" if part.tool_type == "custom" else "arguments": part.arguments}}
+
+
+def _encode_response_call(part: Part) -> dict:
+    return {"type": "custom_tool_call" if part.tool_type == "custom" else "function_call", "call_id": part.call_id, "name": part.name, "input" if part.tool_type == "custom" else "arguments": part.arguments}
 
 
 def _decode_chat(body: dict[str, Any], *, public_reasoning: bool = False) -> Request:
@@ -288,10 +310,7 @@ def _decode_chat(body: dict[str, Any], *, public_reasoning: bool = False) -> Req
             if role == "assistant":
                 for index, call in enumerate(_list(item.get("tool_calls") or [], "tool_calls")):
                     call = _object(call, "tool_call")
-                    _validate_chat_call(call, index)
-                    fn = _object(call.get("function"), "tool_call.function")
-                    _only(fn, {"name", "arguments"}, "tool_call.function")
-                    parts.append(Part("tool_call", call_id=_string(call.get("id"), "tool_call.id"), name=_string(fn.get("name"), "tool_call.name"), arguments=_arguments(fn.get("arguments"), "tool_call.arguments")))
+                    parts.append(_chat_call(call, index))
             turns.append(Turn(role, parts))
         elif role == "tool":
             _only(item, {"role", "tool_call_id", "content"}, "tool message")
@@ -301,6 +320,10 @@ def _decode_chat(body: dict[str, Any], *, public_reasoning: bool = False) -> Req
     tools: list[dict[str, Any]] = []
     for item in _list(body.get("tools") or [], "tools"):
         item = _object(item, "tool")
+        if item.get("type") == "custom":
+            _only(item, {"type", "custom"}, "tool")
+            tools.append(custom_definition(_object(item.get("custom"), "tool.custom"), "chat"))
+            continue
         _only(item, {"type", "function"}, "tool")
         if item.get("type") != "function":
             raise ConversionError("only function tools are supported")
@@ -431,19 +454,25 @@ def _decode_responses(body: dict[str, Any], *, public_reasoning: bool = False) -
                 if item.get("status") == "incomplete":
                     raise ConversionError("incomplete public reasoning history cannot be replayed")
                 turns.append(Turn("assistant", [Part("reasoning_text", text=response_reasoning(item))]))
-            elif kind == "function_call":
-                _only(item, {"type", "id", "status", "call_id", "name", "arguments"}, "function_call")
-                turns.append(Turn("assistant", [Part("tool_call", call_id=_string(item.get("call_id"), "call_id"), name=_string(item.get("name"), "function name"), arguments=_arguments(item.get("arguments"), "arguments"))]))
-            elif kind == "function_call_output":
-                _only(item, {"type", "id", "call_id", "output"}, "function_call_output")
+            elif kind in ("function_call", "custom_tool_call"):
+                custom = kind == "custom_tool_call"
+                arg = "input" if custom else "arguments"
+                _only(item, {"type", "id", "status", "call_id", "name", arg}, kind)
+                if item.get("status") not in (None, "completed"):
+                    raise ConversionError("incomplete Responses history call")
+                raw = _string(item.get(arg), arg) if custom else _arguments(item.get(arg), arg)
+                turns.append(Turn("assistant", [Part("tool_call", call_id=_string(item.get("call_id"), "call_id"), name=_string(item.get("name"), "tool name"), arguments=raw, tool_type="custom" if custom else "function")]))
+            elif kind in ("function_call_output", "custom_tool_call_output"):
+                _only(item, {"type", "id", "call_id", "output"}, kind)
+                tool_type = "custom" if kind == "custom_tool_call_output" else "function"
                 output = item.get("output")
                 if isinstance(output, list):
                     output_parts = _response_content(output, "function_call_output.output")
                     if any(part.kind == "image" for part in output_parts):
-                        turns.append(Turn("user", [Part("tool_result", call_id=_string(item.get("call_id"), "call_id"), result_parts=output_parts)]))
+                        turns.append(Turn("user", [Part("tool_result", call_id=_string(item.get("call_id"), "call_id"), result_parts=output_parts, tool_type=tool_type)]))
                         continue
                     output = "".join(part.text for part in output_parts)
-                turns.append(Turn("user", [Part("tool_result", call_id=_string(item.get("call_id"), "call_id"), text=_string(output, "output"))]))
+                turns.append(Turn("user", [Part("tool_result", call_id=_string(item.get("call_id"), "call_id"), text=_string(output, "output"), tool_type=tool_type)]))
             else:
                 raise ConversionError(f"unsupported Responses item: {kind}")
     grouped_turns: list[Turn] = []
@@ -456,6 +485,9 @@ def _decode_responses(body: dict[str, Any], *, public_reasoning: bool = False) -
     tools: list[dict[str, Any]] = []
     for item in _list(body.get("tools") or [], "tools"):
         item = _object(item, "tool")
+        if item.get("type") == "custom":
+            tools.append(custom_definition(item, "responses"))
+            continue
         _only(item, {"type", "name", "description", "parameters", "strict"}, "tool")
         if item.get("type") != "function":
             raise ConversionError("only function tools are supported")
@@ -472,6 +504,11 @@ def _check_function_names(names, target: Protocol) -> None:
 
 
 def _check_turns(request: Request, target: Protocol, *, messages_mid_system: bool = False) -> None:
+    custom = any(tool.get("type") == "custom" for tool in request.tools) or any(part.tool_type == "custom" for turn in request.turns for part in turn.parts)
+    if custom and target == Protocol.MESSAGES:
+        raise ConversionError("Messages cannot preserve native custom-tool formats")
+    if custom and request.stream:
+        raise ConversionError("cross-protocol custom-tool streaming is not verified")
     if request.stop_sequences is not None and target == Protocol.RESPONSES:
         raise ConversionError("Responses has no equivalent stop-sequence setting")
     if target == Protocol.MESSAGES and any(tool.get("strict") is True for tool in request.tools):
@@ -483,6 +520,8 @@ def _check_turns(request: Request, target: Protocol, *, messages_mid_system: boo
         raise ConversionError("duplicate tool definition name")
     if isinstance(request.tool_choice, dict) and request.tool_choice["name"] not in names:
         raise ConversionError("forced tool_choice must name a declared function")
+    if isinstance(request.tool_choice, dict) and not any(tool["name"] == request.tool_choice["name"] and tool.get("type", "function") == request.tool_choice["type"] for tool in request.tools):
+        raise ConversionError("forced tool_choice type does not match its definition")
     if request.tool_choice == "required" and not names:
         raise ConversionError("required tool_choice requires function tools")
     if target == Protocol.MESSAGES:
@@ -564,7 +603,7 @@ def _encode_chat(req: Request) -> dict[str, Any]:
             if any(p.kind == "image" for p in turn.parts):
                 msg["content"] = [p.image.encode("chat") if p.kind == "image" else {"type": "text", "text": p.text} for p in turn.parts]
             if calls:
-                msg["tool_calls"] = [{"id": p.call_id, "type": "function", "function": {"name": p.name, "arguments": p.arguments}} for p in calls]
+                msg["tool_calls"] = [_encode_chat_call(p) for p in calls]
             reasoning = [p.text for p in turn.parts if p.kind == "reasoning_text"]
             if reasoning:
                 msg["reasoning_content"] = "".join(reasoning)
@@ -575,7 +614,7 @@ def _encode_chat(req: Request) -> dict[str, Any]:
     if req.reasoning_effort is not None:
         out["reasoning_effort"] = req.reasoning_effort
     if req.tools:
-        out["tools"] = [{"type": "function", "function": {"name": t["name"], "description": t["description"], "parameters": t["parameters"], **_strict_tool(t)}} for t in req.tools]
+        out["tools"] = [encode_custom(t, "chat") if t.get("type") == "custom" else {"type": "function", "function": {"name": t["name"], "description": t["description"], "parameters": t["parameters"], **_strict_tool(t)}} for t in req.tools]
     if req.stop_sequences is not None:
         out["stop"] = list(req.stop_sequences)
     if req.max_tokens is not None:
@@ -586,7 +625,8 @@ def _encode_chat(req: Request) -> dict[str, Any]:
         out["top_p"] = req.top_p
     if req.tool_choice is not None:
         if isinstance(req.tool_choice, dict):
-            out["tool_choice"] = {"type": "function", "function": {"name": req.tool_choice["name"]}}
+            kind = req.tool_choice["type"]
+            out["tool_choice"] = {"type": kind, kind: {"name": req.tool_choice["name"]}}
         elif isinstance(req.tool_choice, str) and req.tool_choice in {"auto", "none", "required"}:
             out["tool_choice"] = req.tool_choice
         else:
@@ -667,11 +707,11 @@ def _encode_responses(req: Request) -> dict[str, Any]:
                 inputs.append(reasoning_item(p.text))
             elif p.kind == "tool_call":
                 _flush_response_text(inputs, turn.role, text_parts)
-                inputs.append({"type": "function_call", "call_id": p.call_id, "name": p.name, "arguments": p.arguments})
+                inputs.append(_encode_response_call(p))
             elif p.kind == "tool_result":
                 _flush_response_text(inputs, turn.role, text_parts)
                 content = [part.image.encode("responses") if part.kind == "image" else {"type": "input_text", "text": part.text} for part in p.result_parts] if p.result_parts is not None else p.text
-                inputs.append({"type": "function_call_output", "call_id": p.call_id, "output": content})
+                inputs.append({"type": "custom_tool_call_output" if p.tool_type == "custom" else "function_call_output", "call_id": p.call_id, "output": content})
         _flush_response_text(inputs, turn.role, text_parts)
     out: dict[str, Any] = {"model": req.model, "input": inputs, "stream": req.stream, "store": False}
     if req.parallel_tool_calls is not None:
@@ -679,7 +719,7 @@ def _encode_responses(req: Request) -> dict[str, Any]:
     if req.reasoning_effort is not None:
         out["reasoning"] = {"effort": req.reasoning_effort}
     if req.tools:
-        out["tools"] = [{"type": "function", "name": t["name"], "description": t["description"], "parameters": t["parameters"], "strict": t.get("strict", False)} for t in req.tools]
+        out["tools"] = [encode_custom(t, "responses") if t.get("type") == "custom" else {"type": "function", "name": t["name"], "description": t["description"], "parameters": t["parameters"], "strict": t.get("strict", False)} for t in req.tools]
     if req.max_tokens is not None:
         out["max_output_tokens"] = req.max_tokens
     if req.temperature is not None:
@@ -710,6 +750,17 @@ def convert_request(body: dict[str, Any], source: Protocol | str, target: Protoc
         return body.copy()
     options = {"public_reasoning": public_reasoning} if source in {Protocol.CHAT, Protocol.RESPONSES} else {}
     request = _DECODERS[source](_object(body, "request"), **options)
+    call_types = {}
+    for turn in request.turns:
+        for part in turn.parts:
+            if part.kind == "tool_call":
+                call_types[part.call_id] = part.tool_type
+            elif part.kind == "tool_result":
+                expected = call_types.get(part.call_id)
+                if source == Protocol.CHAT and expected is not None:
+                    part.tool_type = expected
+                elif expected is not None and expected != part.tool_type:
+                    raise ConversionError("tool result type does not match its call")
     request.stop_sequences = _stops(body.get("stop" if source == Protocol.CHAT else "stop_sequences")) if source != Protocol.RESPONSES else None
     request.output_format = decode_output_format(body, source)
     _check_turns(request, target, messages_mid_system=messages_mid_system)
@@ -727,6 +778,10 @@ def _validate_response_item(item: dict, label: str) -> None:
         _only(item, {"type", "id", "status", "role", "content"}, label)
     elif item.get("type") == "function_call":
         _only(item, {"type", "id", "status", "call_id", "name", "arguments", "namespace"}, label)
+        if item.get("namespace") is not None:
+            raise ConversionError("upstream Responses namespace cannot be preserved in this protocol")
+    elif item.get("type") == "custom_tool_call":
+        _only(item, {"type", "id", "status", "call_id", "name", "input", "namespace"}, label)
         if item.get("namespace") is not None:
             raise ConversionError("upstream Responses namespace cannot be preserved in this protocol")
 
@@ -755,10 +810,7 @@ def _decode_result(body: dict[str, Any], source: Protocol, *, public_reasoning: 
             parts.insert(0, Part("reasoning_text", text=_string(msg["reasoning_content"], "reasoning_content")))
         for index, call in enumerate(_list(msg.get("tool_calls") or [], "tool_calls")):
             call = _object(call, "tool_call")
-            _validate_chat_call(call, index)
-            fn = _object(call.get("function"), "function")
-            _only(fn, {"name", "arguments"}, "function")
-            parts.append(Part("tool_call", call_id=_string(call.get("id"), "call.id"), name=_string(fn.get("name"), "function.name"), arguments=_arguments(fn.get("arguments"), "function.arguments")))
+            parts.append(_chat_call(call, index))
         usage = _object(body.get("usage") or {}, "usage")
         reason = choice.get("finish_reason")
         if reason not in {"stop", "tool_calls", "length"}:
@@ -796,6 +848,10 @@ def _decode_result(body: dict[str, Any], source: Protocol, *, public_reasoning: 
             if item.get("status") not in {None, "completed"}:
                 raise ConversionError("Responses function call is incomplete")
             parts.append(Part("tool_call", call_id=_string(item.get("call_id"), "call_id"), name=_string(item.get("name"), "name"), arguments=_arguments(item.get("arguments"), "arguments")))
+        elif item.get("type") == "custom_tool_call":
+            if item.get("status") not in (None, "completed"):
+                raise ConversionError("Responses custom tool call is incomplete")
+            parts.append(Part("tool_call", call_id=_string(item.get("call_id"), "call_id"), name=_string(item.get("name"), "name"), arguments=_string(item.get("input"), "input"), tool_type="custom"))
         else:
             raise ConversionError(f"unsupported Responses output item: {item.get('type')}")
     usage = _object(body.get("usage") or {}, "usage")
@@ -813,6 +869,8 @@ def _decode_result(body: dict[str, Any], source: Protocol, *, public_reasoning: 
 
 
 def _encode_result(result: Result, target: Protocol) -> dict[str, Any]:
+    if target == Protocol.MESSAGES and any(part.tool_type == "custom" for part in result.parts):
+        raise ConversionError("Messages cannot preserve native custom-tool formats")
     seen_ordinary = False
     for part in result.parts:
         if part.kind == "reasoning_text":
@@ -835,7 +893,7 @@ def _encode_result(result: Result, target: Protocol) -> dict[str, Any]:
         if reasoning:
             message["reasoning_content"] = "".join(reasoning)
         if calls:
-            message["tool_calls"] = [{"id": p.call_id, "type": "function", "function": {"name": p.name, "arguments": p.arguments}} for p in calls]
+            message["tool_calls"] = [_encode_chat_call(p) for p in calls]
         out: dict[str, Any] = {"id": "chatcmpl-" + secrets.token_hex(12), "created": int(time.time()), "object": "chat.completion", "model": result.model, "choices": [{"index": 0, "message": message, "finish_reason": result.finish_reason}]}
         if result.input_tokens is not None and result.output_tokens is not None:
             out["usage"] = _encode_usage(result, target)
@@ -856,7 +914,7 @@ def _encode_result(result: Result, target: Protocol) -> dict[str, Any]:
         output.append(reasoning_item("".join(reasoning), identifier="rs_" + secrets.token_hex(12), status="incomplete" if result.finish_reason == "length" else "completed"))
     if text:
         output.append({"id": "msg_" + secrets.token_hex(12), "type": "message", "role": "assistant", "status": "incomplete" if result.finish_reason == "length" else "completed", "content": [{"type": "output_text", "text": text, "annotations": [], "logprobs": []}]})
-    output.extend({"id": "fc_" + secrets.token_hex(12), "type": "function_call", "call_id": p.call_id, "name": p.name, "arguments": p.arguments, "status": "completed"} for p in calls)
+    output.extend({"id": ("ct_" if p.tool_type == "custom" else "fc_") + secrets.token_hex(12), **_encode_response_call(p), "status": "completed"} for p in calls)
     out = {"id": "resp_" + secrets.token_hex(12), "created_at": int(time.time()), "object": "response", "model": result.model, "status": "incomplete" if result.finish_reason == "length" else "completed", "output": output, "parallel_tool_calls": len(calls) > 1, "error": None, "incomplete_details": {"reason": "max_output_tokens"} if result.finish_reason == "length" else None}
     out.update(tools=[], tool_choice="auto")
     if result.input_tokens is not None and result.output_tokens is not None:
