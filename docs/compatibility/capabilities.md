@@ -49,7 +49,7 @@ behavior. Requiring verified capabilities without a registry is an error.
 
 Recognized features: `text`, `streaming`, `tools`, `forced_tool_choice`,
 `json_object`, `json_schema`, `strict_json_schema`, `reasoning_effort`, `public_reasoning`, `images`,
-and `mid_conversation_system`. Feature detection inspects content, not arbitrary
+`top_p`, and `mid_conversation_system`. Feature detection inspects content, not arbitrary
 tool schema properties. Records cannot enable conversions the core does not
 implement: for example, an image-capable model does not enable translated
 image tool results or provider-owned Files API IDs. Ordinary user image inputs
@@ -64,3 +64,26 @@ not create observations or claim support from the model catalog. These changes
 were published with the pinned `0.3.0a5` preview release. The `0.3.0a6` preview
 adds user images and opt-in unsigned public reasoning; earlier wheels do not
 contain those conversions.
+
+## Recorded limits (schema version 2)
+
+Version 1 registries remain supported unchanged. Version 2 optionally adds
+`max_output_tokens`, `context_window_tokens` (positive integers), and
+`reasoning_efforts` (a nonempty array of distinct known effort strings) per
+model record. The original exact prefix/protocol/model scope and dated evidence
+requirements still apply. These fields are rejected in version 1 instead of
+silently changing its meaning.
+
+Preflight rejects an explicit output budget exceeding a recorded maximum and
+an explicit effort not in a recorded allowlist, before upstream I/O. It never
+clamps the request, picks a different effort or infers a limit from error text.
+Absent limits mean unknown, not unlimited or verified. `require_verified`
+continues to require feature observations; it does not require every optional
+numeric metadata field to be present.
+
+The context-window value is metadata only: without an exact tokenizer and a
+protocol/model-specific accounting contract, the gateway does not pretend it
+can calculate an accurate input budget. Retrieve an immutable record through
+`registry.lookup(base_url, protocol, model)`; no record inheritance or model-name
+heuristic is used. Effort metadata does not enable nonportable conversions in
+the strict core, which still maps only its documented effort subset.

@@ -7,7 +7,7 @@ from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 
-from .core import Protocol
+from .core import ConversionError, Protocol, _check_function_names
 from .sse import SSEParser, encode_sse
 from .stream_encoder import StreamEncoder
 from .streaming import Delta, StreamDecoder, StreamError, UnsupportedReasoningError
@@ -83,7 +83,7 @@ class StreamTranscoder:
     Calling code must not emit a successful terminal event after an exception.
     """
 
-    def __init__(self, source: Protocol | str, target: Protocol | str, *, messages_usage_policy: str = "strict", max_pending_bytes: int = 8 * 1024 * 1024, response_transform: Callable[[dict], dict] | None = None, public_reasoning: bool = False) -> None:
+    def __init__(self, source: Protocol | str, target: Protocol | str, *, messages_usage_policy: str = "strict", max_pending_bytes: int = 8 * 1024 * 1024, response_transform: Callable[[dict], dict] | None = None, public_reasoning: bool = False, tool_name_transform: Callable[[str], str] | None = None) -> None:
         self.source = Protocol(source)
         self.target = Protocol(target)
         if messages_usage_policy not in {"strict", "deferred"}:
@@ -97,6 +97,7 @@ class StreamTranscoder:
         self.parser = SSEParser()
         self.decoder = StreamDecoder(self.source, public_reasoning=public_reasoning)
         self.encoder = StreamEncoder(self.target, response_transform=response_transform, public_reasoning=public_reasoning)
+        self.tool_name_transform = tool_name_transform
         self._terminal = b""
         self._closed = False
         self.has_payload = False
@@ -111,6 +112,16 @@ class StreamTranscoder:
             raise StreamError(str(exc)) from exc
         for event in events:
             for decoded in self.decoder.feed(event):
+                if decoded.kind == "tool_start" and self.tool_name_transform is None:
+                    try:
+                        _check_function_names((decoded.name,), self.target)
+                    except ConversionError as exc:
+                        raise StreamError("upstream function name is not portable to the target") from exc
+                if decoded.kind == "tool_start" and self.tool_name_transform is not None:
+                    try:
+                        decoded = replace(decoded, name=self.tool_name_transform(decoded.name))
+                    except ConversionError as exc:
+                        raise StreamError("upstream function alias cannot be restored") from exc
                 for delta in self.order.feed(decoded) if self.order else [decoded]:
                     for encoded in self.encoder.feed(delta):
                         if delta.kind in {"tool_start", "reasoning_text"} or delta.kind == "text" and bool(delta.text):

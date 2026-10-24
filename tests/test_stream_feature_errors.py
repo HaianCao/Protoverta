@@ -41,6 +41,10 @@ def test_unsupported_reasoning_is_non_retryable_and_contains_no_upstream_text(ta
             events = SSEParser().feed(wire)
             assert events[-1].event == "error"
             error = json.loads(events[-1].data)
+            if target == "responses":
+                assert error["type"] == "error" and error["param"] is None
+                assert error["sequence_number"] > json.loads(events[-2].data)["sequence_number"]
+                assert error["code"] == "unsupported_reasoning"
             assert b"message_stop" not in wire and b"response.completed" not in wire and b"[DONE]" not in wire
         else:
             with pytest.raises(HTTPError) as caught:
@@ -49,8 +53,9 @@ def test_unsupported_reasoning_is_non_retryable_and_contains_no_upstream_text(ta
             assert caught.value.headers["x-should-retry"] == "false"
             error = json.load(caught.value)
             caught.value.close()
-    assert error["error"]["type"] == "invalid_request_error"
-    assert error["error"]["code"] == "unsupported_reasoning"
+    if target != "responses" or mode != "visible":
+        assert error["error"]["type"] == "invalid_request_error"
+        assert error["error"]["code"] == "unsupported_reasoning"
     assert "private-upstream-sentinel" not in json.dumps(error)
     assert "upstream-key" not in json.dumps(error)
 

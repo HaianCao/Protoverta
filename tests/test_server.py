@@ -166,7 +166,7 @@ def test_gateway_reports_interrupted_sse_without_done_marker():
         assert caught.value.code == 502
         wire = caught.value.read()
         caught.value.close()
-        assert b"api_error" in wire
+        assert b"server_error" in wire
         assert b"[DONE]" not in wire
     finally:
         server.shutdown()

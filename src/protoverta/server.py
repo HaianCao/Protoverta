@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import secrets
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
@@ -16,11 +17,13 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .capabilities import CapabilityRegistry
 from .core import ConversionError, Protocol, convert_request, convert_response
+from .failures import gateway_failure
 from .namespaces import NamespaceMap
 from .profiles import prepare_claude_request, prepare_codex_request
 from .sse import encode_sse
 from .stream_pipe import StreamTranscoder, StreamValidator
 from .streaming import StreamError, UnsupportedReasoningError
+from .tool_names import ToolNameMap
 
 _PATHS = {
     "/v1/chat/completions": Protocol.CHAT,
@@ -33,8 +36,8 @@ _PATHS = {
 class GatewayConfig:
     upstream_protocol: Protocol
     upstream_base_url: str
-    upstream_api_key: str
-    inbound_token: str
+    upstream_api_key: str = field(repr=False)
+    inbound_token: str = field(repr=False)
     auth_style: str = "bearer"
     timeout: float = 120.0
     max_body_bytes: int = 8 * 1024 * 1024
@@ -47,10 +50,16 @@ class GatewayConfig:
     capabilities: CapabilityRegistry | None = None
     require_verified_capabilities: bool = False
     public_reasoning: bool = False
+    tool_names: str | None = None
+    max_concurrent_requests: int = 16
 
     def __post_init__(self) -> None:
         if not isinstance(self.public_reasoning, bool):
             raise TypeError("public_reasoning must be a boolean")
+        if self.tool_names is None:
+            object.__setattr__(self, "tool_names", "alias" if self.client_profile in {"codex", "claude"} else "reject")
+        if self.tool_names not in {"reject", "alias"}:
+            raise ValueError("tool_names must be reject or alias")
         object.__setattr__(self, "upstream_protocol", Protocol(self.upstream_protocol))
         parsed = urlsplit(self.upstream_base_url)
         _ = parsed.port
@@ -65,8 +74,10 @@ class GatewayConfig:
             raise ValueError("both upstream key and inbound token are required")
         if any(char in self.upstream_api_key + self.inbound_token for char in "\r\n"):
             raise ValueError("credentials cannot contain line breaks")
-        if self.timeout <= 0 or self.max_body_bytes <= 0:
+        if isinstance(self.timeout, bool) or not isinstance(self.timeout, int | float) or not math.isfinite(self.timeout) or self.timeout <= 0 or type(self.max_body_bytes) is not int or self.max_body_bytes <= 0:
             raise ValueError("timeout and max_body_bytes must be positive")
+        if type(self.max_concurrent_requests) is not int or self.max_concurrent_requests <= 0:
+            raise ValueError("max_concurrent_requests must be a positive integer")
         if self.client_profile not in {"strict", "codex", "claude"}:
             raise ValueError("client_profile must be strict, codex or claude")
         if self.messages_usage_policy not in {"strict", "deferred"}:
@@ -135,6 +146,7 @@ class _RedirectBlocker(HTTPRedirectHandler):
 def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPRequestHandler]:
     opener = build_opener(_RedirectBlocker())
     open_upstream = upstream_open or opener.open
+    admission = threading.BoundedSemaphore(config.max_concurrent_requests)
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "Protoverta/0.3"
@@ -146,6 +158,10 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
         def _json(self, status: int, payload: dict[str, object], headers=None) -> None:
             raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             self._raw_json(status, raw, headers)
+
+        def _error(self, status, message, protocol, *, code=None, headers=None):
+            failure = gateway_failure(status, message, code=code, secrets=(config.upstream_api_key, config.inbound_token))
+            self._json(failure.status, failure.payload(protocol), headers)
 
         def _forward_headers(self, headers) -> None:
             for name, value in (headers.items() if headers else []):
@@ -163,8 +179,8 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
             self.end_headers()
             self.wfile.write(raw)
 
-        def _stream(self, response, source: Protocol, target: Protocol, response_transform=None) -> None:
-            pipeline = StreamTranscoder(source, target, messages_usage_policy=config.messages_usage_policy, max_pending_bytes=config.max_body_bytes, response_transform=response_transform, public_reasoning=config.public_reasoning) if source != target else StreamValidator(source)
+        def _stream(self, response, source: Protocol, target: Protocol, response_transform=None, tool_name_transform=None) -> None:
+            pipeline = StreamTranscoder(source, target, messages_usage_policy=config.messages_usage_policy, max_pending_bytes=config.max_body_bytes, response_transform=response_transform, public_reasoning=config.public_reasoning, tool_name_transform=tool_name_transform) if source != target else StreamValidator(source)
             headers_sent = False
             initial = bytearray()
 
@@ -211,16 +227,19 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                 send_headers()
             except (StreamError, UnicodeError, OSError) as exc:
                 unsupported = isinstance(exc, UnsupportedReasoningError)
-                detail = {"type": "invalid_request_error" if unsupported else "api_error", "message": f"upstream stream error: {type(exc).__name__}"}
+                message = f"upstream stream error: {type(exc).__name__}"
                 if unsupported:
                     hint = "Messages requires its own thinking/signature contract; use native Messages or a compatible Responses route." if target == Protocol.MESSAGES else "For unsigned Chat reasoning_content, enable public_reasoning explicitly on a Chat/Responses route; summaries, signed or encrypted state remain unsupported."
-                    detail.update(code="unsupported_reasoning", message="Upstream reasoning cannot be preserved on this route. " + hint + " No reasoning was dropped or given a fabricated signature.")
-                payload = {"type": "error", "error": detail}
+                    message = "Upstream reasoning cannot be preserved on this route. " + hint + " No reasoning was dropped or given a fabricated signature."
+                timeout = isinstance(exc, TimeoutError)
+                failure = gateway_failure(422 if unsupported else 504 if timeout else 502, message, code="unsupported_reasoning" if unsupported else "upstream_timeout" if timeout else "invalid_stream")
+                payload = failure.payload(target)
                 try:
                     if not headers_sent:
-                        self._json(422 if unsupported else 502, payload, {"x-should-retry": "false"} if unsupported else None)
+                        self._json(failure.status, payload, {"x-should-retry": "false"} if unsupported else None)
                     else:
-                        error = json.dumps(payload)
+                        sequence = pipeline.encoder.sequence if isinstance(pipeline, StreamTranscoder) else pipeline.decoder.sequence + 1
+                        error = json.dumps(failure.stream_payload(target, sequence_number=max(0, sequence)))
                         self.wfile.write(encode_sse("error", error))
                         self.wfile.flush()
                 except (BrokenPipeError, ConnectionResetError):
@@ -230,19 +249,33 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
             target_url = urlsplit(self.path)
             protocol = _PATHS.get(target_url.path)
             if protocol is None:
-                self._json(404, {"error": {"message": "unsupported endpoint"}})
+                self._error(404, "unsupported endpoint", Protocol.CHAT)
                 return
             token = self.headers.get("Authorization", "")
             if not token.startswith("Bearer ") or not secrets.compare_digest(token[7:], config.inbound_token):
-                self._json(401, {"error": {"message": "unauthorized"}})
+                self._error(401, "unauthorized", protocol)
                 return
+            if not admission.acquire(blocking=False):
+                self._error(503, "Local gateway request capacity reached; retry after an active request finishes.", protocol, headers={"Retry-After": "1"})
+                return
+            try:
+                self.connection.settimeout(config.timeout)
+                self._handle_post(protocol, target_url)
+            except TimeoutError:
+                self._error(408, "Client request body read timed out.", protocol, headers={"x-should-retry": "false"})
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            finally:
+                admission.release()
+
+        def _handle_post(self, protocol, target_url) -> None:
             try:
                 length = int(self.headers.get("Content-Length", ""))
             except ValueError:
-                self._json(411, {"error": {"message": "Content-Length is required"}})
+                self._error(411, "Content-Length is required", protocol)
                 return
             if length < 0 or length > config.max_body_bytes:
-                self._json(413, {"error": {"message": "request body is too large"}})
+                self._error(413, "request body is too large", protocol)
                 return
             try:
                 payload = json.loads(self.rfile.read(length))
@@ -259,12 +292,17 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                 if protocol == config.upstream_protocol:
                     outbound = payload
                     namespace_map = None
+                    tool_name_map = None
                 else:
                     namespace_map = None
+                    tool_name_map = None
                     mid_system = config.upstream_protocol == Protocol.MESSAGES and payload.get("model") in config.messages_system_models
                     if protocol == Protocol.RESPONSES and config.namespace_tools == "flatten":
                         namespace_map = NamespaceMap()
                         payload = namespace_map.prepare(payload)
+                    if config.tool_names == "alias":
+                        tool_name_map = ToolNameMap()
+                        payload = tool_name_map.prepare(payload, protocol)
                     if config.client_profile == "codex" and protocol == Protocol.RESPONSES:
                         payload = prepare_codex_request(payload, config.upstream_protocol, default_max_output_tokens=config.default_max_output_tokens, messages_mid_system=mid_system)
                     elif config.client_profile == "claude" and protocol == Protocol.MESSAGES:
@@ -274,7 +312,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                 if config.capabilities is not None:
                     config.capabilities.preflight(config.upstream_base_url, config.upstream_protocol, outbound, require_verified=config.require_verified_capabilities)
             except (json.JSONDecodeError, UnicodeError, ConversionError) as exc:
-                self._json(422, {"error": {"message": str(exc)}})
+                self._error(422, str(exc), protocol, headers={"x-should-retry": "false"})
                 return
             headers = {"Content-Type": "application/json", "Accept": "text/event-stream" if streaming else "application/json"}
             if config.auth_style == "bearer":
@@ -293,6 +331,8 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
             request = Request(upstream_url, data=data, headers=headers, method="POST")
 
             def restore_response(result):
+                if tool_name_map is not None:
+                    result = tool_name_map.restore(result, protocol)
                 mapped = namespace_map.restore(result) if namespace_map else copy.deepcopy(result)
                 # Generated Responses snapshots must describe the requested
                 # format instead of incorrectly echoing plain-text defaults.
@@ -300,13 +340,19 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                     snapshot = mapped.get("response", mapped if "output" in mapped else None)
                     if isinstance(snapshot, dict):
                         snapshot["text"] = copy.deepcopy(payload["text"])
+                if protocol == Protocol.RESPONSES:
+                    snapshot = mapped.get("response", mapped if "output" in mapped else None)
+                    if isinstance(snapshot, dict):
+                        for option in ("top_p", "temperature"):
+                            if payload.get(option) is not None:
+                                snapshot[option] = payload[option]
                 return mapped
 
             try:
                 with open_upstream(request, timeout=config.timeout) as response:
                     if streaming:
-                        transform = restore_response if protocol == Protocol.RESPONSES and (namespace_map or "text" in payload) else None
-                        self._stream(response, config.upstream_protocol, protocol, transform)
+                        transform = restore_response if protocol == Protocol.RESPONSES and (namespace_map or "text" in payload or any(payload.get(option) is not None for option in ("top_p", "temperature"))) else None
+                        self._stream(response, config.upstream_protocol, protocol, transform, tool_name_map.decode if tool_name_map is not None else None)
                         return
                     raw = response.read(config.max_body_bytes + 1)
                     if len(raw) > config.max_body_bytes:
@@ -330,15 +376,17 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                         self._raw_json(exc.code, raw, exc.headers)
                     else:
                         detail = error["error"]
-                        self._json(exc.code if 400 <= exc.code < 600 else 502, {"type": "error", "error": {"type": "api_error", "message": str(detail.get("message", f"upstream HTTP {exc.code}"))}}, exc.headers)
+                        message = detail.get("message")
+                        self._error(exc.code, message if isinstance(message, str) else f"upstream HTTP {exc.code}", protocol, code=detail.get("code") if isinstance(detail.get("code"), str) else None, headers=exc.headers)
                 except (ValueError, TypeError, UnicodeError, OSError):
-                    self._json(502 if not 400 <= exc.code < 600 else exc.code, {"error": {"message": f"upstream HTTP {exc.code}"}}, exc.headers)
+                    self._error(exc.code, f"upstream HTTP {exc.code}", protocol, headers=exc.headers)
                 finally:
                     exc.close()
             except (URLError, TimeoutError, OSError) as exc:
-                self._json(502, {"error": {"message": f"upstream transport error: {type(exc).__name__}"}})
+                timeout = isinstance(exc, TimeoutError) or isinstance(exc, URLError) and isinstance(exc.reason, TimeoutError)
+                self._error(504 if timeout else 502, f"upstream transport error: {type(exc).__name__}", protocol, code="upstream_timeout" if timeout else "upstream_transport")
             except (json.JSONDecodeError, UnicodeError, ConversionError, StreamError) as exc:
-                self._json(502, {"error": {"message": str(exc)}})
+                self._error(502, str(exc), protocol)
 
     return Handler
 

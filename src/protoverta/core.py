@@ -7,6 +7,7 @@ It does not fabricate reasoning state, token counts, or server-side history.
 from __future__ import annotations
 
 import json
+import re
 import secrets
 import time
 from dataclasses import dataclass, field
@@ -53,6 +54,7 @@ class Request:
     parallel_tool_calls: bool | None = None
     reasoning_effort: str | None = None
     output_format: OutputFormat | None = None
+    top_p: float | None = None
 
 
 @dataclass(slots=True)
@@ -161,6 +163,14 @@ def _stream_flag(value: Any) -> bool:
     return value
 
 
+def _optional_top_p(value: Any) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int | float) or not 0 <= value <= 1:
+        raise ConversionError("top_p must be a number between 0 and 1")
+    return float(value)
+
+
 def _parallel_flag(value: Any) -> bool | None:
     if value is not None and not isinstance(value, bool):
         raise ConversionError("parallel_tool_calls must be a boolean")
@@ -246,7 +256,7 @@ def _validate_chat_call(call: dict, index: int) -> None:
 
 
 def _decode_chat(body: dict[str, Any], *, public_reasoning: bool = False) -> Request:
-    _only(body, {"model", "messages", "tools", "tool_choice", "max_completion_tokens", "max_tokens", "temperature", "stream", "parallel_tool_calls", "reasoning_effort", "response_format"}, "Chat request")
+    _only(body, {"model", "messages", "tools", "tool_choice", "max_completion_tokens", "max_tokens", "temperature", "top_p", "stream", "parallel_tool_calls", "reasoning_effort", "response_format"}, "Chat request")
     if "max_completion_tokens" in body and "max_tokens" in body:
         raise ConversionError("choose one Chat token limit field")
     turns: list[Turn] = []
@@ -282,7 +292,7 @@ def _decode_chat(body: dict[str, Any], *, public_reasoning: bool = False) -> Req
         if fn.get("strict"):
             raise ConversionError("strict tool schemas have no universal equivalent")
         tools.append({"name": _string(fn.get("name"), "tool name"), "description": fn.get("description", ""), "parameters": fn.get("parameters", {"type": "object", "properties": {}})})
-    return Request(_string(body.get("model"), "model"), turns, tools, _optional_positive_int(body.get("max_completion_tokens", body.get("max_tokens")), "max_completion_tokens"), _optional_temperature(body.get("temperature")), _stream_flag(body.get("stream", False)), _tool_choice(body.get("tool_choice"), Protocol.CHAT), _parallel_flag(body.get("parallel_tool_calls")), _effort(body.get("reasoning_effort")))
+    return Request(_string(body.get("model"), "model"), turns, tools, _optional_positive_int(body.get("max_completion_tokens", body.get("max_tokens")), "max_completion_tokens"), _optional_temperature(body.get("temperature")), _stream_flag(body.get("stream", False)), _tool_choice(body.get("tool_choice"), Protocol.CHAT), _parallel_flag(body.get("parallel_tool_calls")), _effort(body.get("reasoning_effort")), top_p=_optional_top_p(body.get("top_p")))
 
 
 def _message_parts(content: Any, label: str) -> list[Part]:
@@ -322,7 +332,7 @@ def _message_parts(content: Any, label: str) -> list[Part]:
 
 
 def _decode_messages(body: dict[str, Any]) -> Request:
-    _only(body, {"model", "system", "messages", "tools", "tool_choice", "max_tokens", "temperature", "stream", "output_config"}, "Messages request")
+    _only(body, {"model", "system", "messages", "tools", "tool_choice", "max_tokens", "temperature", "top_p", "stream", "output_config"}, "Messages request")
     output_config = _object(body.get("output_config", {}), "output_config")
     _only(output_config, {"effort", "format"}, "output_config")
     turns: list[Turn] = []
@@ -354,7 +364,7 @@ def _decode_messages(body: dict[str, Any]) -> Request:
                 raise ConversionError("disable_parallel_tool_use must be a boolean")
             parallel = not flag
         choice = _tool_choice(choice, Protocol.MESSAGES)
-    return Request(_string(body.get("model"), "model"), turns, tools, _optional_positive_int(body.get("max_tokens"), "max_tokens"), _optional_temperature(body.get("temperature")), _stream_flag(body.get("stream", False)), choice, parallel, _effort(output_config.get("effort")))
+    return Request(_string(body.get("model"), "model"), turns, tools, _optional_positive_int(body.get("max_tokens"), "max_tokens"), _optional_temperature(body.get("temperature")), _stream_flag(body.get("stream", False)), choice, parallel, _effort(output_config.get("effort")), top_p=_optional_top_p(body.get("top_p")))
 
 
 def _response_content(content: Any, label: str) -> list[Part]:
@@ -376,7 +386,7 @@ def _response_content(content: Any, label: str) -> list[Part]:
 
 
 def _decode_responses(body: dict[str, Any], *, public_reasoning: bool = False) -> Request:
-    _only(body, {"model", "input", "instructions", "tools", "tool_choice", "max_output_tokens", "temperature", "stream", "store", "parallel_tool_calls", "reasoning", "text"}, "Responses request")
+    _only(body, {"model", "input", "instructions", "tools", "tool_choice", "max_output_tokens", "temperature", "top_p", "stream", "store", "parallel_tool_calls", "reasoning", "text"}, "Responses request")
     reasoning = _object(body.get("reasoning", {}), "reasoning")
     _only(reasoning, {"effort"}, "reasoning")
     if body.get("store") is True:
@@ -431,14 +441,21 @@ def _decode_responses(body: dict[str, Any], *, public_reasoning: bool = False) -
         if item.get("type") != "function" or item.get("strict"):
             raise ConversionError("only non-strict function tools are supported")
         tools.append({"name": _string(item.get("name"), "tool name"), "description": item.get("description", ""), "parameters": item.get("parameters", {"type": "object", "properties": {}})})
-    return Request(_string(body.get("model"), "model"), turns, tools, _optional_positive_int(body.get("max_output_tokens"), "max_output_tokens"), _optional_temperature(body.get("temperature")), _stream_flag(body.get("stream", False)), _tool_choice(body.get("tool_choice"), Protocol.RESPONSES), _parallel_flag(body.get("parallel_tool_calls")), _effort(reasoning.get("effort")))
+    return Request(_string(body.get("model"), "model"), turns, tools, _optional_positive_int(body.get("max_output_tokens"), "max_output_tokens"), _optional_temperature(body.get("temperature")), _stream_flag(body.get("stream", False)), _tool_choice(body.get("tool_choice"), Protocol.RESPONSES), _parallel_flag(body.get("parallel_tool_calls")), _effort(reasoning.get("effort")), top_p=_optional_top_p(body.get("top_p")))
 
 
 _DECODERS = {Protocol.CHAT: _decode_chat, Protocol.MESSAGES: _decode_messages, Protocol.RESPONSES: _decode_responses}
 
 
+def _check_function_names(names, target: Protocol) -> None:
+    if target in {Protocol.CHAT, Protocol.RESPONSES} and any(not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", name) for name in names):
+        raise ConversionError("target function names require 1-64 ASCII letters, digits, underscores or dashes; enable tool_names='alias' on the gateway to preserve other names")
+
+
 def _check_turns(request: Request, target: Protocol, *, messages_mid_system: bool = False) -> None:
     names = [tool["name"] for tool in request.tools]
+    wire_names = names + [part.name for turn in request.turns for part in turn.parts if part.kind == "tool_call"]
+    _check_function_names(wire_names, target)
     if len(names) != len(set(names)):
         raise ConversionError("duplicate tool definition name")
     if isinstance(request.tool_choice, dict) and request.tool_choice["name"] not in names:
@@ -538,6 +555,8 @@ def _encode_chat(req: Request) -> dict[str, Any]:
         out["max_completion_tokens"] = req.max_tokens
     if req.temperature is not None:
         out["temperature"] = req.temperature
+    if req.top_p is not None:
+        out["top_p"] = req.top_p
     if req.tool_choice is not None:
         if isinstance(req.tool_choice, dict):
             out["tool_choice"] = {"type": "function", "function": {"name": req.tool_choice["name"]}}
@@ -577,6 +596,8 @@ def _encode_messages(req: Request) -> dict[str, Any]:
         out["tools"] = [{"name": t["name"], "description": t["description"], "input_schema": t["parameters"]} for t in req.tools]
     if req.temperature is not None:
         out["temperature"] = req.temperature
+    if req.top_p is not None:
+        out["top_p"] = req.top_p
     if req.tool_choice is not None:
         choice = req.tool_choice
         if choice == "auto":
@@ -632,6 +653,8 @@ def _encode_responses(req: Request) -> dict[str, Any]:
         out["max_output_tokens"] = req.max_tokens
     if req.temperature is not None:
         out["temperature"] = req.temperature
+    if req.top_p is not None:
+        out["top_p"] = req.top_p
     if req.tool_choice is not None:
         if isinstance(req.tool_choice, dict):
             out["tool_choice"] = dict(req.tool_choice)
@@ -817,6 +840,7 @@ def convert_response(body: dict[str, Any], source: Protocol | str, target: Proto
     if source == target:
         return body.copy()
     result = _decode_result(_object(body, "response"), source, public_reasoning=public_reasoning)
+    _check_function_names((part.name for part in result.parts if part.kind == "tool_call"), target)
     if any(part.kind == "image" for part in result.parts):
         raise ConversionError("image output is not supported across protocols")
     call_ids = [part.call_id for part in result.parts if part.kind == "tool_call"]

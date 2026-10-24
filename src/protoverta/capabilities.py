@@ -16,7 +16,7 @@ from urllib.parse import urlsplit, urlunsplit
 from .core import Protocol
 from .errors import ConversionError
 
-FEATURES = frozenset({"text", "streaming", "tools", "forced_tool_choice", "json_object", "json_schema", "strict_json_schema", "reasoning_effort", "public_reasoning", "images", "mid_conversation_system"})
+FEATURES = frozenset({"text", "streaming", "tools", "forced_tool_choice", "json_object", "json_schema", "strict_json_schema", "reasoning_effort", "public_reasoning", "images", "mid_conversation_system", "top_p"})
 
 
 def _prefix(value: str) -> str:
@@ -41,6 +41,9 @@ class CapabilityRecord:
     features: Mapping[str, bool]
     checked_at: str
     evidence: str
+    max_output_tokens: int | None = None
+    context_window_tokens: int | None = None
+    reasoning_efforts: tuple[str, ...] | None = None
 
     def __post_init__(self):
         object.__setattr__(self, "base_url", _prefix(self.base_url))
@@ -55,6 +58,12 @@ class CapabilityRecord:
         if not isinstance(self.evidence, str) or not self.evidence.strip():
             raise ValueError("capability evidence must identify a documentation or probe result")
         object.__setattr__(self, "features", MappingProxyType(dict(self.features)))
+        for name in ("max_output_tokens", "context_window_tokens"):
+            value = getattr(self, name)
+            if value is not None and (type(value) is not int or value <= 0):
+                raise ValueError(f"{name} must be a positive integer")
+        if self.reasoning_efforts is not None and (not isinstance(self.reasoning_efforts, tuple) or not self.reasoning_efforts or any(not isinstance(effort, str) or effort not in {"none", "minimal", "low", "medium", "high", "xhigh", "max"} for effort in self.reasoning_efforts) or len(set(self.reasoning_efforts)) != len(self.reasoning_efforts)):
+            raise ValueError("reasoning_efforts must contain distinct known effort values")
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +88,8 @@ def request_features(body: dict, protocol: Protocol | str) -> frozenset[str]:
     if not isinstance(body, dict):
         raise ConversionError("capability preflight requires an object request")
     features = {"text"}
+    if body.get("top_p") is not None:
+        features.add("top_p")
     if body.get("stream") is True:
         features.add("streaming")
     if body.get("tools"):
@@ -148,13 +159,19 @@ class CapabilityRegistry:
 
     @classmethod
     def from_dict(cls, body: dict) -> CapabilityRegistry:
-        if not isinstance(body, dict) or set(body) != {"schema_version", "models"} or type(body["schema_version"]) is not int or body["schema_version"] != 1 or not isinstance(body["models"], list):
+        if not isinstance(body, dict) or set(body) != {"schema_version", "models"} or type(body["schema_version"]) is not int or body["schema_version"] not in {1, 2} or not isinstance(body["models"], list):
             raise ValueError("invalid capability registry schema")
         fields = {"base_url", "protocol", "model", "features", "checked_at", "evidence"}
+        optional = {"max_output_tokens", "context_window_tokens", "reasoning_efforts"} if body["schema_version"] == 2 else set()
         records = []
         for item in body["models"]:
-            if not isinstance(item, dict) or set(item) != fields:
+            if not isinstance(item, dict) or not fields <= set(item) or set(item) - fields - optional:
                 raise ValueError("invalid capability record fields")
+            item = dict(item)
+            if "reasoning_efforts" in item and item["reasoning_efforts"] is not None:
+                if not isinstance(item["reasoning_efforts"], list):
+                    raise ValueError("reasoning_efforts must be an array")
+                item["reasoning_efforts"] = tuple(item["reasoning_efforts"])
             records.append(CapabilityRecord(**item))
         return cls(tuple(records))
 
@@ -180,8 +197,26 @@ class CapabilityRegistry:
             tuple(sorted(name for name in requested if name not in values)),
         )
 
+    def lookup(self, base_url: str, protocol: Protocol | str, model: str) -> CapabilityRecord | None:
+        """Return an immutable exact-match record, never an inferred catalog claim."""
+        if not isinstance(model, str) or not model:
+            raise ValueError("capability lookup requires an exact model ID")
+        return self._records.get((_prefix(base_url), Protocol(protocol), model))
+
     def preflight(self, base_url: str, protocol: Protocol | str, body: dict, *, require_verified: bool = False) -> CapabilityReport:
         features = request_features(body, protocol)
         report = self.assess(base_url, protocol, body.get("model"), features)
         report.require(verified=require_verified)
+        protocol = Protocol(protocol)
+        record = self._records.get((_prefix(base_url), protocol, body.get("model")))
+        if record is not None:
+            budget = body.get("max_completion_tokens", body.get("max_tokens")) if protocol == Protocol.CHAT else body.get("max_tokens" if protocol == Protocol.MESSAGES else "max_output_tokens")
+            if budget is not None and (type(budget) is not int or budget <= 0):
+                raise ConversionError("capability preflight requires a positive output token limit")
+            if budget is not None and record.max_output_tokens is not None and budget > record.max_output_tokens:
+                raise ConversionError(f"upstream max_output_tokens limit exceeded ({record.max_output_tokens}); choose an explicit smaller budget")
+            settings = body.get("reasoning" if protocol == Protocol.RESPONSES else "output_config")
+            effort = body.get("reasoning_effort") if protocol == Protocol.CHAT else settings.get("effort") if isinstance(settings, dict) else None
+            if effort is not None and record.reasoning_efforts is not None and (not isinstance(effort, str) or effort not in record.reasoning_efforts):
+                raise ConversionError("upstream does not support the requested reasoning effort")
         return report

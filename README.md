@@ -44,6 +44,10 @@ chat_request = convert_request(messages_request, "messages", "chat")
 
 `ConversionError` indicates an unsupported or invalid JSON conversion. For SSE, `StreamTranscoder` accepts upstream bytes via `feed()` and requires `finish()` at EOF; it raises `StreamError` on invalid or interrupted streams. Protocol names are `chat`, `messages`, and `responses`.
 
+`top_p` maps across all six request routes with explicit range/type validation;
+omitted values do not invent a sampling setting. Provider/model support remains
+subject to capability checks.
+
 User images support URL/base64 references in ordered text/image messages on all
 six request routes. Explicit detail selectors, provider-owned file IDs and
 image tool results have portability limits; see [image inputs](docs/compatibility/images.md).
@@ -92,6 +96,13 @@ gateway extension can select one declared namespaced function. The default is
 `reject`; native forwarding is unchanged.
 Use `GatewayConfig(..., namespace_tools="flatten")` from Python.
 
+For long or nonportable ordinary function names, opt into `--tool-names alias`
+(`tool_names="alias"` in Python). Aliases are request-local and reversible for
+definitions, history, forced choice, JSON and SSE; native forwarding is unchanged.
+The explicit Codex/Claude compatibility profiles select aliasing by default;
+`--tool-names reject` overrides that choice. Standalone strict mode stays strict.
+See [function-name and identity rules](docs/compatibility/tool-names.md).
+
 Forced function selection maps between all three protocols. JSON object mode maps
 between Chat and Responses; JSON Schema maps across the supported strict subset
 when Messages is involved. See [tool selection and output formats](docs/compatibility/output-formats.md).
@@ -100,6 +111,14 @@ An optional [capability registry](docs/compatibility/capabilities.md) can block
 unsupported provider/model features before upstream I/O. Configure it with
 `--capabilities-file FILE`; add `--require-verified-capabilities` to reject unknown
 features too. Records are scoped to the exact API prefix, protocol and model.
+
+Version-2 capability records can also declare output-token limits, context-window
+metadata and allowed reasoning efforts. Explicit incompatible budgets/efforts
+are rejected, not silently reduced. See the registry documentation for scope.
+
+The gateway bounds active requests with `--max-concurrent-requests` (default 16)
+and socket I/O with `--timeout` (default 120 seconds). See
+[failure mapping and resource limits](docs/compatibility/errors.md).
 
 For a Messages model whose provider explicitly supports mid-conversation system
 text, opt in with repeatable `--messages-system-model EXACT_MODEL_ID` or

@@ -10,6 +10,7 @@ from .core import ConversionError, Protocol, convert_request, convert_response
 from .stream_encoder import StreamEncoder
 from .stream_pipe import StreamTranscoder
 from .streaming import Delta, StreamDecoder, StreamError
+from .tool_names import ToolNameMap
 
 __all__ = [
     "CapabilityRecord",
@@ -22,6 +23,7 @@ __all__ = [
     "StreamEncoder",
     "StreamError",
     "StreamTranscoder",
+    "ToolNameMap",
     "convert_request",
     "convert_response",
     "request_features",
