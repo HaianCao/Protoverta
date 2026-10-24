@@ -1,7 +1,7 @@
 """Contain only newly created Windows probe processes and their descendants.
 
 Assign the suspended child to a kill-on-close job before it can spawn anything.
-No breakaway flags, privilege changes, process discovery or name-based kills.
+No breakaway flags, privilege changes, global process discovery or name-based kills.
 """
 
 from __future__ import annotations
@@ -33,6 +33,9 @@ class WindowsProbeJob:
             ("TerminateJobObject", [wintypes.HANDLE, wintypes.UINT], wintypes.BOOL),
             ("CloseHandle", [wintypes.HANDLE], wintypes.BOOL),
             ("ResumeThread", [wintypes.HANDLE], wintypes.DWORD),
+            ("QueryInformationJobObject", [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD, ctypes.c_void_p], wintypes.BOOL),
+            ("OpenProcess", [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD], wintypes.HANDLE),
+            ("QueryFullProcessImageNameW", [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)], wintypes.BOOL),
         ):
             function = getattr(self.kernel, name)
             function.argtypes, function.restype = args, result
@@ -57,6 +60,29 @@ class WindowsProbeJob:
     def terminate(self):
         if not self.kernel.TerminateJobObject(self.handle, 124):
             raise ctypes.WinError(ctypes.get_last_error())
+
+    def process_images(self):
+        """Image basenames of this probe job only; never inspect command lines."""
+        from ctypes import wintypes
+        from pathlib import PureWindowsPath
+
+        buffer = ctypes.create_string_buffer(8 + ctypes.sizeof(ctypes.c_size_t) * 128)
+        if not self.kernel.QueryInformationJobObject(self.handle, 3, buffer, len(buffer), None):
+            raise ctypes.WinError(ctypes.get_last_error())
+        count = ctypes.c_uint32.from_buffer(buffer, 4).value
+        images = []
+        for index in range(min(count, 128)):
+            pid = ctypes.c_size_t.from_buffer(buffer, 8 + index * ctypes.sizeof(ctypes.c_size_t)).value
+            handle = self.kernel.OpenProcess(0x1000, False, pid)  # QUERY_LIMITED_INFORMATION
+            if not handle:
+                continue  # Member may already have exited.
+            try:
+                name, size = ctypes.create_unicode_buffer(32768), wintypes.DWORD(32768)
+                if self.kernel.QueryFullProcessImageNameW(handle, 0, name, ctypes.byref(size)):
+                    images.append(PureWindowsPath(name.value).name)
+            finally:
+                self.kernel.CloseHandle(handle)
+        return sorted(images)
 
     def close(self):
         if self.handle:

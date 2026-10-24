@@ -19,6 +19,7 @@ def test_isolated_probe_process_returns_success_and_stops_on_timeout(monkeypatch
     result = module.run_process([sys.executable, "-c", code], **{**options, "timeout": 0.5})
     assert result.returncode == 124
     assert "process tree was terminated" in result.stderr
+    assert "root still running" in result.stderr
 
 
 def test_timeout_cleans_descendant_even_after_its_parent_exits(monkeypatch, tmp_path):
@@ -28,6 +29,7 @@ def test_timeout_cleans_descendant_even_after_its_parent_exits(monkeypatch, tmp_
     started = time.monotonic()
     result = module.run_process([sys.executable, "-c", code], cwd=str(tmp_path), text=True, encoding="utf-8", errors="replace", timeout=0.5)
     assert result.returncode == 124 and "parent-exited" in result.stdout
+    assert "root exited 0; descendant pipes remained open" in result.stderr
     assert time.monotonic() - started < 10
 
 

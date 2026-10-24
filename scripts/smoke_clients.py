@@ -223,6 +223,10 @@ def run_smoke(
                 "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
                 "CLAUDE_CODE_SIMPLE": "1",
                 "PROTOVERTA_SMOKE_TOKEN": "smoke-local-token",
+                # Client startup must not fetch plugin marketplaces or prompt
+                # through a user's Git credential helper during local fixtures.
+                "GIT_ALLOW_PROTOCOL": "file",
+                "GIT_TERMINAL_PROMPT": "0",
             }
         )
         (task_root / "codex").mkdir()
@@ -302,6 +306,7 @@ def run_client(
     resume_id: str | None = None,
     provider_id: str = "smoke",
     trace_file: Path | None = None,
+    codex_config: dict | None = None,
 ):
     if client == "codex":
         settings = {
@@ -317,7 +322,15 @@ def run_client(
             "web_search": "disabled",
             "model_reasoning_summary": "none",
             "features.multi_agent": False,
+            # Keep persistent fixture threads from starting a background daemon
+            # that can inherit captured pipes beyond the isolated CLI lifetime.
+            "features.daemon_auto_start": False,
+            "features.plugins": False,
+            "features.apps": False,
+            "features.remote_plugin": False,
+            "check_for_update_on_startup": False,
         }
+        settings.update(codex_config or {})
         args = [
             executable,
             "exec",
@@ -386,7 +399,7 @@ def run_client(
                 Protocol.RESPONSES: "responses",
             }[upstream]
             config_path.write_text(
-                f'schema_version = 1\n[providers.smoke]\ndisplay_name = "Smoke"\nbase_url = "{upstream_origin}/v1"\nprotocol = "{protocol}"\nexecution_mode = "gateway"\nupstream_reasoning = "{config.upstream_reasoning}"\npublic_reasoning = {str(config.public_reasoning).lower()}\nauth_secret_ref = "smoke-main"\n[secrets.smoke-main]\nbackend = "environment"\nenv_var = "SMOKE_TOKEN"\n',
+                f'schema_version = 1\n[providers.smoke]\ndisplay_name = "Smoke"\nbase_url = "{upstream_origin}/v1"\nprotocol = "{protocol}"\nexecution_mode = "gateway"\nupstream_reasoning = "{config.upstream_reasoning}"\npublic_reasoning = {str(config.public_reasoning).lower()}\nclient_tool_search = "{config.client_tool_search}"\nauth_secret_ref = "smoke-main"\n[secrets.smoke-main]\nbackend = "environment"\nenv_var = "SMOKE_TOKEN"\n',
                 encoding="utf-8",
             )
             options = [
@@ -472,11 +485,20 @@ def run_client(
         # Real-provider probes must not multiply failed requests through the
         # CLI's default reconnect policy. These overrides belong at root scope.
         at = args.index("--") + 1
-        retry_options = ["-c", f"model_providers.{provider_id}.request_max_retries=0", "-c", f"model_providers.{provider_id}.stream_max_retries=0"]
+        retry_options = ["-c", f"model_providers.{provider_id}.request_max_retries=0", "-c", f"model_providers.{provider_id}.stream_max_retries=0", "-c", "features.daemon_auto_start=false"]
+        for key in ("features.plugins", "features.apps", "features.remote_plugin", "check_for_update_on_startup"):
+            retry_options += ["-c", key + "=false"]
+        for key, value in (codex_config or {}).items():
+            retry_options += ["-c", f"{key}={json.dumps(value)}"]
         if not resume_id:
             args[args.index("exec")] = "run"
             retry_options.append("exec")
         args[at:at] = retry_options
+    if client == "codex":
+        # Explicitly bypass an existing/shared daemon too. The feature flag
+        # alone controls auto-start, not attachment to a background server.
+        at = args.index("--") + 1 if adapter_source is not None or installed_adapter else 1
+        args[at:at] = ["--no-daemon"]
     if trace_file is not None:
         if adapter_source is None:
             raise ValueError("Tracing requires a source adapter and synthetic state")

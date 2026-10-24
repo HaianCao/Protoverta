@@ -36,9 +36,12 @@ def test_harness_preserves_opt_in_session_and_resume_arguments(harness, monkeypa
     if client == "codex":
         assert "alternate" in raw["providers"]
         root = args[args.index("--") + 1:]
+        assert root.pop(0) == "--no-daemon"
         assert root[:4] == ["-c", "model_providers.alternate.request_max_retries=0", "-c", "model_providers.alternate.stream_max_retries=0"]
+        assert root[4:6] == ["-c", "features.daemon_auto_start=false"]
         if persist:
-            assert root[4:9] == ["--sandbox", "read-only", "exec", "resume", identifier]
+            at = root.index("--sandbox")
+            assert root[at:at + 5] == ["--sandbox", "read-only", "exec", "resume", identifier]
             assert "run" in args
         assert ("--ephemeral" not in args) == persist
     else:

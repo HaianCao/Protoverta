@@ -78,6 +78,10 @@ Malformed/truncated/oversized calls cannot produce successful completion.
 This is an explicit function-emulation policy, not native provider search or
 a guarantee of native deferred-loading/cache placement. Real-client search
 fixtures are a separate gate from codec tests.
+The [Codex client acceptance checks](client-gates.md) record a passing native
+control and both translated Chat/Messages search→MCP-tool loops on CLI 0.164.0,
+including source and isolated installed launchers. These use synthetic model
+metadata/upstreams and do not certify provider support.
 
 ## Sources
 

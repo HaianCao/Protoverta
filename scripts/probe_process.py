@@ -29,6 +29,13 @@ def run_process(args, **kwargs):
         try:
             stdout, stderr = process.communicate(input_data, timeout=timeout)
         except subprocess.TimeoutExpired:
+            root_status = process.poll()
+            images = []
+            if job is not None:
+                try:
+                    images = job.process_images()
+                except OSError:
+                    pass  # Diagnostics must not prevent bounded cleanup.
             # Kill only the job/group created for this probe, before draining
             # inherited pipes. Never discover or kill unrelated CLI processes.
             if job is not None:
@@ -41,5 +48,6 @@ def run_process(args, **kwargs):
             if process.poll() is None:
                 process.kill()
             stdout, stderr = process.communicate(timeout=10)
-            return subprocess.CompletedProcess(args, 124, stdout, stderr + "\nIsolated client timed out; its process tree was terminated.\n")
+            detail = "still running" if root_status is None else f"exited {root_status}; descendant pipes remained open"
+            return subprocess.CompletedProcess(args, 124, stdout, stderr + f"\nIsolated client timed out (root {detail}; own-job images={images}); its process tree was terminated.\n")
         return subprocess.CompletedProcess(args, process.returncode, stdout, stderr)
