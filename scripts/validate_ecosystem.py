@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import tomllib
 import venv
 from pathlib import Path
 
@@ -18,14 +19,22 @@ def command(args, cwd, *, env=None):
 
 def validate(core, codex, claude, output):
     projects = [core.resolve(), codex.resolve(), claude.resolve()]
+    if any(output.iterdir()):
+        raise ValueError("Use an empty output directory for reproducible package validation.")
+    version = tomllib.loads((projects[0] / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
     wheels = []
     artifacts = []
     for project in projects:
         if not (project / "pyproject.toml").is_file():
             raise ValueError("Expected project checkout: " + str(project))
+        if project != projects[0]:
+            requirements = tomllib.loads((project / "pyproject.toml").read_text(encoding="utf-8"))["project"]["optional-dependencies"]["gateway"]
+            if "protoverta==" + version not in requirements:
+                raise ValueError("Consumer gateway pin does not match this core snapshot: " + project.name)
         env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
-        env["PYTHONPATH"] = os.pathsep.join((str(project / "src"), str(core.resolve() / "src")))
-        command([sys.executable, "-B", "-m", "pytest", "-p", "no:cacheprovider", "-o", "addopts=", "-q"], project, env=env)
+        env["PYTHONPATH"] = os.pathsep.join((str(project / "src"), str(projects[0] / "src"), str(projects[0] / "scripts")))
+        guard = ["-p", "gateway_test_guard"] if project != projects[0] else []
+        command([sys.executable, "-B", "-m", "pytest", *guard, "-p", "no:cacheprovider", "-o", "addopts=", "-q"], project, env=env)
         command([sys.executable, "-m", "ruff", "check", "src", "tests", "scripts"], project)
         destination = output / "dist" / project.name
         command([sys.executable, "-m", "build", "--no-isolation", "--outdir", destination], project)
@@ -39,6 +48,7 @@ def validate(core, codex, claude, output):
     venv.EnvBuilder(with_pip=True).create(environment)
     python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     command([python, "-m", "pip", "install", "--disable-pip-version-check", "--no-deps", *wheels], output)
+    command([python, "-m", "pip", "install", "--disable-pip-version-check", "pytest>=8"], output)
     script = """
 from pathlib import Path
 from unittest.mock import patch
@@ -64,6 +74,11 @@ print('Three isolated wheels: runtime API compatibility PASS')
     clean = dict(os.environ)
     clean.pop("PYTHONPATH", None)
     command([python, "-B", "-c", script], output, env=clean)
+    clean["PYTHONPATH"] = str(projects[0] / "scripts")
+    for project in projects:
+        # Override Claude's source-pythonpath so wheel tests cannot silently
+        # import checkout code instead of the installed artifacts.
+        command([python, "-B", "-m", "pytest", "-p", "gateway_test_guard", "-p", "no:cacheprovider", "-o", "pythonpath=", "-o", "addopts=", "-q", project / "tests"], output, env=clean)
     return {"passed": True, "output": str(output), "local_validation_only": True}
 
 

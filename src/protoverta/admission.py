@@ -19,6 +19,10 @@ class AdmissionPolicyError(ValueError):
     pass
 
 
+class AdmissionStorageError(RuntimeError):
+    """Local budget storage failed; never classify this as upstream transport."""
+
+
 class SharedAdmission:
     def __init__(self, path, scope, *, requests=40, window=60.0, concurrency=5, lease=610.0, clock=time.time):
         if type(requests) is not int or requests < 1 or type(concurrency) is not int or concurrency < 1:
@@ -44,17 +48,21 @@ class SharedAdmission:
 
     @contextmanager
     def _transaction(self):
-        connection = self._connect()
         try:
-            connection.execute("BEGIN IMMEDIATE")
-            yield connection
-            connection.execute("COMMIT")
-        except BaseException:
-            if connection.in_transaction:
-                connection.execute("ROLLBACK")
-            raise
-        finally:
-            connection.close()
+            connection = self._connect()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                yield connection
+                connection.execute("COMMIT")
+            except BaseException:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+            finally:
+                connection.close()
+        except (OSError, sqlite3.Error) as exc:
+            # Do not expose database paths or driver messages to HTTP clients.
+            raise AdmissionStorageError("Shared provider budget storage is unavailable.") from exc
 
     def acquire(self):
         now = self.clock()

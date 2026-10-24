@@ -1,0 +1,104 @@
+name: Ecosystem integration
+
+# Explicit refs avoid silently validating incompatible default-branch snapshots.
+# Dispatch only after all selected commits are available on GitHub.
+on:
+  workflow_dispatch:
+    inputs:
+      codex_ref:
+        description: CodexApter commit SHA to test
+        required: true
+        type: string
+      claude_ref:
+        description: ClaudApter commit SHA to test
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: protoverta
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: HaianCao/CodexApter
+          ref: ${{ inputs.codex_ref }}
+          path: free-codex-cli
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: HaianCao/ClaudApter
+          ref: ${{ inputs.claude_ref }}
+          path: free-claude-cli
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Prepare validation tools
+        run: python -m pip install pytest ruff==0.17.2 build twine hatchling
+      - name: Source tests, matched wheels, strict installed gateway tests
+        run: python protoverta/scripts/validate_ecosystem.py --codex-source free-codex-cli --claude-source free-claude-cli --output validation
+      - name: Browser runtime in disposable wheel environment
+        shell: pwsh
+        run: |
+          & .\validation\installed\Scripts\python.exe -m pip install playwright==1.64.1
+          if ($LASTEXITCODE) { throw 'Playwright install failed' }
+          & .\validation\installed\Scripts\python.exe -m playwright install chromium
+          if ($LASTEXITCODE) { throw 'Chromium install failed' }
+      - name: Browser E2E against installed frontend assets (CLI launch stubbed)
+        shell: pwsh
+        run: |
+          & .\validation\installed\Scripts\python.exe protoverta/scripts/browser_setup_smoke.py --source free-codex-cli --package codex_adapter --installed
+          if ($LASTEXITCODE) { throw 'Codex browser E2E failed' }
+          & .\validation\installed\Scripts\python.exe protoverta/scripts/browser_setup_smoke.py --source free-claude-cli --package claudapter --installed
+          if ($LASTEXITCODE) { throw 'Claude browser E2E failed' }
+      - name: Install pinned official CLIs on the disposable runner
+        shell: pwsh
+        run: |
+          npm install --global @openai/codex@0.164.0 @anthropic-ai/claude-code@2.1.308
+          if ($LASTEXITCODE) { throw 'CLI fixture dependencies failed to install' }
+          codex --version
+          claude --version
+      - name: Real CLI tool loops and client search (scripted local upstreams only)
+        shell: pwsh
+        working-directory: protoverta
+        run: |
+          $python = '..\validation\installed\Scripts\python.exe'
+          & $python scripts/smoke_clients.py --client codex --upstream chat --tool-loop --installed-adapter
+          if ($LASTEXITCODE) { throw 'Codex tool loop failed' }
+          & $python scripts/smoke_clients.py --client claude --upstream chat --tool-loop --installed-adapter
+          if ($LASTEXITCODE) { throw 'Claude tool loop failed' }
+          foreach ($protocol in @('responses', 'chat', 'messages')) {
+            & $python scripts/smoke_tool_search.py --upstream $protocol --installed-adapter
+            if ($LASTEXITCODE) { throw "Codex search gate failed: $protocol" }
+          }
+      - name: Isolated install, update and uninstall
+        shell: pwsh
+        run: |
+          $wheel = (Get-ChildItem validation/dist/protoverta/*.whl).FullName
+          python protoverta/scripts/smoke_windows_install.py --wheel $wheel
+          if ($LASTEXITCODE) { throw 'Isolated installer lifecycle failed' }
+      - name: Upgrade from the immutable public a6 wheel
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri 'https://github.com/HaianCao/Protoverta/releases/download/v0.3.0a6/protoverta-0.3.0a6-py3-none-any.whl' -OutFile validation/protoverta-0.3.0a6-py3-none-any.whl
+          $next = (Get-ChildItem validation/dist/protoverta/*.whl).FullName
+          $codex = (Get-ChildItem validation/dist/free-codex-cli/*.whl).FullName
+          $claude = (Get-ChildItem validation/dist/free-claude-cli/*.whl).FullName
+          python protoverta/scripts/validate_upgrade.py --previous-wheel validation/protoverta-0.3.0a6-py3-none-any.whl --next-wheel $next --codex-wheel $codex --claude-wheel $claude
+          if ($LASTEXITCODE) { throw 'Legacy upgrade gate failed' }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ecosystem-distributions
+          path: validation/dist

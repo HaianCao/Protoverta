@@ -6,7 +6,6 @@ import copy
 import json
 import math
 import secrets
-import sqlite3
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -17,7 +16,12 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from .admission import AdmissionDenied, AdmissionPolicyError, SharedAdmission
+from .admission import (
+    AdmissionDenied,
+    AdmissionPolicyError,
+    AdmissionStorageError,
+    SharedAdmission,
+)
 from .capabilities import CapabilityRegistry, _prefix
 from .core import ConversionError, Protocol, convert_request, convert_response
 from .failures import gateway_failure
@@ -445,7 +449,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                 self._error(429, str(exc), protocol, headers={"Retry-After": str(exc.retry_after)})
             except ClientDisconnected:
                 return
-            except (sqlite3.Error, AdmissionPolicyError):
+            except (AdmissionStorageError, AdmissionPolicyError):
                 self._error(503, "Shared provider admission is unavailable or has conflicting policy.", protocol, headers={"x-should-retry": "false"})
             except HTTPError as exc:
                 try:
@@ -482,7 +486,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                 if shared_admission is not None and lease is not None:
                     try:
                         shared_admission.release(lease)
-                    except sqlite3.Error:
+                    except AdmissionStorageError:
                         pass  # A crashed/busy writer cannot retain a lease beyond its TTL.
 
     return Handler

@@ -1,7 +1,7 @@
 # Provider profiles, shared budgets and retry boundaries
 
-These options are opt-in source features. They are not present in the previously
-published alpha-6 wheel. Test matching source/wheels together; do not overwrite
+These options target the prepared, unpublished alpha-7 preview. They are not
+present in the public alpha-6 wheel. Test matching source/wheels together; do not overwrite
 an existing release asset with a same-version local validation build.
 
 ## Provider wire profiles
@@ -52,6 +52,10 @@ gets HTTP 429 and Retry-After without reaching upstream. Each retry consumes a
 new request attempt; release does not refund the rolling-window quota.
 Upstream 429/503 Retry-After creates a shared cooldown. A conflicting policy or
 unusable database fails with 503 rather than bypassing protections.
+Filesystem creation/permission errors are classified as local admission storage
+failures, not upstream transport errors. If storage fails during release after
+an HTTP response is completed, that response is not rewritten; the lease expires
+at its original TTL and the failed rate attempt is not refunded.
 
 Leases cover total_timeout + timeout + 5 seconds and expire after a crashed
 process. Normal completion, errors and observed disconnect release concurrency.
@@ -83,7 +87,8 @@ default HTTP(S) sockets, including reads waiting for upstream headers/body.
 Clients must keep their write side open while awaiting the response: deliberately
 half-closing the request connection is treated as cancellation.
 
-Cancellation does not forcibly interrupt OS DNS or arbitrary injected transports.
+Cancellation does not forcibly interrupt OS DNS, an in-flight SQLite operation
+(lock waits have a one-second per-operation timeout), or arbitrary injected transports.
 Injected transports must implement bounded reads/cancellation themselves.
 The gateway never kills unrelated processes. Existing stream validation and
 terminal-at-EOF rules remain in force.

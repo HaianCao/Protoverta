@@ -15,12 +15,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 
-def run(source: Path, package: str, browser_executable: str | None = None):
+def run(source: Path, package: str, browser_executable: str | None = None, *, installed=False):
     import sys
 
     from playwright.sync_api import sync_playwright
 
-    sys.path.insert(0, str(source.resolve() / "src"))
+    if not installed:
+        sys.path.insert(0, str(source.resolve() / "src"))
     web = importlib.import_module(package + ".web")
     config_module = importlib.import_module(package + ".config")
     codex = package == "codex_adapter"
@@ -129,8 +130,9 @@ def main():
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--package", choices=["codex_adapter", "claudapter"], required=True)
     parser.add_argument("--browser-executable")
+    parser.add_argument("--installed", action="store_true", help="Test the installed wheel, not checkout imports")
     args = parser.parse_args()
-    print(json.dumps(run(args.source, args.package, args.browser_executable)))
+    print(json.dumps(run(args.source, args.package, args.browser_executable, installed=args.installed)))
 
 
 if __name__ == "__main__":
