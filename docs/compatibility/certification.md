@@ -4,6 +4,10 @@ No new provider is certified by the alpha-7 local fixture suite. Compatibility
 belongs to an exact API prefix, upstream protocol, model, feature and policy.
 An HTTP 200, a model catalog entry or a passing native request is not enough.
 
+Schema 3 supports recording these independent [route/policy claims](route-evidence.md).
+`verified_with` records tested versions as text; it does not enforce version or
+evidence-age constraints automatically. Refresh evidence after relevant changes.
+
 ## Before a live run
 
 - Obtain the operator's approved provider/model list, key reference, allowed

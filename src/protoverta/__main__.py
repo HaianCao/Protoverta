@@ -47,6 +47,8 @@ def main() -> int:
     parser.add_argument("--retry-attempts", type=int, default=1, help="1 disables retries; at most 4 explicit HTTP-rejection attempts")
     parser.add_argument("--retry-max-wait", type=float, default=5)
     parser.add_argument("--require-verified-capabilities", action="store_true", help="Reject requested features missing from the configured registry as well as unsupported features")
+    parser.add_argument("--require-verified-routes", action="store_true", help="Require exact schema-3 route/policy evidence, separately from upstream model support")
+    parser.add_argument("--context-preflight", choices=["off", "estimate", "reject_estimate"], default="off", help="Opt-in labelled heuristic; never an exact tokenizer or automatic history truncation")
     parser.add_argument("--public-reasoning", action="store_true", help="Opt in to unsigned reasoning_content <-> Responses reasoning_text; no summaries, signatures or encrypted state")
     args = parser.parse_args()
     key = os.environ.get(args.upstream_key_env, "")
@@ -59,6 +61,7 @@ def main() -> int:
         config = GatewayConfig(Protocol(args.upstream_protocol), args.upstream_base_url, key, token, args.auth_style, client_profile=args.client_profile, default_max_output_tokens=args.default_max_output_tokens, messages_usage_policy=args.messages_usage_policy, upstream_reasoning=args.upstream_reasoning, namespace_tools=args.namespace_tools, messages_system_models=tuple(args.messages_system_model), capabilities=capabilities, require_verified_capabilities=args.require_verified_capabilities, public_reasoning=args.public_reasoning, tool_names=args.tool_names, timeout=args.timeout, max_concurrent_requests=args.max_concurrent_requests)
         config = replace(config, total_timeout=args.total_timeout, progress_timeout=args.progress_timeout, max_stream_bytes=args.max_stream_bytes, max_stream_items=args.max_stream_items, max_tool_argument_bytes=args.max_tool_argument_bytes, client_tool_search=args.client_tool_search, provider_profiles=profiles)
         config = replace(config, shared_admission_db=args.shared_admission_db, shared_requests=args.shared_requests, shared_window=args.shared_window, shared_concurrency=args.shared_concurrency, retry_attempts=args.retry_attempts, retry_max_wait=args.retry_max_wait)
+        config = replace(config, require_verified_routes=args.require_verified_routes, context_preflight=args.context_preflight)
     except (ValueError, TypeError, OSError) as exc:
         parser.error(str(exc))
     server = serve(config, port=args.port, observer=jsonl_observer(sys.stderr) if args.diagnostics else None)

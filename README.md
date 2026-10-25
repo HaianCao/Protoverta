@@ -207,3 +207,7 @@ a different provider configuration ID and must recall a token from the first
 turn. This still requires `--allow-live` and may incur API charges.
 
 See [SECURITY.md](SECURITY.md) for reporting security issues. Licensed under [MIT](LICENSE).
+
+Optional gateway controls: [exact route evidence](docs/compatibility/route-evidence.md),
+[bounded model catalogs](docs/compatibility/catalogs.md), and
+[context preflight / local soak](docs/compatibility/context-preflight.md).

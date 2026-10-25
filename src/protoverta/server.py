@@ -22,7 +22,8 @@ from .admission import (
     AdmissionStorageError,
     SharedAdmission,
 )
-from .capabilities import CapabilityRegistry, _prefix
+from .capabilities import CapabilityRegistry, _prefix, request_features, route_policies
+from .context import assess_context
 from .core import ConversionError, Protocol, convert_request, convert_response
 from .errors import UnsupportedFeatureError
 from .failures import gateway_failure
@@ -91,8 +92,17 @@ class GatewayConfig:
     shared_concurrency: int = 5
     retry_attempts: int = 1
     retry_max_wait: float = 5.0
+    require_verified_routes: bool = False
+    context_preflight: str = "off"
+    token_counter: object = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
+        if self.context_preflight not in ("off", "estimate", "reject_estimate", "exact"):
+            raise ValueError("invalid context preflight policy")
+        if self.token_counter is not None and not callable(self.token_counter):
+            raise ValueError("token_counter must be callable")
+        if self.context_preflight == "exact" and self.token_counter is None:
+            raise ValueError("exact context policy needs an operator token counter")
         if type(self.retry_attempts) is not int or not 1 <= self.retry_attempts <= 4 or not positive_number(self.retry_max_wait):
             raise ValueError("retry_attempts must be 1-4 and retry_max_wait must be finite and positive")
         if self.shared_admission_db is not None:
@@ -148,6 +158,8 @@ class GatewayConfig:
             raise ValueError("capabilities must be a CapabilityRegistry")
         if not isinstance(self.require_verified_capabilities, bool) or self.require_verified_capabilities and self.capabilities is None:
             raise ValueError("require_verified_capabilities requires a capability registry")
+        if type(self.require_verified_routes) is not bool or self.require_verified_routes and self.capabilities is None:
+            raise ValueError("require_verified_routes requires a capability registry")
 
     @property
     def upstream_url(self) -> str:
@@ -234,6 +246,8 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 self._trace.outcome = "upstream_http"
             self.send_response(status)
             self.send_header("X-Protoverta-Request-ID", self._trace.request_id)
+            for name, value in getattr(self, "_context_headers", {}).items():
+                self.send_header(name, value)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(raw)))
             self.send_header("Cache-Control", "no-store")
@@ -261,6 +275,8 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                     self._trace.status = 200
                     self.send_response(200)
                     self.send_header("X-Protoverta-Request-ID", self._trace.request_id)
+                    for name, value in getattr(self, "_context_headers", {}).items():
+                        self.send_header(name, value)
                     self.send_header("Content-Type", "text/event-stream; charset=utf-8")
                     self.send_header("Cache-Control", "no-store")
                     self.send_header("X-Accel-Buffering", "no")
@@ -333,6 +349,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
         def do_POST(self) -> None:
             protocol = _PATHS.get(urlsplit(self.path).path)
             self._trace = RequestTrace(protocol.value if protocol is not None else "unknown", config.upstream_protocol.value)
+            self._context_headers = {}
             try:
                 self._dispatch_post()
             except Exception:
@@ -416,6 +433,12 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                     outbound = config.provider_profiles.apply(config.upstream_base_url, config.upstream_protocol, outbound)
                 if config.capabilities is not None:
                     config.capabilities.preflight(config.upstream_base_url, config.upstream_protocol, outbound, require_verified=config.require_verified_capabilities)
+                    config.capabilities.assess_route(config.upstream_base_url, config.upstream_protocol, outbound.get("model"), request_features(payload, protocol) | request_features(outbound, config.upstream_protocol),
+                                                     source_protocol=protocol, streaming=streaming, client_profile=config.client_profile, policies=route_policies(config)).require(verified=config.require_verified_routes)
+                if config.context_preflight != "off":
+                    record = config.capabilities.lookup(config.upstream_base_url, config.upstream_protocol, outbound.get("model")) if config.capabilities else None
+                    assessment = assess_context(outbound, config.upstream_protocol, record.context_window_tokens if record else None, policy=config.context_preflight, counter=config.token_counter)
+                    self._context_headers = assessment.headers()
             except RecursionError:
                 self._error(422, "request nesting exceeds the supported depth", protocol, headers={"x-should-retry": "false"})
                 return

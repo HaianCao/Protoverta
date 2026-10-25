@@ -18,6 +18,58 @@ from .errors import ConversionError
 
 FEATURES = frozenset({"text", "streaming", "tools", "custom_tools", "forced_tool_choice", "json_object", "json_schema", "strict_json_schema", "reasoning_effort", "public_reasoning", "images", "mid_conversation_system", "top_p", "stop_sequences", "strict_tools", "image_tool_results"})
 
+POLICY_VALUES = {
+    "messages_usage_policy": ("strict", "deferred"),
+    "upstream_reasoning": ("provider_default", "disabled", "openrouter_disabled"),
+    "namespace_tools": ("reject", "flatten"),
+    "tool_names": ("reject", "alias"),
+    "client_tool_search": ("reject", "function"),
+    "public_reasoning": (False, True),
+}
+
+
+def route_policies(config) -> dict:
+    """Resolved policy fingerprint; unknown/missing policy values never wildcard."""
+    return {key: getattr(config, key) for key in POLICY_VALUES}
+
+
+@dataclass(frozen=True, slots=True)
+class RouteCapabilityRecord:
+    base_url: str
+    protocol: Protocol | str
+    model: str
+    source_protocol: Protocol | str
+    streaming: bool
+    client_profile: str
+    policies: Mapping
+    features: Mapping[str, bool]
+    checked_at: str
+    evidence: str
+    verified_with: str
+
+    def __post_init__(self):
+        record = CapabilityRecord(self.base_url, self.protocol, self.model, self.features, self.checked_at, self.evidence)
+        object.__setattr__(self, "base_url", record.base_url)
+        object.__setattr__(self, "protocol", record.protocol)
+        object.__setattr__(self, "source_protocol", Protocol(self.source_protocol))
+        object.__setattr__(self, "features", record.features)
+        if type(self.streaming) is not bool or self.client_profile not in ("strict", "codex", "claude"):
+            raise ValueError("route requires a boolean streaming mode and known client profile")
+        if not isinstance(self.verified_with, str) or not self.verified_with.strip():
+            raise ValueError("route evidence must record tested core/client versions")
+        _policy_key(self.policies)
+        object.__setattr__(self, "policies", MappingProxyType(dict(self.policies)))
+
+
+def _policy_key(policies):
+    if not isinstance(policies, Mapping) or set(policies) != set(POLICY_VALUES):
+        raise ValueError("route policies must explicitly declare every known policy")
+    for key, allowed in POLICY_VALUES.items():
+        value = policies[key]
+        if type(value) is not type(allowed[0]) or value not in allowed:
+            raise ValueError("invalid route policy value")
+    return tuple((key, policies[key]) for key in sorted(POLICY_VALUES))
+
 
 def _prefix(value: str) -> str:
     if not isinstance(value, str) or any(char.isspace() for char in value):
@@ -167,7 +219,7 @@ def request_features(body: dict, protocol: Protocol | str) -> frozenset[str]:
 
 
 class CapabilityRegistry:
-    def __init__(self, records: tuple[CapabilityRecord, ...] = ()):
+    def __init__(self, records: tuple[CapabilityRecord, ...] = (), routes: tuple[RouteCapabilityRecord, ...] = ()):
         index = {}
         for record in records:
             if not isinstance(record, CapabilityRecord):
@@ -177,13 +229,23 @@ class CapabilityRegistry:
                 raise ValueError("duplicate capability entry for API prefix/protocol/model")
             index[key] = record
         self._records = MappingProxyType(index)
+        route_index = {}
+        for route in routes:
+            if not isinstance(route, RouteCapabilityRecord):
+                raise TypeError("route entries must be RouteCapabilityRecord instances")
+            key = (route.base_url, route.protocol, route.model, route.source_protocol,
+                   route.streaming, route.client_profile, _policy_key(route.policies))
+            if key in route_index:
+                raise ValueError("duplicate exact route capability record")
+            route_index[key] = route
+        self._routes = MappingProxyType(route_index)
 
     @classmethod
     def from_dict(cls, body: dict) -> CapabilityRegistry:
-        if not isinstance(body, dict) or set(body) != {"schema_version", "models"} or type(body["schema_version"]) is not int or body["schema_version"] not in {1, 2} or not isinstance(body["models"], list):
+        if not isinstance(body, dict) or type(body.get("schema_version")) is not int or body["schema_version"] not in {1, 2, 3} or set(body) != ({"schema_version", "models", "routes"} if body["schema_version"] == 3 else {"schema_version", "models"}) or not isinstance(body["models"], list):
             raise ValueError("invalid capability registry schema")
         fields = {"base_url", "protocol", "model", "features", "checked_at", "evidence"}
-        optional = {"max_output_tokens", "context_window_tokens", "reasoning_efforts"} if body["schema_version"] == 2 else set()
+        optional = {"max_output_tokens", "context_window_tokens", "reasoning_efforts"} if body["schema_version"] >= 2 else set()
         records = []
         for item in body["models"]:
             if not isinstance(item, dict) or not fields <= set(item) or set(item) - fields - optional:
@@ -194,7 +256,26 @@ class CapabilityRegistry:
                     raise ValueError("reasoning_efforts must be an array")
                 item["reasoning_efforts"] = tuple(item["reasoning_efforts"])
             records.append(CapabilityRecord(**item))
-        return cls(tuple(records))
+        routes = body.get("routes", [])
+        if not isinstance(routes, list) or any(not isinstance(item, dict) for item in routes):
+            raise ValueError("routes must be an array of route records")
+        try:
+            return cls(tuple(records), tuple(RouteCapabilityRecord(**item) for item in routes))
+        except TypeError as exc:
+            raise ValueError("invalid route record fields") from exc
+
+    def assess_route(self, base_url, protocol, model, features, *, source_protocol, streaming, client_profile, policies) -> CapabilityReport:
+        if not isinstance(model, str) or not model or type(streaming) is not bool or client_profile not in ("strict", "codex", "claude"):
+            raise ValueError("invalid exact route selector")
+        requested = frozenset(features)
+        if requested - FEATURES:
+            raise ValueError("unknown requested route capability")
+        key = (_prefix(base_url), Protocol(protocol), model, Protocol(source_protocol), streaming, client_profile, _policy_key(policies))
+        record = self._routes.get(key)
+        values = record.features if record else {}
+        return CapabilityReport(tuple(sorted(name for name in requested if values.get(name) is True)),
+                                tuple(sorted(name for name in requested if values.get(name) is False)),
+                                tuple(sorted(name for name in requested if name not in values)))
 
     @classmethod
     def load(cls, path: str | Path) -> CapabilityRegistry:
