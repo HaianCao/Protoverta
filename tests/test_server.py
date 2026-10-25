@@ -255,6 +255,9 @@ def test_client_disconnect_stops_upstream_stream_processing():
     config = GatewayConfig(Protocol.MESSAGES, "https://example.com/v1", "key", "local", "x-api-key")
     handler_type = make_handler(config)
     handler = handler_type.__new__(handler_type)
+    from protoverta.observability import RequestTrace
+
+    handler._trace = RequestTrace("chat", "messages")
     handler.wfile = DisconnectedWriter()
     handler.send_response = lambda status: None
     handler.send_header = lambda name, value: None
@@ -267,6 +270,7 @@ def test_client_disconnect_stops_upstream_stream_processing():
     upstream = Upstream(first + b"irrelevant trailing bytes")
     handler._stream(upstream, Protocol.MESSAGES, Protocol.CHAT)
     assert upstream.tell() < len(first) + len(b"irrelevant trailing bytes")
+    assert handler._trace.outcome == "client_disconnected"
 
 
 def test_gateway_converts_request_and_response_without_network():

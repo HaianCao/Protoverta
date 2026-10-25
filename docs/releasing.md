@@ -10,8 +10,12 @@ branches remain separate. Never replace a6 release assets with newer code.
 python scripts/validate_ecosystem.py --codex-source ../free-codex-cli --claude-source ../free-claude-cli --output PATH_TO_EMPTY_TEMP_DIRECTORY
 ```
 
-The gate checks source suites, lint, matching dependency pins, distributions,
+Install the core's test/typing extras and build/Twine tooling in a disposable
+development environment first. The gate checks scoped strict types (including
+positive/negative fixtures), source suites, lint, matching dependency pins, distributions,
 installed runtime constructors and all three suites using the installed wheels.
+It also installs the pinned test-only SDKs into the fresh wheel environment and
+runs independent stream conformance with the installed core (no provider calls).
 Gateway tests may not skip; an absent/obsolete core fails explicitly. The wheel
 phase overrides source-pythonpath so editable checkout imports cannot hide a
 bad wheel. Output must be empty, preventing reuse of stale installed artifacts.
@@ -27,7 +31,8 @@ runtime API works. It never edits a real installation or configuration.
 
 ## CI layers
 
-- Core CI runs unit/fault/churn tests and lint on Windows/Linux, Python 3.11/3.13.
+- Core CI runs unit/fault/churn tests, lint and the scoped type gate on
+  Windows/Linux, Python 3.11/3.13. Release and ecosystem gates also check types.
 - Consumer CI has direct-only and pinned-gateway jobs. Required gateway tests
   cannot silently skip. These jobs need the a7 public asset after publication;
   they must fail, not silently fall back to a6, while it is unavailable.

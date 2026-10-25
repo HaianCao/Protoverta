@@ -139,6 +139,11 @@ The gateway bounds active requests with `--max-concurrent-requests` (default 16)
 and socket I/O with `--timeout` (default 120 seconds). See
 [failure mapping and resource limits](docs/compatibility/errors.md).
 
+For payload-free local request diagnostics, add `--diagnostics`. JSON lines go
+to stderr only; no log file is created. Each response has a fresh
+`X-Protoverta-Request-ID`. See [diagnostics and privacy](docs/compatibility/observability.md)
+for supported fields and post-header SSE failure handling.
+
 For a Messages model whose provider explicitly supports mid-conversation system
 text, opt in with repeatable `--messages-system-model EXACT_MODEL_ID` or
 `GatewayConfig(..., messages_system_models=("EXACT_MODEL_ID",))`. No model is
@@ -161,9 +166,18 @@ this client profile remains unchanged.
 PRs should include sanitized fixtures and tests for both directions of any protocol change. Never commit API keys or private conversations.
 
 ```powershell
+python -m pip install -e ".[test,typing]"
 python -m pytest
-ruff check src tests
+python -m ruff check src tests sdk_tests scripts
+python scripts/check_types.py
 ```
+
+The strict type gate currently covers six runtime/boundary modules, not every
+codec or launcher. See [the typing scope](docs/development/typing.md).
+
+For independent official-SDK stream tests, install the optional `sdk-test` extra
+and run `python scripts/check_sdk.py`. The gate uses only loopback fixtures and
+no provider keys; see [conformance scope and findings](docs/development/conformance.md).
 
 Installed CLI clients can be exercised without provider keys. The smoke harness uses a loopback fixture, temporary client state and two read-only tool calls:
 

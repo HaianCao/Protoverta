@@ -15,7 +15,7 @@ from enum import StrEnum
 from typing import Any
 
 from .custom_tools import custom_definition, encode_custom
-from .errors import ConversionError
+from .errors import ConversionError, UnsupportedFeatureError
 from .formats import (
     OutputFormat,
     decode_output_format,
@@ -89,7 +89,7 @@ def _decode_usage(usage: dict[str, Any], source: Protocol) -> dict[str, int | No
         input_details = _object(usage.get("input_tokens_details") or {}, "input_tokens_details")
         output_details = _object(usage.get("output_tokens_details") or {}, "output_tokens_details")
     read = _optional_nonnegative_int(usage.get("cache_read_input_tokens") if source == Protocol.MESSAGES else input_details.get("cached_tokens"), "cached input tokens")
-    creation = _optional_nonnegative_int(usage.get("cache_creation_input_tokens"), "cache creation tokens") if source == Protocol.MESSAGES else None
+    creation = _optional_nonnegative_int(usage.get("cache_creation_input_tokens") if source == Protocol.MESSAGES else input_details.get("cache_write_tokens"), "cache creation tokens")
     inputs = _optional_nonnegative_int(usage.get(input_key), input_key)
     outputs = _optional_nonnegative_int(usage.get(output_key), output_key)
     reasoning = _optional_nonnegative_int(output_details.get("reasoning_tokens"), "reasoning tokens")
@@ -117,10 +117,15 @@ def _encode_usage(value: Any, target: Protocol) -> dict[str, Any]:
         usage = {"prompt_tokens": inputs, "completion_tokens": outputs, "total_tokens": inputs + outputs}
         if cached is not None:
             usage["prompt_tokens_details"] = {"cached_tokens": cached}
+        if creation is not None:
+            usage.setdefault("prompt_tokens_details", {})["cache_write_tokens"] = creation
         if reasoning is not None:
             usage["completion_tokens_details"] = {"reasoning_tokens": reasoning}
         return usage
-    return {"input_tokens": inputs, "input_tokens_details": {"cached_tokens": cached or 0},
+    input_details = {"cached_tokens": cached or 0}
+    if creation is not None:
+        input_details["cache_write_tokens"] = creation
+    return {"input_tokens": inputs, "input_tokens_details": input_details,
             "output_tokens": outputs, "output_tokens_details": {"reasoning_tokens": reasoning or 0}, "total_tokens": inputs + outputs}
 
 
@@ -300,7 +305,14 @@ def _encode_response_call(part: Part) -> dict:
 
 
 def _decode_chat(body: dict[str, Any], *, public_reasoning: bool = False) -> Request:
-    _only(body, {"model", "messages", "tools", "tool_choice", "max_completion_tokens", "max_tokens", "temperature", "top_p", "stream", "parallel_tool_calls", "reasoning_effort", "response_format", "stop"}, "Chat request")
+    _only(body, {"model", "messages", "tools", "tool_choice", "max_completion_tokens", "max_tokens", "temperature", "top_p", "stream", "stream_options", "parallel_tool_calls", "reasoning_effort", "response_format", "stop"}, "Chat request")
+    if body.get("stream_options") is not None:
+        options = _object(body["stream_options"], "stream_options")
+        _only(options, {"include_usage"}, "stream_options")
+        if "include_usage" in options and not isinstance(options["include_usage"], bool):
+            raise ConversionError("stream_options.include_usage must be a boolean")
+        if body.get("stream") is not True or ("include_usage" in options and options["include_usage"] is not True):
+            raise UnsupportedFeatureError("stream_usage_policy")
     if "max_completion_tokens" in body and "max_tokens" in body:
         raise ConversionError("choose one Chat token limit field")
     turns: list[Turn] = []
@@ -419,6 +431,10 @@ def _response_content(content: Any, label: str) -> list[Part]:
     parts: list[Part] = []
     for block in _list(content, label):
         block = _object(block, label)
+        if block.get("type") == "refusal":
+            _only(block, {"type", "refusal"}, label)
+            _string(block.get("refusal"), "refusal")
+            raise UnsupportedFeatureError("refusal")
         if block.get("type") == "input_image":
             parts.append(Part("image", image=decode_image(block, "responses")))
             continue
@@ -810,8 +826,10 @@ def _decode_result(body: dict[str, Any], source: Protocol, *, public_reasoning: 
             raise ConversionError("Chat response message must have assistant role")
         if msg.get("annotations"):
             raise ConversionError("Chat annotations cannot be preserved")
+        if msg.get("refusal") is not None and not isinstance(msg["refusal"], str):
+            raise ConversionError("Chat refusal must be a string or null")
         if msg.get("refusal"):
-            raise ConversionError("refusal cannot be preserved across protocols")
+            raise UnsupportedFeatureError("refusal")
         parts = _chat_content(msg.get("content"), "message.content")
         if public_reasoning and msg.get("reasoning_content") is not None:
             parts.insert(0, Part("reasoning_text", text=_string(msg["reasoning_content"], "reasoning_content")))
@@ -820,6 +838,8 @@ def _decode_result(body: dict[str, Any], source: Protocol, *, public_reasoning: 
             parts.append(_chat_call(call, index))
         usage = _object(body.get("usage") or {}, "usage")
         reason = choice.get("finish_reason")
+        if reason == "content_filter":
+            raise UnsupportedFeatureError("content_filter")
         if reason not in ("stop", "tool_calls", "length"):
             raise ConversionError(f"unsupported Chat finish_reason: {reason}")
         if reason != "length" and (reason == "tool_calls") != any(p.kind == "tool_call" for p in parts):
@@ -833,6 +853,8 @@ def _decode_result(body: dict[str, Any], source: Protocol, *, public_reasoning: 
             raise ConversionError("tool result is not a valid Messages response")
         usage = _object(body.get("usage") or {}, "usage")
         reason = body.get("stop_reason")
+        if reason in ("refusal", "stop_sequence"):
+            raise UnsupportedFeatureError(reason)
         if reason not in ("end_turn", "tool_use", "max_tokens"):
             raise ConversionError(f"unsupported Messages stop_reason: {reason}")
         if reason != "max_tokens" and (reason == "tool_use") != any(p.kind == "tool_call" for p in parts):
@@ -867,6 +889,8 @@ def _decode_result(body: dict[str, Any], source: Protocol, *, public_reasoning: 
         raise ConversionError(f"unsupported Responses status: {status}")
     if status == "incomplete":
         details = _object(body.get("incomplete_details"), "incomplete_details")
+        if details.get("reason") == "content_filter":
+            raise UnsupportedFeatureError("content_filter")
         if details.get("reason") != "max_output_tokens":
             raise ConversionError("unsupported Responses incomplete reason")
         reason = "length"

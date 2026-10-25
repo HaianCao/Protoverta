@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from dataclasses import replace
 
 from .capabilities import CapabilityRegistry
 from .core import Protocol
+from .observability import jsonl_observer
 from .provider_profiles import ProviderProfiles
 from .server import GatewayConfig, serve
 
@@ -24,6 +26,7 @@ def main() -> int:
     parser.add_argument("--default-max-output-tokens", type=int)
     parser.add_argument("--upstream-reasoning", choices=["provider_default", "disabled", "openrouter_disabled"], default="provider_default", help="Explicit upstream override; disabled replaces request effort, not output filtering")
     parser.add_argument("--port", type=int, default=0)
+    parser.add_argument("--diagnostics", action="store_true", help="Opt-in payload-free request outcome JSON lines on stderr; no log file is created")
     parser.add_argument("--timeout", type=float, default=120, help="Socket I/O timeout in seconds; not a total generation deadline")
     parser.add_argument("--max-concurrent-requests", type=int, default=16, help="Maximum active authenticated requests per gateway")
     parser.add_argument("--total-timeout", type=float, default=600)
@@ -58,7 +61,7 @@ def main() -> int:
         config = replace(config, shared_admission_db=args.shared_admission_db, shared_requests=args.shared_requests, shared_window=args.shared_window, shared_concurrency=args.shared_concurrency, retry_attempts=args.retry_attempts, retry_max_wait=args.retry_max_wait)
     except (ValueError, TypeError, OSError) as exc:
         parser.error(str(exc))
-    server = serve(config, port=args.port)
+    server = serve(config, port=args.port, observer=jsonl_observer(sys.stderr) if args.diagnostics else None)
     print(f"READY http://127.0.0.1:{server.server_port}", flush=True)
     try:
         server.serve_forever(poll_interval=0.2)

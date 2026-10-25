@@ -1,16 +1,20 @@
 """Opt-in cross-process request budgets. No prompts or credentials are stored."""
 
+from __future__ import annotations
+
 import hashlib
 import math
 import sqlite3
 import time
 import uuid
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from os import PathLike
 from pathlib import Path
 
 
 class AdmissionDenied(Exception):
-    def __init__(self, retry_after):
+    def __init__(self, retry_after: float) -> None:
         self.retry_after = max(1, math.ceil(retry_after))
         super().__init__("Shared provider request budget reached.")
 
@@ -24,7 +28,7 @@ class AdmissionStorageError(RuntimeError):
 
 
 class SharedAdmission:
-    def __init__(self, path, scope, *, requests=40, window=60.0, concurrency=5, lease=610.0, clock=time.time):
+    def __init__(self, path: str | PathLike[str], scope: str, *, requests: int = 40, window: float = 60.0, concurrency: int = 5, lease: float = 610.0, clock: Callable[[], float] = time.time) -> None:
         if type(requests) is not int or requests < 1 or type(concurrency) is not int or concurrency < 1:
             raise ValueError("shared request and concurrency limits must be positive integers")
         if any(isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value) or value <= 0 for value in (window, lease)):
@@ -34,7 +38,7 @@ class SharedAdmission:
         self.requests, self.window, self.concurrency, self.lease = requests, window, concurrency, lease
         self.clock = clock
 
-    def _connect(self):
+    def _connect(self) -> sqlite3.Connection:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self.path, timeout=1, isolation_level=None)
         try:
@@ -47,7 +51,7 @@ class SharedAdmission:
         return connection
 
     @contextmanager
-    def _transaction(self):
+    def _transaction(self) -> Iterator[sqlite3.Connection]:
         try:
             connection = self._connect()
             try:
@@ -64,12 +68,14 @@ class SharedAdmission:
             # Do not expose database paths or driver messages to HTTP clients.
             raise AdmissionStorageError("Shared provider budget storage is unavailable.") from exc
 
-    def acquire(self):
+    def acquire(self) -> str:
         now = self.clock()
         identifier = uuid.uuid4().hex
         with self._transaction() as db:
             db.execute("INSERT OR IGNORE INTO budgets VALUES (?,?,?,?,0)", (self.scope, self.requests, self.window, self.concurrency))
             policy = db.execute("SELECT requests,window,concurrency,cooldown FROM budgets WHERE scope=?", (self.scope,)).fetchone()
+            if policy is None:
+                raise AdmissionStorageError("Shared provider budget record is unavailable.")
             if policy[:3] != (self.requests, self.window, self.concurrency):
                 raise AdmissionPolicyError("Conflicting shared budget policy for the same upstream account.")
             db.execute("DELETE FROM attempts WHERE scope=? AND started<=? AND active_until<=?", (self.scope, now - self.window, now))
@@ -85,11 +91,11 @@ class SharedAdmission:
             db.execute("INSERT INTO attempts VALUES (?,?,?,?)", (identifier, self.scope, now, now + self.lease))
         return identifier
 
-    def release(self, identifier):
+    def release(self, identifier: str | None) -> None:
         with self._transaction() as db:
             db.execute("UPDATE attempts SET active_until=0 WHERE id=? AND scope=?", (identifier, self.scope))
 
-    def cooldown(self, seconds):
+    def cooldown(self, seconds: float) -> None:
         if not isinstance(seconds, int | float) or not math.isfinite(seconds) or seconds < 0:
             raise ValueError("cooldown must be finite and nonnegative")
         with self._transaction() as db:

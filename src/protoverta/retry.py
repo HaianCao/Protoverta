@@ -1,12 +1,39 @@
 """Bounded pre-response retries; never replay a partially delivered stream."""
 
+from __future__ import annotations
+
 import math
 import time
+from collections.abc import Callable
 from email.utils import parsedate_to_datetime
+from typing import Protocol, TypeVar
 from urllib.error import HTTPError
+from urllib.request import Request
 
 
-def retry_after(headers, *, now=None):
+class RetryHeaders(Protocol):
+    def get(self, key: str) -> str | None: ...
+
+
+class RetryBudget(Protocol):
+    def remaining(self) -> float: ...
+    def wait(self, seconds: float) -> None: ...
+
+
+class Admission(Protocol):
+    def acquire(self) -> str: ...
+    def release(self, identifier: str | None) -> None: ...
+    def cooldown(self, seconds: float) -> None: ...
+
+
+ResponseT_co = TypeVar("ResponseT_co", covariant=True)
+
+
+class UpstreamOpener(Protocol[ResponseT_co]):
+    def __call__(self, request: Request, *, timeout: float) -> ResponseT_co: ...
+
+
+def retry_after(headers: RetryHeaders | None, *, now: float | None = None) -> float | None:
     raw = headers.get("Retry-After") if headers else None
     if raw is None:
         return None
@@ -20,7 +47,7 @@ def retry_after(headers, *, now=None):
     return max(0.0, seconds) if math.isfinite(seconds) else None
 
 
-def open_with_retry(opener, request, budget, *, attempts=1, max_wait=5.0, admission=None, sleep=None):
+def open_with_retry(opener: UpstreamOpener[ResponseT_co], request: Request, budget: RetryBudget, *, attempts: int = 1, max_wait: float = 5.0, admission: Admission | None = None, sleep: Callable[[float], None] | None = None) -> tuple[ResponseT_co, str | None]:
     """Retry only explicit transient HTTP rejection before response/body delivery.
 
     Transport errors are not retried: whether a generation reached upstream is

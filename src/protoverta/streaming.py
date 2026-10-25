@@ -12,12 +12,22 @@ from dataclasses import dataclass
 from typing import Any
 
 from .core import ConversionError, Protocol, _decode_usage, _validate_response_item
+from .errors import UnsupportedFeatureError
 from .reasoning import response_reasoning
 from .sse import SSEEvent
 
 
 class StreamError(ValueError):
     """Malformed, unsupported, or prematurely terminated upstream stream."""
+
+
+class UnsupportedStreamFeatureError(StreamError):
+    """Known, unrepresentable semantics; not a malformed upstream event."""
+
+    def __init__(self, feature: str):
+        error = UnsupportedFeatureError(feature)
+        self.feature = error.feature
+        super().__init__(str(error))
 
 
 class UnsupportedReasoningError(StreamError):
@@ -257,11 +267,21 @@ class StreamDecoder:
                 continue
             if field in {"reasoning", "reasoning_content", "reasoning_details"} and value not in (None, "", []):
                 raise UnsupportedReasoningError()
+            if field == "refusal":
+                if value is not None and not isinstance(value, str):
+                    raise StreamError("Chat refusal must be a string or null")
+                if value:
+                    raise UnsupportedStreamFeatureError("refusal")
+                continue
             if field not in {"role", "content", "tool_calls"} and (field not in {"refusal", "annotations", "reasoning", "reasoning_content", "reasoning_details"} or value not in (None, "", [])):
                 raise StreamError(f"unsupported Chat delta field: {field}")
         if delta.get("role") not in (None, "assistant"):
             raise StreamError("Chat delta has a non-assistant role")
-        if delta.get("refusal") or delta.get("audio") or delta.get("function_call"):
+        if delta.get("refusal") is not None and not isinstance(delta["refusal"], str):
+            raise StreamError("Chat refusal must be a string or null")
+        if delta.get("refusal"):
+            raise UnsupportedStreamFeatureError("refusal")
+        if delta.get("audio") or delta.get("function_call"):
             raise StreamError("unsupported Chat delta field")
         content = delta.get("content")
         if content is not None and not (self.public_reasoning and content == ""):
@@ -306,6 +326,8 @@ class StreamDecoder:
                     raise StreamError("Chat tool arguments preceded its ID/name")
         reason = choice.get("finish_reason")
         if reason is not None:
+            if reason == "content_filter":
+                raise UnsupportedStreamFeatureError("content_filter")
             if self.reason is not None:
                 raise StreamError("duplicate Chat finish_reason")
             if reason not in ("stop", "tool_calls", "length"):
@@ -393,6 +415,8 @@ class StreamDecoder:
                 raise StreamError("Messages message_delta out of order")
             delta = _obj(body.get("delta"), "message_delta.delta")
             reason = _str(delta.get("stop_reason"), "Messages stop_reason")
+            if reason in ("refusal", "stop_sequence"):
+                raise UnsupportedStreamFeatureError(reason)
             self.reason = {"end_turn": "stop", "tool_use": "tool_calls", "max_tokens": "length"}.get(reason)
             if self.reason is None:
                 raise StreamError(f"unsupported Messages stop_reason: {reason}")
@@ -476,6 +500,10 @@ class StreamDecoder:
             if body.get("content_index") != 0 or index in self.text_parts:
                 raise StreamError("unsupported Responses content part index")
             part = _obj(body.get("part"), "Responses content part")
+            if part.get("type") == "refusal":
+                _only(part, {"type", "refusal"}, "Responses refusal part")
+                _str(part.get("refusal"), "refusal")
+                raise UnsupportedStreamFeatureError("refusal")
             if part.get("type") != "output_text" or part.get("text") != "" or part.get("annotations") != [] or part.get("logprobs") != []:
                 raise StreamError("unsupported Responses content part metadata")
             self.text_parts[index] = "open"
@@ -593,6 +621,8 @@ class StreamDecoder:
                 if item != self.completed_items.get(index):
                     raise StreamError("Responses final output differs from streamed items")
             status = response.get("status")
+            if kind == "response.incomplete" and status == "incomplete" and _obj(response.get("incomplete_details"), "incomplete_details").get("reason") == "content_filter":
+                raise UnsupportedStreamFeatureError("content_filter")
             if kind == "response.completed" and status == "completed":
                 reason = "tool_calls" if self.saw_tool else "stop"
             elif kind == "response.incomplete" and status == "incomplete" and _obj(response.get("incomplete_details"), "incomplete_details").get("reason") == "max_output_tokens":

@@ -24,9 +24,11 @@ from .admission import (
 )
 from .capabilities import CapabilityRegistry, _prefix
 from .core import ConversionError, Protocol, convert_request, convert_response
+from .errors import UnsupportedFeatureError
 from .failures import gateway_failure
 from .lifetime import DisconnectWatch
 from .namespaces import NamespaceMap
+from .observability import Observer, RequestTrace
 from .profiles import prepare_claude_request, prepare_codex_request
 from .provider_profiles import ProviderProfiles
 from .resources import (
@@ -40,7 +42,11 @@ from .resources import (
 from .retry import open_with_retry
 from .sse import encode_sse
 from .stream_pipe import StreamTranscoder, StreamValidator
-from .streaming import StreamError, UnsupportedReasoningError
+from .streaming import (
+    StreamError,
+    UnsupportedReasoningError,
+    UnsupportedStreamFeatureError,
+)
 from .tool_names import ToolNameMap
 from .tool_search import ClientToolSearchMap
 from .transport import DeadlineHTTPHandler, DeadlineHTTPSHandler
@@ -189,7 +195,7 @@ class _RedirectBlocker(HTTPRedirectHandler):
         return None
 
 
-def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPRequestHandler]:
+def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observer | None = None) -> type[BaseHTTPRequestHandler]:
     opener = build_opener(_RedirectBlocker(), DeadlineHTTPHandler(), DeadlineHTTPSHandler())
     open_upstream = upstream_open or opener.open
     admission = threading.BoundedSemaphore(config.max_concurrent_requests)
@@ -207,6 +213,9 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
             self._raw_json(status, raw, headers)
 
         def _error(self, status, message, protocol, *, code=None, headers=None):
+            self._trace.outcome = {401: "authentication", 404: "not_found", 408: "timeout", 411: "invalid_request", 413: "invalid_request", 422: "invalid_request", 429: "upstream_http", 503: "upstream_http", 504: "timeout"}.get(status, "upstream_http")
+            if code in {"unsupported_feature", "unsupported_reasoning", "invalid_stream", "stream_limit", "upstream_transport"}:
+                self._trace.outcome = code
             failure = gateway_failure(status, message, code=code, secrets=(config.upstream_api_key, config.inbound_token))
             self._json(failure.status, failure.payload(protocol), headers)
 
@@ -218,7 +227,13 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                     self.send_header(name, value)
 
         def _raw_json(self, status: int, raw: bytes, headers=None) -> None:
+            self._trace.status = status
+            if status < 400:
+                self._trace.outcome = "success"
+            elif self._trace.outcome == "internal_error":
+                self._trace.outcome = "upstream_http"
             self.send_response(status)
+            self.send_header("X-Protoverta-Request-ID", self._trace.request_id)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(raw)))
             self.send_header("Cache-Control", "no-store")
@@ -233,15 +248,27 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
             headers_sent = False
             initial = bytearray()
 
+            def write_output(raw):
+                try:
+                    self.wfile.write(raw)
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError) as exc:
+                    raise ClientDisconnected("Local HTTP client disconnected.") from exc
+
             def send_headers() -> None:
                 nonlocal headers_sent
                 if not headers_sent:
+                    self._trace.status = 200
                     self.send_response(200)
+                    self.send_header("X-Protoverta-Request-ID", self._trace.request_id)
                     self.send_header("Content-Type", "text/event-stream; charset=utf-8")
                     self.send_header("Cache-Control", "no-store")
                     self.send_header("X-Accel-Buffering", "no")
                     self._forward_headers(getattr(response, "headers", None))
-                    self.end_headers()
+                    try:
+                        self.end_headers()
+                    except (BrokenPipeError, ConnectionResetError) as exc:
+                        raise ClientDisconnected("Local HTTP client disconnected.") from exc
                     headers_sent = True
 
             try:
@@ -266,28 +293,31 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                             output = bytes(initial)
                             initial.clear()
                         send_headers()
-                        self.wfile.write(output)
-                        self.wfile.flush()
+                        write_output(output)
                 tail = pipeline.finish()
                 if initial:
                     tail = bytes(initial) + tail
                     initial.clear()
                 if tail:
                     send_headers()
-                    self.wfile.write(tail)
-                    self.wfile.flush()
+                    write_output(tail)
                 send_headers()
+                self._trace.outcome = "success"
             except (StreamError, UnicodeError, OSError, HTTPException) as exc:
                 if isinstance(exc, ClientDisconnected):
+                    self._trace.outcome = "client_disconnected"
                     return
-                unsupported = isinstance(exc, UnsupportedReasoningError)
+                unsupported = isinstance(exc, (UnsupportedReasoningError, UnsupportedStreamFeatureError))
                 message = f"upstream stream error: {type(exc).__name__}"
-                if unsupported:
+                if isinstance(exc, UnsupportedReasoningError):
                     hint = "Messages requires its own thinking/signature contract; use native Messages or a compatible Responses route." if target == Protocol.MESSAGES else "For unsigned Chat reasoning_content, enable public_reasoning explicitly on a Chat/Responses route; summaries, signed or encrypted state remain unsupported."
                     message = "Upstream reasoning cannot be preserved on this route. " + hint + " No reasoning was dropped or given a fabricated signature."
+                elif isinstance(exc, UnsupportedStreamFeatureError):
+                    message = str(exc)
                 timeout = isinstance(exc, TimeoutError)
                 limited = isinstance(exc, StreamLimitError)
-                code = "unsupported_reasoning" if unsupported else exc.kind if isinstance(exc, DeadlineExceeded) else "upstream_timeout" if timeout else "stream_limit" if limited else "invalid_stream"
+                code = "unsupported_reasoning" if isinstance(exc, UnsupportedReasoningError) else "unsupported_feature" if unsupported else exc.kind if isinstance(exc, DeadlineExceeded) else "upstream_timeout" if timeout else "stream_limit" if limited else "invalid_stream"
+                self._trace.outcome = "unsupported_reasoning" if isinstance(exc, UnsupportedReasoningError) else "unsupported_feature" if unsupported else "timeout" if timeout else "stream_limit" if limited else "invalid_stream"
                 failure = gateway_failure(422 if unsupported else 504 if timeout else 502, message, code=code)
                 payload = failure.payload(target)
                 try:
@@ -296,12 +326,22 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                     else:
                         sequence = pipeline.encoder.sequence if isinstance(pipeline, StreamTranscoder) else pipeline.decoder.sequence + 1
                         error = json.dumps(failure.stream_payload(target, sequence_number=max(0, sequence)))
-                        self.wfile.write(encode_sse("error", error))
-                        self.wfile.flush()
-                except (BrokenPipeError, ConnectionResetError):
-                    pass
+                        write_output(encode_sse("error", error))
+                except (BrokenPipeError, ConnectionResetError, ClientDisconnected):
+                    self._trace.outcome = "client_disconnected"
 
         def do_POST(self) -> None:
+            protocol = _PATHS.get(urlsplit(self.path).path)
+            self._trace = RequestTrace(protocol.value if protocol is not None else "unknown", config.upstream_protocol.value)
+            try:
+                self._dispatch_post()
+            except Exception:
+                self._trace.outcome = "internal_error"
+                raise
+            finally:
+                self._trace.emit(observer)
+
+        def _dispatch_post(self) -> None:
             target_url = urlsplit(self.path)
             protocol = _PATHS.get(target_url.path)
             if protocol is None:
@@ -313,6 +353,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                 return
             if not admission.acquire(blocking=False):
                 self._error(503, "Local gateway request capacity reached; retry after an active request finishes.", protocol, headers={"Retry-After": "1"})
+                self._trace.outcome = "capacity"
                 return
             try:
                 self.connection.settimeout(config.timeout)
@@ -320,7 +361,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
             except TimeoutError:
                 self._error(408, "Client request body read timed out.", protocol, headers={"x-should-retry": "false"})
             except (BrokenPipeError, ConnectionResetError):
-                pass
+                self._trace.outcome = "client_disconnected"
             finally:
                 admission.release()
 
@@ -340,6 +381,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                 streaming = payload.get("stream", False)
                 if not isinstance(streaming, bool):
                     raise ConversionError("stream must be a boolean")
+                self._trace.streaming = streaming
                 if streaming and protocol == Protocol.MESSAGES and config.upstream_protocol != Protocol.MESSAGES and config.messages_usage_policy == "strict":
                     raise ConversionError("incremental Messages output requires input usage before the first event; this route cannot provide it")
                 claude_beta = config.client_profile == "claude" and protocol == Protocol.MESSAGES and target_url.query == "beta=true"
@@ -376,6 +418,9 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                     config.capabilities.preflight(config.upstream_base_url, config.upstream_protocol, outbound, require_verified=config.require_verified_capabilities)
             except RecursionError:
                 self._error(422, "request nesting exceeds the supported depth", protocol, headers={"x-should-retry": "false"})
+                return
+            except UnsupportedFeatureError as exc:
+                self._error(422, str(exc), protocol, code="unsupported_feature", headers={"x-should-retry": "false"})
                 return
             except (json.JSONDecodeError, UnicodeError, ConversionError) as exc:
                 self._error(422, str(exc), protocol, headers={"x-should-retry": "false"})
@@ -447,10 +492,13 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                     self._json(200, result, getattr(response, "headers", None))
             except AdmissionDenied as exc:
                 self._error(429, str(exc), protocol, headers={"Retry-After": str(exc.retry_after)})
+                self._trace.outcome = "shared_admission"
             except ClientDisconnected:
+                self._trace.outcome = "client_disconnected"
                 return
             except (AdmissionStorageError, AdmissionPolicyError):
                 self._error(503, "Shared provider admission is unavailable or has conflicting policy.", protocol, headers={"x-should-retry": "false"})
+                self._trace.outcome = "admission_unavailable"
             except HTTPError as exc:
                 try:
                     raw = bytearray()
@@ -473,13 +521,17 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
                 except (ValueError, TypeError, UnicodeError, OSError, HTTPException, RecursionError):
                     self._error(exc.code, f"upstream HTTP {exc.code}", protocol, headers=exc.headers)
                 finally:
+                    self._trace.outcome = "upstream_http"
                     exc.close()
             except (URLError, TimeoutError, OSError, HTTPException) as exc:
                 timeout = isinstance(exc, TimeoutError) or isinstance(exc, URLError) and isinstance(exc.reason, TimeoutError)
                 cause = exc.reason if isinstance(exc, URLError) else exc
                 self._error(504 if timeout else 502, f"upstream transport error: {type(exc).__name__}", protocol, code=cause.kind if isinstance(cause, DeadlineExceeded) else "upstream_timeout" if timeout else "upstream_transport", headers={"x-should-retry": "false"} if isinstance(cause, DeadlineExceeded) else None)
+            except UnsupportedFeatureError as exc:
+                self._error(422, str(exc), protocol, code="unsupported_feature", headers={"x-should-retry": "false"})
             except (json.JSONDecodeError, UnicodeError, ConversionError, StreamError, RecursionError) as exc:
                 self._error(502, str(exc), protocol)
+                self._trace.outcome = "invalid_response"
             finally:
                 if watch is not None:
                     watch.__exit__(None, None, None)
@@ -492,18 +544,18 @@ def make_handler(config: GatewayConfig, *, upstream_open=None) -> type[BaseHTTPR
     return Handler
 
 
-def serve(config: GatewayConfig, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPServer:
+def serve(config: GatewayConfig, host: str = "127.0.0.1", port: int = 0, *, observer: Observer | None = None) -> ThreadingHTTPServer:
     if host != "127.0.0.1":
         raise ValueError("this version only binds to 127.0.0.1")
-    server = ThreadingHTTPServer((host, port), make_handler(config))
+    server = ThreadingHTTPServer((host, port), make_handler(config, observer=observer))
     server.daemon_threads = True
     return server
 
 
 @contextmanager
-def gateway_session(config: GatewayConfig) -> Iterator[str]:
+def gateway_session(config: GatewayConfig, *, observer: Observer | None = None) -> Iterator[str]:
     """Serve one CLI session on loopback and always release its listener."""
-    server = serve(config)
+    server = serve(config, observer=observer)
     thread = threading.Thread(target=server.serve_forever, name="protoverta-gateway", daemon=True)
     thread.start()
     try:

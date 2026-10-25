@@ -1,0 +1,81 @@
+# Independent stream conformance
+
+The normal core suite includes reproducibly randomized byte partitions and
+semantic round-trips across all six translated directions. Fixtures in
+`tests/wire_cases.py` are hand-authored, not produced by Protoverta encoders.
+They include UTF-8 split boundaries, sparse parallel Chat tool indices and tool
+arguments carried in the same chunk that opens the call. Terminal truncation
+must never become successful target completion. Generated IDs/timestamps and
+target-specific block numbering are not expected to be byte-identical.
+
+## Official SDK consumer gate
+
+In an isolated development environment:
+
+```text
+python -m pip install -e ".[test,sdk-test]"
+python scripts/check_sdk.py
+```
+
+Pinned parsers: OpenAI Python 3.37.0 and Anthropic Python 2.3.0. These are test-only
+dependencies, not part of the runtime core. Missing/wrong versions and skipped/
+empty SDK suites fail. The core pytest suite does not import SDK tests, so basic
+contributors can still run it without provider SDK dependencies.
+
+The gate runs all six translated directions through real loopback HTTP listeners
+and the SDK consumers with strict response validation and retries disabled.
+Provider transport is an injected fixture callback: no request reaches a vendor,
+no real key is needed, proxies are disabled on the SDK client, and fixture model
+IDs are not real provider capability records. It verifies text, tool arguments,
+call IDs/order, measured usage, length termination and truncated-stream errors.
+Messages and Responses accumulation helpers are exercised; Chat uses the SDK's
+typed chunk parser and a test-side accumulator. No tools are actually executed.
+
+Keyless test processes use an allowlisted OS environment, excluding inherited
+provider keys/auth settings, proxies, telemetry exporters and pytest flags.
+Core/SDK pytest hooks scrub their own child-process environment too, so a test
+assertion cannot accidentally print inherited credentials in argument locals.
+Synthetic variables may be set explicitly by individual tests. The coordinated
+validator and SDK/type gates do not change the launching shell or persistent
+environment. Never use this keyless environment helper in a live probe that
+needs an explicitly authorized credential. Tracebacks are short and captured
+output is hidden in the coordinated gate; these are defense in depth, not
+permission to log real credentials elsewhere.
+
+`check_sdk.py --installed` disables checkout pythonpath and tests the installed
+core. The coordinated ecosystem validator installs matching wheels plus the
+pinned test SDKs into a fresh venv and runs this gate. Source core CI has a
+separate Windows/Linux x Python 3.11/3.13 SDK job; release also checks it. These
+workflow definitions are not evidence that remote CI has run.
+
+## Explicit compatibility findings
+
+- Anthropic's SDK appends `/v1/messages`; the SDK fixture uses a root base URL.
+  This is SDK URL construction, not a reason to rewrite operator API prefixes.
+- Translated Chat requests accept `stream_options.include_usage=true` while
+  streaming. Messages/Responses have native usage events, so that transport
+  request does not become a model parameter. Explicit false/nonboolean values
+  and unknown options are rejected rather than silently ignored. Native Chat
+  remains unchanged.
+- The current OpenAI SDK strict usage schema requires `cache_write_tokens`.
+  Protoverta now preserves MEASURED cache writes between Chat/Responses details
+  and Messages `cache_creation_input_tokens`, without double-counting total
+  input. If upstream omitted cache-write accounting, output still omits it;
+  it is NOT invented as zero merely to satisfy the latest strict SDK. Therefore
+  this gate's positive fixtures explicitly provide measured counts, including
+  measured zero. Older providers with missing detail are not thereby certified
+  compatible with every strict SDK version. This does not add caching itself.
+- The pinned Responses SDK's `get_final_response()` helper requires
+  `response.completed`; it raises for a valid `response.incomplete` event. The
+  gate verifies that exception and inspects the SDK-validated incomplete terminal
+  directly. The gateway must NOT emit completed to appease the helper.
+
+These local tests are independent-client evidence for the declared subset, not
+full schema validation, universal model compatibility or live certification.
+Property-based fuzzing, additional SDK versions, browser clients and longer
+soaks remain separate coverage. Never download/run third-party test gateways or
+send real session payloads as a shortcut.
+
+References: [OpenAI Python SDK](https://developers.openai.com/api/reference/python),
+[OpenAI cache accounting](https://developers.openai.com/api/docs/guides/prompt-caching),
+[Anthropic streaming helpers](https://github.com/anthropics/anthropic-sdk-python/blob/main/helpers.md).

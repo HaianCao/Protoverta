@@ -17,6 +17,8 @@ Issues = "https://github.com/HaianCao/Protoverta/issues"
 
 [project.optional-dependencies]
 test = ["pytest>=8", "ruff==0.17.2"]
+typing = ["mypy==2.4.0"]
+sdk-test = ["openai==3.37.0", "anthropic==2.3.0"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/protoverta"]
@@ -25,3 +27,20 @@ packages = ["src/protoverta"]
 pythonpath = ["src"]
 testpaths = ["tests"]
 addopts = "-q"
+
+# An explicit first tranche, not a claim that every codec is strictly typed.
+[tool.mypy]
+python_version = "3.11"
+mypy_path = "$MYPY_CONFIG_FILE_DIR/src"
+files = [
+  "src/protoverta/admission.py",
+  "src/protoverta/failures.py",
+  "src/protoverta/lifetime.py",
+  "src/protoverta/observability.py",
+  "src/protoverta/retry.py",
+  "src/protoverta/sse.py",
+]
+strict = true
+follow_imports = "silent"
+warn_unreachable = true
+show_error_codes = true

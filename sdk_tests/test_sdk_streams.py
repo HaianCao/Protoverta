@@ -1,0 +1,160 @@
+"""Independent official SDK consumers. No vendor calls, keys or SDK fallbacks."""
+
+import io
+import json
+import threading
+from contextlib import contextmanager
+from http.server import ThreadingHTTPServer
+
+import anthropic
+import openai
+import pytest
+from wire_cases import CALLS, MODEL, TEXT, event, fragments, source_wire
+
+from protoverta.server import GatewayConfig, make_handler
+
+PROTOCOLS = ("chat", "messages", "responses")
+ROUTES = [(source, target) for source in PROTOCOLS for target in PROTOCOLS if source != target]
+
+
+class Fragmented(io.BytesIO):
+    def __init__(self, raw):
+        super().__init__()
+        self.chunks = iter(fragments(raw, 72))
+
+    def read1(self, size):
+        return next(self.chunks, b"")
+
+
+@contextmanager
+def listener(source, *, tools=True, length=False, wire=None, **options):
+    raw = source_wire(source, tools=tools, length=length) if wire is None else wire
+    config = GatewayConfig(source, "https://example.invalid/v1", "synthetic-upstream", "local", messages_usage_policy="deferred", **options)
+    calls = []
+
+    def upstream(request, *, timeout):
+        # All HTTP requests made by the SDK terminate at the loopback handler.
+        # The provider transport is this callback and cannot access the network.
+        calls.append(json.loads(request.data))
+        return Fragmented(raw)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(config, upstream_open=upstream))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}/v1", calls
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+
+
+@contextmanager
+def client_for(target, origin):
+    library = anthropic if target == "messages" else openai
+    constructor = library.Anthropic if target == "messages" else library.OpenAI
+    base = origin.removesuffix("/v1") if target == "messages" else origin
+    with constructor(api_key="local", base_url=base, max_retries=0, timeout=5,
+                     default_headers={"Authorization": "Bearer local"},
+                     http_client=library.DefaultHttpxClient(trust_env=False),
+                     _strict_response_validation=True) as client:
+        yield client
+
+
+def consume(client, target):
+    if target == "messages":
+        with client.messages.stream(model=MODEL, max_tokens=32, messages=[{"role": "user", "content": "synthetic"}]) as stream:
+            events = list(stream)
+            result = stream.get_final_message()
+        return {"text": "".join(block.text for block in result.content if block.type == "text"),
+                "calls": [(block.id, block.name, block.input) for block in result.content if block.type == "tool_use"],
+                "reason": result.stop_reason, "usage": (result.usage.input_tokens, result.usage.output_tokens), "events": events}
+    if target == "responses":
+        with client.responses.stream(model=MODEL, input="synthetic", max_output_tokens=32) as stream:
+            try:
+                events = list(stream)
+            except openai.APIResponseValidationError as exc:
+                cause = exc.__cause__
+                kinds = {"ResponseCompletedEvent", "ResponseIncompleteEvent", "ResponseCreatedEvent", "ResponseFunctionCallArgumentsDoneEvent"}
+                details = [error for error in cause.errors(include_input=False, include_url=False) if error["loc"][0] in kinds and error["type"] != "literal_error"]
+                raise AssertionError(json.dumps(details, default=str)) from None
+            if events[-1].type == "response.incomplete":
+                # The pinned SDK accumulator only exposes completed responses
+                # through this helper. Do NOT fake response.completed to appease
+                # it: inspect the schema-validated incomplete terminal event.
+                with pytest.raises(RuntimeError, match="response.completed"):
+                    stream.get_final_response()
+                result = events[-1].response
+            else:
+                result = stream.get_final_response()
+        return {"text": result.output_text,
+                "calls": [(item.call_id, item.name, json.loads(item.arguments)) for item in result.output if item.type == "function_call"],
+                "reason": result.status, "usage": (result.usage.input_tokens, result.usage.output_tokens), "events": events}
+    content, tools, reason, usage = [], {}, None, None
+    events = []
+    with client.chat.completions.create(model=MODEL, messages=[{"role": "user", "content": "synthetic"}], max_completion_tokens=32, stream=True, stream_options={"include_usage": True}) as stream:
+        for chunk in stream:
+            events.append(chunk)
+            if chunk.usage is not None:
+                usage = chunk.usage.prompt_tokens, chunk.usage.completion_tokens
+            for choice in chunk.choices:
+                if choice.delta.content:
+                    content.append(choice.delta.content)
+                for tool in choice.delta.tool_calls or []:
+                    value = tools.setdefault(tool.index, {"id": "", "name": "", "arguments": ""})
+                    if tool.id:
+                        value["id"] = tool.id
+                    if tool.function is not None:
+                        value["name"] += tool.function.name or ""
+                        value["arguments"] += tool.function.arguments or ""
+                if choice.finish_reason is not None:
+                    reason = choice.finish_reason
+    return {"text": "".join(content), "calls": [(value["id"], value["name"], json.loads(value["arguments"])) for value in tools.values()],
+            "reason": reason, "usage": usage, "events": events}
+
+
+@pytest.mark.parametrize(("source", "target"), ROUTES)
+def test_sdk_accumulates_text_and_tools_without_losing_opening_arguments(source, target):
+    with listener(source) as (origin, calls), client_for(target, origin) as client:
+        result = consume(client, target)
+    assert result["text"] == TEXT and result["calls"] == CALLS
+    assert result["usage"] == (19, 7)
+    assert result["reason"] == {"chat": "tool_calls", "messages": "tool_use", "responses": "completed"}[target]
+    assert len(calls) == 1
+    if target == "responses":
+        for item in result["events"]:
+            if item.type.startswith(("response.content_part.", "response.output_text.")):
+                assert item.content_index == 0
+
+
+@pytest.mark.parametrize(("source", "target"), ROUTES)
+def test_sdk_sees_max_tokens_as_incomplete_not_full_success(source, target):
+    with listener(source, tools=False, length=True) as (origin, calls), client_for(target, origin) as client:
+        result = consume(client, target)
+    assert result["text"] == TEXT and result["calls"] == []
+    assert result["usage"] == (19, 7)
+    assert result["reason"] == {"chat": "length", "messages": "max_tokens", "responses": "incomplete"}[target]
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize(("source", "target"), ROUTES)
+def test_sdk_does_not_receive_success_on_truncated_upstream(source, target):
+    # Cut the final frame itself. The gateway must reject EOF or emit an error,
+    # not repair a missing upstream terminal marker into successful completion.
+    raw = source_wire(source, tools=False)
+    with listener(source, wire=raw[:-10]) as (origin, calls), client_for(target, origin) as client, pytest.raises((openai.APIError, anthropic.APIError, RuntimeError)):
+        consume(client, target)
+    assert len(calls) == 1  # SDK retries disabled; never replay generation.
+
+
+def test_sdk_reasoning_prefix_does_not_shift_per_item_content_index():
+    prefix = event("message", {"id": "chatcmpl_fixture", "created": 1, "object": "chat.completion.chunk", "model": MODEL,
+                               "choices": [{"index": 0, "delta": {"role": "assistant", "reasoning_content": "public fixture reasoning"}, "finish_reason": None}]})
+    raw = prefix + source_wire("chat", tools=False).replace(b'"reasoning_tokens": 0', b'"reasoning_tokens": 2')
+    with listener("chat", wire=raw, public_reasoning=True) as (origin, calls), client_for("responses", origin) as client:
+        result = consume(client, "responses")
+    assert result["text"] == TEXT and len(calls) == 1
+    text_events = [item for item in result["events"] if item.type == "response.output_text.delta"]
+    assert text_events and all(item.output_index == 1 and item.content_index == 0 for item in text_events)
+    reasoning = [item.item for item in result["events"] if item.type == "response.output_item.done" and item.item.type == "reasoning"]
+    assert len(reasoning) == 1 and reasoning[0].content[0].text == "public fixture reasoning"

@@ -7,9 +7,10 @@ from .capabilities import (
     request_features,
 )
 from .core import ConversionError, Protocol, convert_request, convert_response
+from .errors import UnsupportedFeatureError
 from .stream_encoder import StreamEncoder
 from .stream_pipe import StreamTranscoder
-from .streaming import Delta, StreamDecoder, StreamError
+from .streaming import Delta, StreamDecoder, StreamError, UnsupportedStreamFeatureError
 from .tool_names import ToolNameMap
 
 __all__ = [
@@ -24,6 +25,8 @@ __all__ = [
     "StreamError",
     "StreamTranscoder",
     "ToolNameMap",
+    "UnsupportedFeatureError",
+    "UnsupportedStreamFeatureError",
     "convert_request",
     "convert_response",
     "request_features",

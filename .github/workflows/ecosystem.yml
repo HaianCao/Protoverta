@@ -45,7 +45,10 @@ jobs:
         with:
           node-version: '22'
       - name: Prepare validation tools
-        run: python -m pip install pytest ruff==0.17.2 build twine hatchling
+        run: python -m pip install pytest ruff==0.17.2 mypy==2.4.0 build twine hatchling
+      - name: Strict runtime boundary types and gate fixtures
+        working-directory: protoverta
+        run: python scripts/check_types.py
       - name: Source tests, matched wheels, strict installed gateway tests
         run: python protoverta/scripts/validate_ecosystem.py --codex-source free-codex-cli --claude-source free-claude-cli --output validation
       - name: Browser runtime in disposable wheel environment

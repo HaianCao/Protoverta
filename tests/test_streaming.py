@@ -301,7 +301,7 @@ def test_responses_rejects_unsupported_content_metadata(kind, part):
     decoder = StreamDecoder("responses")
     decoder.feed(responses("response.created", 0, response={"model": "m"}))
     decoder.feed(responses("response.output_item.added", 1, output_index=0, item={"id": "msg_1", "type": "message", "role": "assistant", "content": []}))
-    with pytest.raises(StreamError, match="unsupported Responses content part metadata"):
+    with pytest.raises(StreamError, match="refusal cannot be preserved" if part.get("type") == "refusal" else "unsupported Responses content part metadata"):
         decoder.feed(responses(kind, 2, output_index=0, content_index=0, item_id="msg_1", part=part))
 
 

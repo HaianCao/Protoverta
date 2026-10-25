@@ -27,6 +27,29 @@ produce an SSE error, never a successful terminal event. Socket timeouts map to
 504; malformed/truncated upstream streams remain 502. No estimated token usage
 is substituted to make an interrupted stream appear successful.
 
+## Recognized but unrepresentable semantics
+
+`UnsupportedFeatureError` (a `ConversionError` subclass) separates selected
+known wire features from malformed output. It currently covers refusal,
+content-filter termination, matched Messages stop-sequence termination and an
+unsupported translated Chat stream-usage policy. These remain STRICT rejections,
+not newly supported refusal/stop mappings or permission to bypass filtering.
+
+For translated JSON output, or SSE before visible payload, the gateway returns
+422 / `unsupported_feature` / `x-should-retry: false`. Once SSE headers/payload
+are committed, it emits a protocol-correct error without a successful terminal.
+`UnsupportedStreamFeatureError` is the corresponding `StreamError` subclass.
+Messages must retain its own semantics; refusal text is not flattened into an
+ordinary answer. Error messages for these categories never contain refusal text
+or the matched private stop sequence. Reasoning keeps its existing separate
+`unsupported_reasoning` code and strict policy.
+
+Unknown statuses, malformed refusal field types, contradictory snapshots and
+truncated streams remain invalid upstream responses (502), not automatically
+recognized features. Native protocol forwarding remains unchanged. This is an
+incremental taxonomy: not every older unsupported-field rejection has been
+migrated to the new class. Do not infer semantics by matching exception messages.
+
 `--max-concurrent-requests` (Python: `max_concurrent_requests`) defaults to 16
 active authenticated requests per gateway. Excess requests receive 503 with
 `Retry-After: 1` without reaching upstream. Slots are released on completion,
