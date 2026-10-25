@@ -34,6 +34,7 @@ from .core import (
 )
 from .errors import UnsupportedFeatureError
 from .failures import gateway_failure
+from .json_wire import decode_json, encode_json
 from .lifetime import DisconnectWatch
 from .namespaces import NamespaceMap
 from .observability import Observer, RequestTrace
@@ -270,7 +271,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
             return
 
         def _json(self, status: int, payload: dict[str, object], headers=None) -> None:
-            raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            raw = encode_json(payload)
             self._raw_json(status, raw, headers)
 
         def _error(self, status, message, protocol, *, code=None, headers=None):
@@ -461,7 +462,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 self._error(413, "request body is too large", protocol)
                 return
             try:
-                payload = json.loads(self.rfile.read(length))
+                payload = decode_json(self.rfile.read(length))
                 if not isinstance(payload, dict):
                     raise ConversionError("request body must be a JSON object")
                 if target_url.path in ("/v1/messages/count_tokens", "/v1/responses/input_tokens"):
@@ -576,6 +577,9 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 from .routing import apply_openrouter
 
                 outbound = apply_openrouter(outbound, config.openrouter_provider, route_session_id)
+                if streaming and config.upstream_protocol == Protocol.CHAT and protocol != Protocol.CHAT:
+                    outbound["stream_options"] = {"include_usage": True}
+                data = encode_json(outbound)
             except RecursionError:
                 self._error(422, "request nesting exceeds the supported depth", protocol, headers={"x-should-retry": "false"})
                 return
@@ -594,10 +598,6 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 headers["anthropic-version"] = self.headers.get("anthropic-version", "2023-06-01")
                 if protocol == Protocol.MESSAGES and self.headers.get("anthropic-beta"):
                     headers["anthropic-beta"] = self.headers["anthropic-beta"]
-            data = json.dumps(outbound, ensure_ascii=False).encode("utf-8")
-            if streaming and config.upstream_protocol == Protocol.CHAT and protocol != Protocol.CHAT:
-                outbound["stream_options"] = {"include_usage": True}
-                data = json.dumps(outbound, ensure_ascii=False).encode("utf-8")
             upstream_url = config.upstream_url + ("/compact" if compact else "") + ("?" + target_url.query if target_url.query and protocol == config.upstream_protocol else "")
             request = Request(upstream_url, data=data, headers=headers, method="POST")
 
@@ -655,7 +655,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                         raw.extend(chunk)
                     if len(raw) > config.max_body_bytes:
                         raise ConversionError("upstream response is too large")
-                    result = json.loads(raw)
+                    result = decode_json(raw)
                     if not isinstance(result, dict):
                         raise ConversionError("upstream returned a non-object JSON response")
                     try:
@@ -686,7 +686,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                         raw.extend(chunk)
                     if len(raw) > config.max_body_bytes:
                         raise ValueError("upstream error is too large")
-                    error = json.loads(raw)
+                    error = decode_json(raw)
                     if not isinstance(error, dict) or not isinstance(error.get("error"), dict):
                         raise TypeError("not an API error object")
                     if protocol == config.upstream_protocol and 400 <= exc.code < 600:

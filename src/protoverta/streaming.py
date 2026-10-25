@@ -7,7 +7,6 @@ encoders and HTTP forwarding are implemented separately.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -19,6 +18,7 @@ from .core import (
     _validate_response_item,
 )
 from .errors import UnsupportedFeatureError
+from .json_wire import decode_json
 from .reasoning import response_reasoning
 from .sse import SSEEvent
 
@@ -107,8 +107,8 @@ def _valid_arguments(raw: str, label: str) -> None:
 
 def _json_event(event: SSEEvent, label: str) -> dict[str, Any]:
     try:
-        body = json.loads(event.data)
-    except (json.JSONDecodeError, RecursionError) as exc:
+        body = decode_json(event.data)
+    except ConversionError as exc:
         raise StreamError(f"{label} contains invalid JSON") from exc
     return _obj(body, label)
 
@@ -210,8 +210,8 @@ class StreamDecoder:
                 raise StreamError("stream completed with an unfinished tool call")
             if tool.tool_type == "function":
                 _valid_arguments(tool.arguments or "{}", "tool arguments")
-        if reason == "tool_calls" and not self.saw_tool:
-            raise StreamError("tool finish reason without tool calls")
+        if reason != "length" and (reason == "tool_calls") != self.saw_tool:
+            raise StreamError("finish reason disagrees with tool calls")
         self.ended = True
         return [Delta("finish", reason=reason, input_tokens=self.input_tokens, output_tokens=self.output_tokens, **self.usage_details)]
 

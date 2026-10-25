@@ -24,6 +24,7 @@ from .formats import (
     validate_strict_tool_schema,
 )
 from .images import Image, decode_image
+from .json_wire import decode_json, encode_json
 from .reasoning import reasoning_item, response_reasoning
 
 
@@ -229,11 +230,8 @@ def _only(obj: dict[str, Any], allowed: set[str], label: str) -> None:
 def _arguments(value: Any, label: str) -> str:
     raw = _string(value, label)
     try:
-        parsed = json.loads(raw)
-        # Python accepts NaN/Infinity and overflowing exponents on input.
-        # Reject them at any depth without rewriting the original arguments.
-        json.dumps(parsed, allow_nan=False)
-    except (ValueError, RecursionError) as exc:
+        parsed = decode_json(raw)
+    except ConversionError as exc:
         raise ConversionError(f"{label} is not valid JSON") from exc
     if not isinstance(parsed, dict):
         raise ConversionError(f"{label} must contain a JSON object")
@@ -793,6 +791,8 @@ def convert_request(body: dict[str, Any], source: Protocol | str, target: Protoc
         return body.copy()
     options = {"public_reasoning": public_reasoning} if source in {Protocol.CHAT, Protocol.RESPONSES} else {}
     request = _DECODERS[source](_object(body, "request"), **options)
+    # Preserve field-specific validation errors before checking opaque schemas.
+    encode_json(body)
     if Protocol.MESSAGES in (source, target):
         for tool in request.tools:
             if tool.get("strict") is True:
@@ -984,6 +984,7 @@ def convert_response(body: dict[str, Any], source: Protocol | str, target: Proto
         raise TypeError("public_reasoning must be a boolean")
     if source == target:
         return body.copy()
+    encode_json(body)
     result = _decode_result(_object(body, "response"), source, public_reasoning=public_reasoning)
     _check_function_names((part.name for part in result.parts if part.kind == "tool_call"), target)
     if any(part.kind in {"image", "document"} for part in result.parts):

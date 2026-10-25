@@ -14,13 +14,18 @@ from collections.abc import Callable
 from typing import Any
 
 from .core import ConversionError, Protocol, _arguments, _encode_usage
+from .json_wire import encode_json
 from .reasoning import reasoning_item
 from .sse import SSEEvent
 from .streaming import Delta, StreamError, UnsupportedReasoningError
 
 
 def _event(kind: str, body: dict[str, Any]) -> SSEEvent:
-    return SSEEvent(kind, json.dumps(body, ensure_ascii=False, separators=(",", ":")))
+    try:
+        raw = encode_json(body, compact=True)
+    except ConversionError as exc:
+        raise StreamError("canonical event must contain valid JSON and Unicode") from exc
+    return SSEEvent(kind, raw.decode("utf-8"))
 
 
 class StreamEncoder:

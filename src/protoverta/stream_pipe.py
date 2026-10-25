@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 
 from .core import ConversionError, Protocol, _check_function_names
+from .json_wire import decode_json
 from .resources import StreamLimits
 from .sse import SSEParser, encode_sse
 from .stream_encoder import StreamEncoder
@@ -192,7 +192,7 @@ class _LifecycleValidator:
             self.ended = True
             return
         try:
-            body = json.loads(event.data)
+            body = decode_json(event.data)
         except (ValueError, TypeError, RecursionError) as exc:
             raise StreamError("native stream event is not valid JSON") from exc
         if not isinstance(body, dict):

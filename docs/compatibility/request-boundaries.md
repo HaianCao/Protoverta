@@ -16,6 +16,19 @@ Header parse timeouts may simply close the connection; authenticated body timeou
 return 408 when the client can still receive it. These are socket/network deadlines,
 not preemption of trusted operator callbacks, JSON CPU work or arbitrary filesystems.
 
+JSON boundaries require finite numbers and valid Unicode scalar values, including
+values inside schemas and object keys. NaN/Infinity, exponent overflow, unpaired
+surrogates, and numbers/nesting exceeding the Python parser's supported limits
+produce a structured error, never character replacement or numeric clamping.
+Locally invalid requests return nonretryable 422 before upstream dispatch. Invalid
+upstream JSON returns 502; malformed SSE produces a stream failure and no successful
+terminal event. The same grammar checks apply to native HTTP forwarding; valid
+native feature fields are still preserved without cross-protocol interpretation.
+Translated library requests/responses apply these checks too. Same-protocol library
+copy helpers remain passthrough helpers; they are not standalone JSON validators.
+Validation does not promise arbitrary-precision decimal arithmetic or change the
+Python interpreter's integer-size protection.
+
 Count endpoints distinguish local validation/conversion failure (422), provider
 HTTP failures (their sanitized 4xx/5xx status), provider transport/schema failure
 (502), and provider timeout (504). Allowed retry/rate headers use the same allowlist
@@ -27,6 +40,9 @@ Doctor records `incomplete`, with `passed=false`, when JSON or SSE reports a len
 limit, even if the synthetic nonce arrived. Failed/truncated checks export no
 positive capability evidence. Protocol conversion itself still faithfully maps
 incomplete output; certification demands successful completion of its probe.
+Tool probes also reject completed streams whose stop reason contradicts the
+presence of tool calls. Chat `stop` / Messages `end_turn` must not certify a
+tool-use result; length-limited output remains incomplete evidence.
 
 Doctor uses the configured public-reasoning policy when decoding both JSON and
 SSE probe results. Enabling unsigned Chat/Responses reasoning does not certify a
