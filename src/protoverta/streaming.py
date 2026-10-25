@@ -292,7 +292,10 @@ class StreamDecoder:
             if content:
                 self.reasoning_closed = True
             deltas.append(Delta("text", text=_str(content, "Chat content")))
-        for partial in delta.get("tool_calls") or []:
+        calls = delta.get("tool_calls")
+        if calls is not None and not isinstance(calls, list):
+            raise StreamError("Chat tool_calls must be an array or null")
+        for partial in calls if calls is not None else []:
             self.reasoning_closed = True
             partial = _obj(partial, "Chat tool delta")
             index = _index(partial.get("index"), "Chat tool index")
