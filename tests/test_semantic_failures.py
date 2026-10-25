@@ -151,7 +151,7 @@ def test_measured_cache_writes_survive_messages_conversion_and_roundtrip(source)
 
 def test_unknown_cache_writes_are_not_fabricated_to_satisfy_new_sdk_schema():
     result = convert_response(chat_refusal(None), "chat", "responses")
-    assert "cache_write_tokens" not in result["usage"]["input_tokens_details"]
+    assert "cache_write_tokens" not in result["usage"].get("input_tokens_details", {})
 
 
 def test_unsupported_feature_categories_cannot_contain_arbitrary_provider_text():

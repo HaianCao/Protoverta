@@ -11,7 +11,13 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from .core import ConversionError, Protocol, _decode_usage, _validate_response_item
+from .core import (
+    ConversionError,
+    Protocol,
+    _arguments,
+    _decode_usage,
+    _validate_response_item,
+)
 from .errors import UnsupportedFeatureError
 from .reasoning import response_reasoning
 from .sse import SSEEvent
@@ -94,11 +100,9 @@ def _tokens(value: Any, label: str) -> int | None:
 
 def _valid_arguments(raw: str, label: str) -> None:
     try:
-        parsed = json.loads(raw)
-    except (json.JSONDecodeError, RecursionError) as exc:
-        raise StreamError(f"{label} is not valid JSON") from exc
-    if not isinstance(parsed, dict):
-        raise StreamError(f"{label} must be a JSON object")
+        _arguments(raw, label)
+    except ConversionError as exc:
+        raise StreamError(str(exc)) from exc
 
 
 def _json_event(event: SSEEvent, label: str) -> dict[str, Any]:

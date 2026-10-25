@@ -124,11 +124,17 @@ def _encode_usage(value: Any, target: Protocol) -> dict[str, Any]:
         if reasoning is not None:
             usage["completion_tokens_details"] = {"reasoning_tokens": reasoning}
         return usage
-    input_details = {"cached_tokens": cached or 0}
+    input_details = {}
+    if cached is not None:
+        input_details["cached_tokens"] = cached
     if creation is not None:
         input_details["cache_write_tokens"] = creation
-    return {"input_tokens": inputs, "input_tokens_details": input_details,
-            "output_tokens": outputs, "output_tokens_details": {"reasoning_tokens": reasoning or 0}, "total_tokens": inputs + outputs}
+    usage = {"input_tokens": inputs, "output_tokens": outputs, "total_tokens": inputs + outputs}
+    if input_details:
+        usage["input_tokens_details"] = input_details
+    if reasoning is not None:
+        usage["output_tokens_details"] = {"reasoning_tokens": reasoning}
+    return usage
 
 
 def _object(value: Any, label: str) -> dict[str, Any]:
@@ -224,7 +230,10 @@ def _arguments(value: Any, label: str) -> str:
     raw = _string(value, label)
     try:
         parsed = json.loads(raw)
-    except (json.JSONDecodeError, RecursionError) as exc:
+        # Python accepts NaN/Infinity and overflowing exponents on input.
+        # Reject them at any depth without rewriting the original arguments.
+        json.dumps(parsed, allow_nan=False)
+    except (ValueError, RecursionError) as exc:
         raise ConversionError(f"{label} is not valid JSON") from exc
     if not isinstance(parsed, dict):
         raise ConversionError(f"{label} must contain a JSON object")
@@ -376,7 +385,8 @@ def _message_parts(content: Any, label: str) -> list[Part]:
             if "caller" in block and block["caller"] != {"type": "direct"}:
                 raise ConversionError("non-direct Messages tool callers cannot be preserved across protocols")
             inputs = _object(block.get("input"), "tool_use.input")
-            parts.append(Part("tool_call", call_id=_string(block.get("id"), "tool_use.id"), name=_string(block.get("name"), "tool_use.name"), arguments=json.dumps(inputs, ensure_ascii=False)))
+            arguments = _arguments(json.dumps(inputs, ensure_ascii=False), "tool_use.input")
+            parts.append(Part("tool_call", call_id=_string(block.get("id"), "tool_use.id"), name=_string(block.get("name"), "tool_use.name"), arguments=arguments))
         elif kind == "tool_result":
             _only(block, {"type", "tool_use_id", "content", "is_error"}, label)
             if block.get("is_error"):

@@ -22,8 +22,10 @@ dependencies, not part of the runtime core. Missing/wrong versions and skipped/
 empty SDK suites fail. The core pytest suite does not import SDK tests, so basic
 contributors can still run it without provider SDK dependencies.
 
-The gate runs all six translated directions through real loopback HTTP listeners
-and the SDK consumers with strict response validation and retries disabled.
+The gate exercises all six translated directions through real loopback HTTP
+listeners with strict SDK response validation and retries disabled. Five routes
+have positive accumulation checks. Messages → Responses has explicit negative
+schema checks for unknown reasoning usage, not a positive SDK compatibility claim.
 Provider transport is an injected fixture callback: no request reaches a vendor,
 no real key is needed, proxies are disabled on the SDK client, and fixture model
 IDs are not real provider capability records. It verifies text, tool arguments,
@@ -50,6 +52,21 @@ workflow definitions are not evidence that remote CI has run.
 
 ## Explicit compatibility findings
 
+- Missing cached/reasoning-token subtotals remain unknown and are omitted from
+  translated Responses usage. Measured zero is preserved; it is never inferred
+  from absent reasoning text. Messages has no reasoning-token subtotal, so its
+  translated Responses terminal snapshots fail the pinned OpenAI SDK's strict
+  `output_tokens_details` requirement. Two SDK tests assert that exact schema
+  failure (completed and incomplete), without disabling strict validation,
+  skipping tests or fabricating zero. The 19-test suite therefore includes
+  negative compatibility evidence; it does not certify six successful SDK routes.
+  Protocol-level text/tool conversion remains available, with this documented
+  schema limitation. A full-schema consumer needs provider-reported measurements
+  or an explicitly designed policy for unavailable usage, not guessed facts.
+- Function arguments must contain a JSON object with finite numbers at every
+  depth. NaN, Infinity, and float overflow such as `1e309` are rejected in JSON
+  and SSE conversion. Valid argument strings retain their original spelling.
+  Invalid translated requests fail locally without upstream dispatch/retry.
 - Anthropic's SDK appends `/v1/messages`; the SDK fixture uses a root base URL.
   This is SDK URL construction, not a reason to rewrite operator API prefixes.
 - Translated Chat requests accept `stream_options.include_usage=true` while

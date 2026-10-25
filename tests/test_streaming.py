@@ -274,9 +274,7 @@ def test_responses_encoder_event_schema_has_item_identity_and_empty_logprobs():
     assert completed["status"] == "completed" and len(completed["output"]) == 2
     assert completed["usage"] == {
         "input_tokens": 2,
-        "input_tokens_details": {"cached_tokens": 0},
         "output_tokens": 3,
-        "output_tokens_details": {"reasoning_tokens": 0},
         "total_tokens": 5,
     }
     text_id = next(body["item"]["id"] for body in bodies if body["type"] == "response.output_item.added" and body["item"]["type"] == "message")

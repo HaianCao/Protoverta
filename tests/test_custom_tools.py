@@ -61,7 +61,7 @@ def test_completed_response_round_trip_keeps_custom_and_function_calls():
     assert response["output"][0]["input"] == body["choices"][0]["message"]["tool_calls"][0]["custom"]["input"]
     restored = convert_response(response, "responses", "chat")
     assert restored["choices"] == body["choices"]
-    assert restored["usage"] == {**body["usage"], "total_tokens": 7, "prompt_tokens_details": {"cached_tokens": 0}, "completion_tokens_details": {"reasoning_tokens": 0}}
+    assert restored["usage"] == {**body["usage"], "total_tokens": 7}
     assert body == original
 
 

@@ -15,6 +15,9 @@ from protoverta.server import GatewayConfig, make_handler
 
 PROTOCOLS = ("chat", "messages", "responses")
 ROUTES = [(source, target) for source in PROTOCOLS for target in PROTOCOLS if source != target]
+# Messages does not report a reasoning-token breakdown. A strict Responses SDK
+# requires that measurement; do not manufacture zero to satisfy its schema.
+SDK_SCHEMA_ROUTES = [route for route in ROUTES if route != ("messages", "responses")]
 
 
 class Fragmented(io.BytesIO):
@@ -113,7 +116,7 @@ def consume(client, target):
             "reason": reason, "usage": usage, "events": events}
 
 
-@pytest.mark.parametrize(("source", "target"), ROUTES)
+@pytest.mark.parametrize(("source", "target"), SDK_SCHEMA_ROUTES)
 def test_sdk_accumulates_text_and_tools_without_losing_opening_arguments(source, target):
     with listener(source) as (origin, calls), client_for(target, origin) as client:
         result = consume(client, target)
@@ -127,13 +130,26 @@ def test_sdk_accumulates_text_and_tools_without_losing_opening_arguments(source,
                 assert item.content_index == 0
 
 
-@pytest.mark.parametrize(("source", "target"), ROUTES)
+@pytest.mark.parametrize(("source", "target"), SDK_SCHEMA_ROUTES)
 def test_sdk_sees_max_tokens_as_incomplete_not_full_success(source, target):
     with listener(source, tools=False, length=True) as (origin, calls), client_for(target, origin) as client:
         result = consume(client, target)
     assert result["text"] == TEXT and result["calls"] == []
     assert result["usage"] == (19, 7)
     assert result["reason"] == {"chat": "length", "messages": "max_tokens", "responses": "incomplete"}[target]
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("length", [False, True])
+def test_strict_responses_sdk_rejects_unknown_messages_reasoning_usage(length):
+    with listener("messages", tools=not length, length=length) as (origin, calls), client_for("responses", origin) as client:
+        with client.responses.stream(model=MODEL, input="synthetic", max_output_tokens=32) as stream, pytest.raises(openai.APIResponseValidationError) as caught:
+            list(stream)
+        terminal = "ResponseIncompleteEvent" if length else "ResponseCompletedEvent"
+        errors = caught.value.__cause__.errors(include_input=False, include_url=False)
+        relevant = [error for error in errors if error["loc"][0] == terminal]
+        assert [(error["type"], error["loc"][1:]) for error in relevant] == [
+            ("missing", ("response", "usage", "output_tokens_details"))]
     assert len(calls) == 1
 
 

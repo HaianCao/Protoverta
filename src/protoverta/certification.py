@@ -121,7 +121,7 @@ def check_route(config, model, source_protocol, *, cases=CASES, allow_live=False
                     else:
                         result = send(body)
                         calls = [part for part in result.parts if part.kind == "tool_call"]
-                        if len(calls) != 1 or calls[0].name != "fixture_nonce" or json.loads(calls[0].arguments) != {}:
+                        if len(calls) != 1 or calls[0].name != "fixture_nonce" or not calls[0].call_id or json.loads(calls[0].arguments) != {}:
                             raise ValueError("tool call contract not satisfied")
                     if case == "tool_result":
                         call = calls[0]

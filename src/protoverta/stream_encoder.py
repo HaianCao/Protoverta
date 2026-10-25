@@ -13,7 +13,7 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
-from .core import ConversionError, Protocol, _encode_usage
+from .core import ConversionError, Protocol, _arguments, _encode_usage
 from .reasoning import reasoning_item
 from .sse import SSEEvent
 from .streaming import Delta, StreamError, UnsupportedReasoningError
@@ -295,9 +295,14 @@ class StreamEncoder:
         return [self._response_event("response.custom_tool_call_input.delta" if custom else "response.function_call_arguments.delta", item_id=tool["item_id"], output_index=tool["target_index"], delta=delta.text)]
 
     def _tool_end(self, delta: Delta) -> list[SSEEvent]:
+        tool = self.tools[delta.index]
+        if tool["tool_type"] != "custom":
+            try:
+                _arguments(tool["arguments"], "tool arguments")
+            except ConversionError as exc:
+                raise StreamError(str(exc)) from exc
         if self.protocol == Protocol.CHAT:
             return []
-        tool = self.tools[delta.index]
         if self.protocol == Protocol.MESSAGES:
             return [_event("content_block_stop", {"type": "content_block_stop", "index": tool["target_index"]})]
         item = self.output[tool["target_index"]]

@@ -27,8 +27,8 @@ def test_all_six_text_response_edges(source, target):
     assert "hello" in str(output)
     if target == Protocol.RESPONSES:
         assert output["tools"] == [] and output["tool_choice"] == "auto"
-        assert output["usage"]["input_tokens_details"] == {"cached_tokens": 0}
-        assert output["usage"]["output_tokens_details"] == {"reasoning_tokens": 0}
+        assert "input_tokens_details" not in output["usage"]
+        assert "output_tokens_details" not in output["usage"]
 
 
 def test_tool_call_and_result_chat_to_messages():

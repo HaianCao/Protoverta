@@ -16,7 +16,7 @@ validation scope and do not overwrite that historical identity.
 | Gate | Version/scope | Interpretation |
 | --- | --- | --- |
 | Core/launchers | Protoverta 0.3.0a7; consumers 0.2.0a1; local uncommitted snapshots | Match source hashes and wheel bytes; not published versions |
-| SDK consumers | OpenAI 3.37.0, Anthropic 2.3.0; six translated SSE directions | Independent loopback fixtures, no real provider |
+| SDK consumers | OpenAI 3.37.0, Anthropic 2.3.0; five positive SSE routes, Messages → Responses unknown-usage schema rejection, six-route truncation checks | Independent loopback fixtures, no real provider; see [scope](conformance.md) |
 | Real CLI tool loops | Codex CLI 0.164.0, Claude Code 2.1.308; each against Chat/Messages/Responses | Six installed-launcher cases, two rounds/two read-only tool results each; temporary client state |
 | Property streams | Hypothesis 6.170.9; 24 properties x50 examples | Text/JSON/partitions/invalid terminals, bounded generated coverage |
 | Official schema | OpenResponses revision 8907bc3; Node 24.13.1 | Full required schema audit currently fails; see audit document |

@@ -253,11 +253,14 @@ def test_deferred_messages_does_not_succeed_after_invalid_arguments_or_trailing_
         [
             Delta("start", model="m"),
             Delta("tool_start", index=0, call_id="a", name="lookup"),
-            Delta("tool_delta", index=0, text="not json"),
+            Delta("tool_delta", index=0, text="{}"),
             Delta("tool_end", index=0),
             Delta("finish", reason="tool_calls", input_tokens=3, output_tokens=2),
         ],
     )
+    # Deliberately corrupt a valid wire fixture: the encoder now rejects bad
+    # canonical arguments itself, independently of the decoder's guard.
+    wire = wire.replace(b'"{}"', b'"not json"')
     pipe = StreamTranscoder("chat", "messages", messages_usage_policy="deferred")
     with pytest.raises(StreamError, match="valid JSON"):
         pipe.feed(wire)
