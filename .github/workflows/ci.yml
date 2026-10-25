@@ -25,11 +25,21 @@ jobs:
       - name: Test
         run: python -m pytest
       - name: Lint
-        run: python -m ruff check src tests sdk_tests scripts
+        run: python -m ruff check src tests sdk_tests scripts fuzz_tests
       - name: Strict runtime boundary types
         run: python scripts/check_types.py
       - name: Build wheel
         run: python -m pip wheel --no-deps . --wheel-dir dist
+
+  property-conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -e ".[test,fuzz-test]"
+      - run: python scripts/check_fuzz.py
 
   sdk-conformance:
     strategy:

@@ -29,6 +29,11 @@ class RequestObservation:
     outcome: Outcome
     duration_ms: int
     streaming: bool
+    first_payload_ms: int | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cached_input_tokens: int | None = None
+    cache_creation_input_tokens: int | None = None
 
 
 Observer = Callable[[RequestObservation], None]
@@ -47,12 +52,31 @@ class RequestTrace:
         self.streaming = False
         self._clock = clock
         self._started = clock()
+        self.first_payload_ms: int | None = None
+        self.input_tokens: int | None = None
+        self.output_tokens: int | None = None
+        self.cached_input_tokens: int | None = None
+        self.cache_creation_input_tokens: int | None = None
+
+    def mark_first_payload(self) -> None:
+        if self.first_payload_ms is None:
+            self.first_payload_ms = max(0, int((self._clock() - self._started) * 1000))
+
+    def usage(self, inputs: int | None, outputs: int | None, cached: int | None = None, created: int | None = None) -> None:
+        if type(inputs) is int and inputs >= 0:
+            self.input_tokens = inputs
+        if type(outputs) is int and outputs >= 0:
+            self.output_tokens = outputs
+        if type(cached) is int and cached >= 0:
+            self.cached_input_tokens = cached
+        if type(created) is int and created >= 0:
+            self.cache_creation_input_tokens = created
 
     def snapshot(self) -> RequestObservation:
         return RequestObservation(self.request_id, self.protocol, self.upstream_protocol,
                                   self.status, self.outcome,
                                   max(0, int((self._clock() - self._started) * 1000)),
-                                  self.streaming)
+                                  self.streaming, self.first_payload_ms, self.input_tokens, self.output_tokens, self.cached_input_tokens, self.cache_creation_input_tokens)
 
     def emit(self, observer: Observer | None) -> None:
         if observer is not None:

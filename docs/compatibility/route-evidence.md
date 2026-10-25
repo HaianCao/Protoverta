@@ -42,9 +42,10 @@ from `route_policies(gateway_config)`; different launchers/native routes can
 have different policies. `verified_with` is descriptive evidence, **not** an
 automatic installed-version constraint or freshness check. Operators must rerun
 certification after relevant provider/model/core/CLI changes and refresh records.
-Provider-profile file contents, tokenizer callbacks, retry/admission settings and
-SDK versions are not additional automatic selectors. Include relevant profile
-revisions in evidence and rerun certification when they change. This is an
+An optional record `identity` and `require_current_evidence` check now bind core
+build/provider-profile revisions; `evidence_max_age_days` can enforce freshness.
+See [identity and doctor export](advanced-adapters.md). Tokenizer callbacks,
+retry/admission settings and SDK versions are not automatically certified. This is an
 operator evidence registry, not a cryptographic attestation of the whole runtime.
 
 Missing record/feature means **unknown**; `false` means **unsupported**. Explicit
@@ -56,5 +57,5 @@ checks use the union of inbound and outbound features, including streaming and
 tool options; a text-only test cannot certify a tool turn. Launchers preflight
 their baseline streaming route and the gateway checks each actual request.
 
-The library does not add live evidence automatically, expire records silently,
+The library does not add live evidence automatically, enforce age unless selected,
 retry unsupported features, alter strict reasoning, or fall back mid-tool turn.

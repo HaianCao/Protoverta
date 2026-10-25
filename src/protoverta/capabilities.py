@@ -6,6 +6,7 @@ Loading and checking records never sends requests or treats /models as evidence.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
@@ -17,6 +18,7 @@ from .core import Protocol
 from .errors import ConversionError
 
 FEATURES = frozenset({"text", "streaming", "tools", "custom_tools", "forced_tool_choice", "json_object", "json_schema", "strict_json_schema", "reasoning_effort", "public_reasoning", "images", "mid_conversation_system", "top_p", "stop_sequences", "strict_tools", "image_tool_results"})
+FEATURES = FEATURES | {"documents", "compaction", "prompt_caching", "audio", "video", "hosted_tools"}
 
 POLICY_VALUES = {
     "messages_usage_policy": ("strict", "deferred"),
@@ -46,6 +48,7 @@ class RouteCapabilityRecord:
     checked_at: str
     evidence: str
     verified_with: str
+    identity: str | None = None
 
     def __post_init__(self):
         record = CapabilityRecord(self.base_url, self.protocol, self.model, self.features, self.checked_at, self.evidence)
@@ -58,6 +61,8 @@ class RouteCapabilityRecord:
         if not isinstance(self.verified_with, str) or not self.verified_with.strip():
             raise ValueError("route evidence must record tested core/client versions")
         _policy_key(self.policies)
+        if self.identity is not None and (not isinstance(self.identity, str) or not re.fullmatch(r"[a-f0-9]{64}", self.identity)):
+            raise ValueError("evidence identity must be a SHA-256 digest")
         object.__setattr__(self, "policies", MappingProxyType(dict(self.policies)))
 
 
@@ -149,6 +154,14 @@ def request_features(body: dict, protocol: Protocol | str) -> frozenset[str]:
         features.add("streaming")
     if tools:
         features.add("tools")
+        def hosted(tool):
+            kind = tool.get("type", "function")
+            if kind == "namespace":
+                nested = tool.get("tools", [])
+                return isinstance(nested, list) and any(isinstance(item, dict) and hosted(item) for item in nested)
+            return kind not in ("function", "custom")
+        if any(hosted(tool) for tool in tools):
+            features.add("hosted_tools")
         if any(isinstance(tool, dict) and tool.get("type") == "custom" for tool in body["tools"]):
             features.add("custom_tools")
         if any(isinstance(tool, dict) and (tool.get("function", tool) if protocol == Protocol.CHAT else tool).get("strict") is True for tool in body["tools"] if isinstance(tool, dict) and (protocol != Protocol.CHAT or isinstance(tool.get("function"), dict))):
@@ -200,6 +213,32 @@ def request_features(body: dict, protocol: Protocol | str) -> frozenset[str]:
 
     if contains_image(body.get("messages", body.get("input"))):
         features.add("images")
+    def contains_document(value):
+        if isinstance(value, list):
+            return any(contains_document(item) for item in value)
+        if isinstance(value, dict):
+            return value.get("type") in ("file", "input_file", "document") or contains_document(value.get("content")) or contains_document(value.get("output"))
+        return False
+    if contains_document(body.get("messages", body.get("input"))):
+        features.add("documents")
+    def media_types(value):
+        if isinstance(value, list):
+            for item in value:
+                media_types(item)
+        elif isinstance(value, dict):
+            kind = value.get("type")
+            if isinstance(kind, str):
+                if "audio" in kind:
+                    features.add("audio")
+                if "video" in kind:
+                    features.add("video")
+            if value.get("audio") is not None:
+                features.add("audio")
+            media_types(value.get("content"))
+            media_types(value.get("output"))
+    media_types(body.get("messages", body.get("input")))
+    if body.get("audio") is not None or isinstance(body.get("modalities"), list) and "audio" in body["modalities"]:
+        features.add("audio")
     def rich_result(value):
         if isinstance(value, list):
             return any(rich_result(item) for item in value)
@@ -264,7 +303,7 @@ class CapabilityRegistry:
         except TypeError as exc:
             raise ValueError("invalid route record fields") from exc
 
-    def assess_route(self, base_url, protocol, model, features, *, source_protocol, streaming, client_profile, policies) -> CapabilityReport:
+    def assess_route(self, base_url, protocol, model, features, *, source_protocol, streaming, client_profile, policies, current_identity=None, max_age_days=None) -> CapabilityReport:
         if not isinstance(model, str) or not model or type(streaming) is not bool or client_profile not in ("strict", "codex", "claude"):
             raise ValueError("invalid exact route selector")
         requested = frozenset(features)
@@ -273,6 +312,10 @@ class CapabilityRegistry:
         key = (_prefix(base_url), Protocol(protocol), model, Protocol(source_protocol), streaming, client_profile, _policy_key(policies))
         record = self._routes.get(key)
         values = record.features if record else {}
+        if max_age_days is not None and (type(max_age_days) is not int or max_age_days < 0):
+            raise ValueError("evidence age limit must be a nonnegative number of days")
+        if record and (current_identity is not None and current_identity != record.identity or max_age_days is not None and not 0 <= (date.today() - date.fromisoformat(record.checked_at)).days <= max_age_days):
+            values = {key: value for key, value in values.items() if value is False}
         return CapabilityReport(tuple(sorted(name for name in requested if values.get(name) is True)),
                                 tuple(sorted(name for name in requested if values.get(name) is False)),
                                 tuple(sorted(name for name in requested if name not in values)))

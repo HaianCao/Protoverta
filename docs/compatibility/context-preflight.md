@@ -23,6 +23,11 @@ Rejected preflight requests return 422; neither request history nor output budge
 is rewritten, and no tokenizer download or remote count endpoint is called.
 These checks do not reserve provider tokens, enforce TPM or predict billing.
 
+The separate opt-in HTTP counting endpoints and model-bound local plugin are
+documented in [counting contracts](counting-caching-media.md). Merely enabling
+those endpoints does not silently enable a remote counter for every generation
+preflight; embedding callers must explicitly select their counter callback.
+
 Trusted callback code receives a deep copy and must count the full model-specific
 input, tools and multimodal overhead. It owns its model/tokenizer correctness and
 its own timeouts/resource limits. The gateway does not sandbox or forcibly cancel

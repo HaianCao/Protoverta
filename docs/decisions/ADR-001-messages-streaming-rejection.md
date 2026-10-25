@@ -24,8 +24,11 @@ therefore prevents an exact incremental mapping, but not a useful opt-in bridge.
 - Claude client compatibility is a separate opt-in profile. Telemetry/cache hints
   are omitted, tool-result errors become labelled text, and the launcher disables
   thinking and unsupported experimental capabilities for translated sessions.
-  Existing thinking/signature, hosted-tool, multimodal and compaction payloads
-  remain errors. Native Messages keeps its original payloads.
+  Non-equivalent thinking/signature, hosted-tool and opaque compaction payloads
+  remain errors. Images and inline PDF inputs have explicit supported subsets;
+  see [images](../compatibility/images.md) and
+  [counting, caching and media](../compatibility/counting-caching-media.md).
+  Unsupported media still fails explicitly. Native Messages keeps its original payloads.
 
 ## Consequences
 

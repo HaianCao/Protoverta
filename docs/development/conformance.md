@@ -72,9 +72,20 @@ workflow definitions are not evidence that remote CI has run.
 
 These local tests are independent-client evidence for the declared subset, not
 full schema validation, universal model compatibility or live certification.
-Property-based fuzzing, additional SDK versions, browser clients and longer
-soaks remain separate coverage. Never download/run third-party test gateways or
-send real session payloads as a shortcut.
+Property tests are a separate pinned gate:
+`pip install -e ".[test,fuzz-test]"` then `python scripts/check_fuzz.py`.
+It runs 24 six-direction properties with 50 generated examples each, covering
+Unicode/JSON/byte partitions, length termination, absent terminals and invalid
+tool JSON. Hypothesis shrinking is enabled; the fixed deterministic profile
+disables the example database and timing deadline to keep runs reproducible.
+This is bounded generated coverage, not exhaustive verification. `--installed`
+tests the installed library. Official full-schema findings are tracked separately
+in [the OpenResponses audit](openresponses-audit.md); they are not claimed as passes.
+
+Browser QA and measured soaks now have opt-in scripts, documented in
+[the validation matrix](validation-matrix.md). Additional SDK/client versions,
+provider certification and longer production loads remain separate coverage.
+Never send real session payloads as fixtures.
 
 References: [OpenAI Python SDK](https://developers.openai.com/api/reference/python),
 [OpenAI cache accounting](https://developers.openai.com/api/docs/guides/prompt-caching),

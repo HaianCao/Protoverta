@@ -41,15 +41,16 @@ Field paths are bounded dot-separated object keys, not expressions. Missing
 metadata remains unknown; a present malformed value fails validation. Mapping
 evidence is operator-maintained and is not a claim that every provider uses these
 fields. Policy files are limited to 64 KiB and match one exact prefix. Existing
-inference `ProviderProfiles` remain a separate narrowly scoped token-field alias
-registry; discovery does not authorize new inference rewrites.
+inference `ProviderProfiles` remain separately evidence-scoped; discovery does
+not authorize inference rewrites. Extended listing fields and numbered pagination
+are documented in [declarative provider integration](advanced-adapters.md).
 
 Both launcher previews use this implementation for **gateway-mode** discovery.
 `gateway_runtime = { catalog_policy_file = "catalog.json" }` resolves relative to
 the launcher config file. Native direct-only mode keeps its dependency-free
 discovery. Catalog caches bind to prefix, protocol, auth mode, credential
-fingerprint and policy path (Codex also includes its discovery path/secret ref).
-Key changes invalidate caches without storing raw credentials. Refresh after
-editing a policy at the same path; metadata is stored separately in `model_info`
+fingerprint, policy path and bounded policy-file content hash (Codex also includes
+its discovery path/secret ref). Key changes and policy edits invalidate caches
+without storing raw credentials. Metadata is stored separately in `model_info`
 and model selection still accepts manual IDs. A discovery error does not prevent
 manual selection or change the last successful cache.

@@ -1,10 +1,14 @@
 """Evidence-scoped wire quirks; never strip unsupported request semantics."""
 
 import copy
+import hashlib
 import json
-from dataclasses import dataclass
+import re
+from collections.abc import Mapping
+from dataclasses import dataclass, fields
 from datetime import date
 from pathlib import Path
+from types import MappingProxyType
 
 from .capabilities import _prefix
 from .core import Protocol
@@ -20,6 +24,10 @@ class ProviderProfile:
     evidence: str
     chat_token_field: str
     token_budget_semantics: str
+    reasoning_field: str | None = None
+    reasoning_values: Mapping | None = None
+    reasoning_semantics: str | None = None
+    prompt_cache_semantics: str | None = None
 
     def __post_init__(self):
         object.__setattr__(self, "base_url", _prefix(self.base_url))
@@ -37,6 +45,20 @@ class ProviderProfile:
             raise ValueError("unsupported Chat output-token field")
         if self.token_budget_semantics != "completion_total":
             raise ValueError("profile requires evidence of equivalent completion-total budget semantics")
+        if self.reasoning_field is not None:
+            if not isinstance(self.reasoning_field, str) or not re.fullmatch(r"(?:reasoning|thinking|reasoning_effort)(?:\.[a-z_]+){0,2}", self.reasoning_field):
+                raise ValueError("reasoning profile requires an explicit bounded vendor field")
+            if self.reasoning_semantics != "effort_equivalent" or not isinstance(self.reasoning_values, Mapping) or not self.reasoning_values or set(self.reasoning_values) - {"none", "low", "medium", "high"}:
+                raise ValueError("reasoning mapping requires equivalent-effort evidence")
+            if any(type(value) not in (str, bool, int) or isinstance(value, str) and (not value or len(value) > 64) for value in self.reasoning_values.values()):
+                raise ValueError("reasoning values must be bounded JSON scalars")
+            if len({(type(value), value) for value in self.reasoning_values.values()}) != len(self.reasoning_values):
+                raise ValueError("reasoning mapping cannot collapse distinct effort levels")
+            object.__setattr__(self, "reasoning_values", MappingProxyType(dict(self.reasoning_values)))
+        elif self.reasoning_values is not None or self.reasoning_semantics is not None:
+            raise ValueError("reasoning profile fields must be configured together")
+        if self.prompt_cache_semantics not in (None, "anthropic_ephemeral_system_end"):
+            raise ValueError("unsupported cache contract")
 
 
 class ProviderProfiles:
@@ -49,6 +71,17 @@ class ProviderProfiles:
             if key in self._records:
                 raise ValueError("duplicate provider profile")
             self._records[key] = record
+
+    def fingerprint(self):
+        values = []
+        for key in sorted(self._records):
+            record = self._records[key]
+            values.append({field.name: dict(getattr(record, field.name)) if isinstance(getattr(record, field.name), Mapping) else getattr(record, field.name) for field in fields(record)})
+        return hashlib.sha256(json.dumps(values, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+    def supports_prompt_cache(self, base_url, protocol, model):
+        record = self._records.get((_prefix(base_url), Protocol(protocol), model))
+        return record is not None and record.prompt_cache_semantics == "anthropic_ephemeral_system_end"
 
     @classmethod
     def load(cls, path):
@@ -77,4 +110,17 @@ class ProviderProfiles:
             if type(value) is not int or value <= 0:
                 raise ConversionError("profile output token limit must be a positive integer")
             result[record.chat_token_field] = value
+        if record.reasoning_field is not None and "reasoning_effort" in result:
+            effort = result.pop("reasoning_effort")
+            if not isinstance(effort, str) or effort not in record.reasoning_values:
+                raise ConversionError("profile does not certify the requested reasoning effort")
+            target = result
+            path = record.reasoning_field.split(".")
+            for key in path[:-1]:
+                if key in target and not isinstance(target[key], dict):
+                    raise ConversionError("conflicting vendor reasoning field")
+                target = target.setdefault(key, {})
+            if path[-1] in target:
+                raise ConversionError("conflicting vendor reasoning field")
+            target[path[-1]] = record.reasoning_values[effort]
         return result

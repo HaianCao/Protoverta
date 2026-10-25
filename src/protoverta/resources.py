@@ -1,5 +1,6 @@
 """Request deadlines and bounded wire-level stream accounting."""
 
+import io
 import json
 import math
 import socket
@@ -21,6 +22,39 @@ class DeadlineExceeded(TimeoutError):
 
 class ClientDisconnected(ConnectionAbortedError):
     pass
+
+
+class DeadlineInput(io.RawIOBase):
+    """Enforce an absolute request budget on every raw client socket read.
+
+    A socket timeout alone restarts on each recv, allowing a trickling body or
+    header to live forever. BufferedReader must wrap this, not the other way round.
+    """
+
+    def __init__(self, raw, connection, budget):
+        self.raw, self.connection, self.budget = raw, connection, budget
+
+    def readable(self):
+        return True
+
+    def readinto(self, buffer):
+        limit = self.budget.remaining()
+        self.connection.settimeout(limit)
+        try:
+            count = self.raw.readinto(buffer)
+        except TimeoutError:
+            self.budget.on_timeout(limit)
+            raise
+        self.budget.remaining()
+        if count:
+            self.budget.progress()
+        return count
+
+    def close(self):
+        try:
+            self.raw.close()
+        finally:
+            super().close()
 
 
 class RequestBudget:

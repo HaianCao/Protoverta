@@ -7,11 +7,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import subprocess
 import tempfile
 import tomllib
 from pathlib import Path
+
+from test_environment import sanitized_environment
 
 
 def run(script: Path, options: list[str], env: dict[str, str]) -> None:
@@ -34,7 +35,7 @@ def exercise(source: Path, wheel: Path, root: Path, *, command: str, skip: str, 
     profile = root / "profile"
     for path in (roaming, local, profile):
         path.mkdir(parents=True)
-    env = dict(os.environ, APPDATA=str(roaming), LOCALAPPDATA=str(local), USERPROFILE=str(profile), PIP_CACHE_DIR=str(local / "pip-cache"), PSModuleAnalysisCachePath=str(local / "psmodule-cache"))
+    env = dict(sanitized_environment(), APPDATA=str(roaming), LOCALAPPDATA=str(local), USERPROFILE=str(profile), HOME=str(profile), PIP_CACHE_DIR=str(local / "pip-cache"), PSModuleAnalysisCachePath=str(local / "psmodule-cache"))
     sentinel = roaming / ("codexapter" if command == "codex-ca" else "claudapter") / "preserve.txt"
     sentinel.parent.mkdir()
     sentinel.write_text("synthetic-settings\n", encoding="utf-8")

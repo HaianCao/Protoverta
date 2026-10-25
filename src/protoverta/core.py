@@ -15,6 +15,7 @@ from enum import StrEnum
 from typing import Any
 
 from .custom_tools import custom_definition, encode_custom
+from .documents import PDF, decode_pdf
 from .errors import ConversionError, UnsupportedFeatureError
 from .formats import (
     OutputFormat,
@@ -42,6 +43,7 @@ class Part:
     image: Image | None = None
     result_parts: list[Part] | None = None
     tool_type: str = "function"
+    document: PDF | None = None
 
 
 @dataclass(slots=True)
@@ -240,6 +242,9 @@ def _chat_content(value: Any, label: str) -> list[Part]:
         if block.get("type") == "image_url":
             result.append(Part("image", image=decode_image(block, "chat")))
             continue
+        if block.get("type") == "file":
+            result.append(Part("document", document=decode_pdf(block, "chat")))
+            continue
         if block.get("type") != "text":
             raise ConversionError(f"{label}: only text content is supported")
         _only(block, {"type", "text"}, label)
@@ -364,6 +369,8 @@ def _message_parts(content: Any, label: str) -> list[Part]:
             parts.append(Part("text", text=_string(block.get("text"), "text")))
         elif kind == "image":
             parts.append(Part("image", image=decode_image(block, "messages")))
+        elif kind == "document":
+            parts.append(Part("document", document=decode_pdf(block, "messages")))
         elif kind == "tool_use":
             _only(block, {"type", "id", "name", "input", "caller"}, label)
             if "caller" in block and block["caller"] != {"type": "direct"}:
@@ -438,6 +445,9 @@ def _response_content(content: Any, label: str) -> list[Part]:
         if block.get("type") == "input_image":
             parts.append(Part("image", image=decode_image(block, "responses")))
             continue
+        if block.get("type") == "input_file":
+            parts.append(Part("document", document=decode_pdf(block, "responses")))
+            continue
         if block.get("type") not in ("input_text", "output_text"):
             raise ConversionError(f"unsupported Responses content type: {block.get('type')}")
         _only(block, {"type", "text", "annotations", "logprobs"}, label)
@@ -489,6 +499,8 @@ def _decode_responses(body: dict[str, Any], *, public_reasoning: bool = False) -
                 output = item.get("output")
                 if isinstance(output, list):
                     output_parts = _response_content(output, "function_call_output.output")
+                    if any(part.kind == "document" for part in output_parts):
+                        raise ConversionError("PDF tool results have no portable equivalent")
                     if any(part.kind == "image" for part in output_parts):
                         turns.append(Turn("user", [Part("tool_result", call_id=_string(item.get("call_id"), "call_id"), result_parts=output_parts, tool_type=tool_type)]))
                         continue
@@ -564,7 +576,7 @@ def _check_turns(request: Request, target: Protocol, *, messages_mid_system: boo
                     raise ConversionError("unsigned public reasoning requires a Chat/Responses assistant prefix; Messages signatures cannot be fabricated")
             else:
                 seen_ordinary = True
-        if any(part.kind == "image" for part in turn.parts) and (turn.role != "user" or any(part.kind not in {"text", "image"} for part in turn.parts)):
+        if any(part.kind in {"image", "document"} for part in turn.parts) and (turn.role != "user" or any(part.kind not in {"text", "image", "document"} for part in turn.parts)):
             raise ConversionError("portable images require an ordinary user text/image message")
         if target in {Protocol.CHAT, Protocol.RESPONSES}:
             seen_tool_call = False
@@ -619,8 +631,8 @@ def _encode_chat(req: Request) -> dict[str, Any]:
             messages.extend({"role": "tool", "tool_call_id": p.call_id, "content": p.text} for p in results)
         else:
             msg: dict[str, Any] = {"role": turn.role, "content": text if text or not calls else None}
-            if any(p.kind == "image" for p in turn.parts):
-                msg["content"] = [p.image.encode("chat") if p.kind == "image" else {"type": "text", "text": p.text} for p in turn.parts]
+            if any(p.kind in {"image", "document"} for p in turn.parts):
+                msg["content"] = [p.image.encode("chat") if p.kind == "image" else p.document.encode("chat") if p.kind == "document" else {"type": "text", "text": p.text} for p in turn.parts]
             if calls:
                 msg["tool_calls"] = [_encode_chat_call(p) for p in calls]
             reasoning = [p.text for p in turn.parts if p.kind == "reasoning_text"]
@@ -666,6 +678,8 @@ def _encode_messages(req: Request) -> dict[str, Any]:
                 blocks.append({"type": "text", "text": p.text})
             elif p.kind == "image":
                 blocks.append(p.image.encode("messages"))
+            elif p.kind == "document":
+                blocks.append(p.document.encode("messages"))
             elif p.kind == "tool_call":
                 blocks.append({"type": "tool_use", "id": p.call_id, "name": p.name, "input": json.loads(p.arguments)})
             elif p.kind == "tool_result":
@@ -708,7 +722,7 @@ def _encode_messages(req: Request) -> dict[str, Any]:
 
 def _flush_response_text(inputs: list[dict[str, Any]], role: str, parts: list[Part]) -> None:
     if parts:
-        item: dict[str, Any] = {"role": role, "content": [p.image.encode("responses") if p.kind == "image" else {"type": "output_text" if role == "assistant" else "input_text", "text": p.text} for p in parts]}
+        item: dict[str, Any] = {"role": role, "content": [p.image.encode("responses") if p.kind == "image" else p.document.encode("responses") if p.kind == "document" else {"type": "output_text" if role == "assistant" else "input_text", "text": p.text} for p in parts]}
         if role == "assistant":
             item.update({"type": "message", "id": "msg_" + secrets.token_hex(12), "status": "completed"})
         inputs.append(item)
@@ -720,7 +734,7 @@ def _encode_responses(req: Request) -> dict[str, Any]:
     for turn in req.turns:
         text_parts: list[Part] = []
         for p in turn.parts:
-            if p.kind in {"text", "image"}:
+            if p.kind in {"text", "image", "document"}:
                 text_parts.append(p)
             elif p.kind == "reasoning_text":
                 inputs.append(reasoning_item(p.text))
@@ -962,7 +976,7 @@ def convert_response(body: dict[str, Any], source: Protocol | str, target: Proto
         return body.copy()
     result = _decode_result(_object(body, "response"), source, public_reasoning=public_reasoning)
     _check_function_names((part.name for part in result.parts if part.kind == "tool_call"), target)
-    if any(part.kind == "image" for part in result.parts):
+    if any(part.kind in {"image", "document"} for part in result.parts):
         raise ConversionError("image output is not supported across protocols")
     call_ids = [part.call_id for part in result.parts if part.kind == "tool_call"]
     if any(not value for value in call_ids) or len(call_ids) != len(set(call_ids)):

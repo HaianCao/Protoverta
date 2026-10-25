@@ -17,7 +17,7 @@ One Gateway. Any Protocol. Any Model.
 
 Protoverta converts requests and responses among OpenAI Chat Completions, Anthropic Messages, and OpenAI Responses. Use it as a Python library or run it as a local HTTP gateway.
 
-**Current scope:** text, user image inputs, client-side function tools, forced function selection, and supported JSON output formats, including incremental SSE where usage and event ordering can be preserved. Unsupported fields and unsafe streaming routes are rejected rather than silently changed. Image generation, audio/video, token counting, and server-side conversation state are not supported.
+**Current scope:** text, user images and inline PDF inputs, client-side function tools, forced function selection, and supported JSON output formats, including incremental SSE where usage and event ordering can be preserved. Optional policies support token counting, certified cache checkpoints and native Responses compaction. Unsupported fields, audio/video conversion and nonportable server-owned state are rejected rather than silently changed.
 
 ## Install
 
@@ -211,3 +211,10 @@ See [SECURITY.md](SECURITY.md) for reporting security issues. Licensed under [MI
 Optional gateway controls: [exact route evidence](docs/compatibility/route-evidence.md),
 [bounded model catalogs](docs/compatibility/catalogs.md), and
 [context preflight / local soak](docs/compatibility/context-preflight.md).
+
+Provider integration: [declarative profiles, route doctor and session diagnostics](docs/compatibility/advanced-adapters.md).
+Extended contracts: [token counting, prompt caching, PDF and native compaction](docs/compatibility/counting-caching-media.md).
+Operational contracts: [HTTP boundaries and count errors](docs/compatibility/request-boundaries.md),
+[explicit routing and token quotas](docs/compatibility/routing-and-token-quotas.md).
+Development evidence: [versioned validation matrix](docs/development/validation-matrix.md)
+and [current OpenResponses schema gaps](docs/development/openresponses-audit.md).

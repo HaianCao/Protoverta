@@ -1,0 +1,165 @@
+"""Bounded opt-in session journals containing fixed observations only."""
+
+import json
+import os
+import queue
+import re
+import secrets
+import threading
+from contextlib import contextmanager
+from dataclasses import asdict
+from pathlib import Path
+
+from .observability import RequestObservation
+
+_NAME = re.compile(r"session-[a-f0-9]{32}\.jsonl\Z")
+_FIELDS = set(RequestObservation.__dataclass_fields__)
+_OPTIONAL = {"first_payload_ms", "input_tokens", "output_tokens", "cached_input_tokens", "cache_creation_input_tokens"}
+
+
+def _journals(root):
+    # Inspect at most 512 directory entries, including unrelated filenames.
+    # A crowded directory yields a bounded sample, never a global newest claim.
+    paths = []
+    limited = False
+    with os.scandir(root) as entries:
+        for index, entry in enumerate(entries):
+            if index >= 512:
+                limited = True
+                break
+            try:
+                if _NAME.fullmatch(entry.name) and entry.is_file(follow_symlinks=False):
+                    paths.append((entry.stat(follow_symlinks=False).st_mtime, Path(entry.path)))
+            except OSError:
+                continue
+    return [path for _, path in sorted(paths, key=lambda item: item[0], reverse=True)], limited
+
+
+class _JournalSink:
+    """Nonblocking producer; the daemon writer exclusively owns its stream."""
+
+    def __init__(self, stream):
+        self.stream = stream
+        self.pending = queue.Queue(maxsize=128)
+        self.lock = threading.Lock()
+        self.stopping = threading.Event()
+        self.accepted = self.dropped = self.byte_count = 0
+        self.thread = threading.Thread(target=self._write, name="protoverta-journal", daemon=True)
+        self.thread.start()
+
+    def __call__(self, record):
+        if type(record) is not RequestObservation:
+            return
+        line = json.dumps(asdict(record), separators=(",", ":")) + "\n"
+        size = len(line.encode())
+        with self.lock:
+            if self.stopping.is_set() or self.accepted >= 1024 or size > 4096 or self.byte_count + size > 1024 * 1024 - 512:
+                self.dropped += 1
+                return
+            try:
+                self.pending.put_nowait(line)
+            except queue.Full:
+                self.dropped += 1
+                return
+            self.accepted += 1
+            self.byte_count += size
+
+    def _write(self):
+        try:
+            while not self.stopping.is_set() or not self.pending.empty():
+                try:
+                    line = self.pending.get(timeout=0.05)
+                except queue.Empty:
+                    continue
+                self.stream.write(line)
+                self.stream.flush()
+            with self.lock:
+                dropped = self.dropped
+            self.stream.write(json.dumps({"kind": "protoverta-summary", "dropped_records": dropped}) + "\n")
+            self.stream.flush()
+        except (OSError, ValueError):
+            pass  # Optional diagnostics cannot change request success/failure.
+        finally:
+            self.stream.close()
+
+    def close(self):
+        with self.lock:
+            self.stopping.set()
+        # Never close a stream from under a blocked writer. It remains daemon-
+        # owned and closes when the filesystem call returns; no durable guarantee.
+        self.thread.join(timeout=0.25)
+
+
+@contextmanager
+def diagnostic_journal(directory):
+    root = Path(directory).expanduser().resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    # Only our fixed-name, non-symlink journals with the ownership header qualify.
+    journals, _ = _journals(root)
+    for path in journals[31:]:
+        try:
+            with path.open("r", encoding="utf-8") as source:
+                header = json.loads(source.readline(512))
+            if header == {"kind": "protoverta-session", "schema_version": 1}:
+                path.unlink()
+        except (OSError, ValueError):
+            pass
+    path = root / ("session-" + secrets.token_hex(16) + ".jsonl")
+    stream = path.open("x", encoding="utf-8")
+    try:
+        stream.write(json.dumps({"kind": "protoverta-session", "schema_version": 1}) + "\n")
+        stream.flush()
+        observe = _JournalSink(stream)
+    except BaseException:
+        stream.close()
+        raise
+    try:
+        yield observe
+    finally:
+        observe.close()
+
+
+def latest_diagnostics(directory):
+    root = Path(directory).expanduser().resolve()
+    if not root.is_dir():
+        return {"records": [], "limited": False}
+    journals, scan_limited = _journals(root)
+    for path in journals:
+        try:
+            if path.stat().st_size > 1024 * 1024:
+                continue
+            with path.open("r", encoding="utf-8") as stream:
+                if json.loads(stream.readline(512)) != {"kind": "protoverta-session", "schema_version": 1}:
+                    continue
+                records = []
+                dropped = 0
+                for index, line in enumerate(stream):
+                    if index >= 1025 or len(line) > 4096:
+                        break
+                    value = json.loads(line)
+                    if isinstance(value, dict) and set(value) == {"kind", "dropped_records"} and value["kind"] == "protoverta-summary" and type(value["dropped_records"]) is int and value["dropped_records"] >= 0:
+                        dropped = value["dropped_records"]
+                        continue
+                    if not isinstance(value, dict) or set(value) - _FIELDS or not (_FIELDS - _OPTIONAL) <= set(value):
+                        continue
+                    for key in _OPTIONAL:
+                        value.setdefault(key, None)
+                    if not isinstance(value["request_id"], str) or not re.fullmatch(r"[a-f0-9]{32}", value["request_id"]):
+                        continue
+                    if value["protocol"] not in ("chat", "messages", "responses", "unknown") or value["upstream_protocol"] not in ("chat", "messages", "responses", "unknown"):
+                        continue
+                    from typing import get_args
+
+                    from .observability import Outcome
+
+                    if value["outcome"] not in get_args(Outcome) or type(value["duration_ms"]) is not int or not 0 <= value["duration_ms"] <= 86400000 or type(value["streaming"]) is not bool:
+                        continue
+                    if value["status"] is not None and (type(value["status"]) is not int or not 100 <= value["status"] <= 599):
+                        continue
+                    if any(value[key] is not None and (type(value[key]) is not int or value[key] < 0) for key in _OPTIONAL):
+                        continue
+                    records.append(value)
+            return {"records": records[-100:], "limited": scan_limited or len(records) >= 100 or dropped > 0, "dropped_records": dropped}
+        except (OSError, ValueError, TypeError):
+            continue
+    return {"records": [], "limited": scan_limited}

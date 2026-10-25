@@ -15,6 +15,7 @@ from .errors import UnsupportedFeatureError
 from .stream_encoder import StreamEncoder
 from .stream_pipe import StreamTranscoder
 from .streaming import Delta, StreamDecoder, StreamError, UnsupportedStreamFeatureError
+from .token_counting import ModelTokenCounter, NativeTokenCounter, count_input
 from .tool_names import ToolNameMap
 
 __all__ = [
@@ -27,6 +28,8 @@ __all__ = [
     "ConversionError",
     "Delta",
     "ModelInfo",
+    "ModelTokenCounter",
+    "NativeTokenCounter",
     "Protocol",
     "RouteCapabilityRecord",
     "StreamDecoder",
@@ -40,6 +43,7 @@ __all__ = [
     "assess_context",
     "convert_request",
     "convert_response",
+    "count_input",
     "fetch_catalog",
     "request_features",
     "route_policies",

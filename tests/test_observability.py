@@ -33,7 +33,10 @@ def observed_server(upstream, observer, **options):
 
 
 def post(origin, body=None, *, path="/v1/chat/completions", auth="Bearer local-token", headers=None):
-    return urlopen(Request(origin + path, data=json.dumps(body or {"model": "private-model", "messages": [{"role": "user", "content": "private-prompt"}]}).encode(),
+    # Auth rejection precedes body parsing. An unnecessary body can race HTTP/1.0
+    # early close on Windows; this fixture tests the 401 envelope, not body drain.
+    data = b"" if auth != "Bearer local-token" else json.dumps(body or {"model": "private-model", "messages": [{"role": "user", "content": "private-prompt"}]}).encode()
+    return urlopen(Request(origin + path, data=data,
                            headers={"Authorization": auth, **(headers or {})}), timeout=5)
 
 
@@ -51,11 +54,27 @@ def test_trace_is_frozen_bounded_and_has_no_payload_fields():
     record = trace.snapshot()
     assert 122 <= record.duration_ms <= 123
     assert re.fullmatch("[0-9a-f]{32}", record.request_id)
-    assert set(asdict(record)) == {"request_id", "protocol", "upstream_protocol", "status", "outcome", "duration_ms", "streaming"}
+    assert set(asdict(record)) == {"request_id", "protocol", "upstream_protocol", "status", "outcome", "duration_ms", "streaming", "first_payload_ms", "input_tokens", "output_tokens", "cached_input_tokens", "cache_creation_input_tokens"}
+    assert record.first_payload_ms is record.input_tokens is record.output_tokens is None
     with pytest.raises(FrozenInstanceError):
         record.outcome = "timeout"
     now[0] = 0
     assert trace.snapshot().duration_ms == 0
+
+
+def test_observed_usage_and_first_payload_are_measured_not_invented():
+    now = [10.0]
+    trace = RequestTrace("chat", "responses", clock=lambda: now[0])
+    now[0] = 10.5
+    trace.mark_first_payload()
+    trace.usage(100, 10, 80, None)
+    now[0] = 11.0
+    trace.mark_first_payload()
+    trace.usage(None, None, None, None)
+    result = trace.snapshot()
+    assert result.first_payload_ms == 500 and result.duration_ms == 1000
+    assert result.input_tokens == 100 and result.output_tokens == 10
+    assert result.cached_input_tokens == 80 and result.cache_creation_input_tokens is None
 
 
 def test_jsonl_sink_serializes_concurrent_records_and_failures_are_optional():

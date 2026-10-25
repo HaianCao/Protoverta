@@ -5,12 +5,18 @@ from __future__ import annotations
 import hashlib
 import math
 import sqlite3
+import threading
 import time
 import uuid
+import weakref
+from _thread import LockType
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from os import PathLike
 from pathlib import Path
+
+_LOCAL_LOCKS: weakref.WeakValueDictionary[Path, LockType] = weakref.WeakValueDictionary()
+_LOCAL_LOCKS_GUARD = threading.Lock()
 
 
 class AdmissionDenied(Exception):
@@ -34,6 +40,12 @@ class SharedAdmission:
         if any(isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value) or value <= 0 for value in (window, lease)):
             raise ValueError("shared time limits must be finite positive numbers")
         self.path = Path(path).expanduser().resolve()
+        with _LOCAL_LOCKS_GUARD:
+            lock = _LOCAL_LOCKS.get(self.path)
+            if lock is None:
+                lock = threading.Lock()
+                _LOCAL_LOCKS[self.path] = lock
+            self._local_lock = lock
         self.scope = hashlib.sha256(scope.encode("utf-8")).hexdigest()
         self.requests, self.window, self.concurrency, self.lease = requests, window, concurrency, lease
         self.clock = clock
@@ -45,6 +57,8 @@ class SharedAdmission:
             connection.execute("CREATE TABLE IF NOT EXISTS budgets (scope TEXT PRIMARY KEY, requests INTEGER, window REAL, concurrency INTEGER, cooldown REAL)")
             connection.execute("CREATE TABLE IF NOT EXISTS attempts (id TEXT PRIMARY KEY, scope TEXT, started REAL, active_until REAL)")
             connection.execute("CREATE INDEX IF NOT EXISTS attempts_scope ON attempts(scope)")
+            connection.execute("CREATE INDEX IF NOT EXISTS attempts_rate ON attempts(scope,started)")
+            connection.execute("CREATE INDEX IF NOT EXISTS attempts_active ON attempts(scope,active_until)")
         except BaseException:
             connection.close()
             raise
@@ -52,6 +66,19 @@ class SharedAdmission:
 
     @contextmanager
     def _transaction(self) -> Iterator[sqlite3.Connection]:
+        # Serialize local writers BEFORE SQLite's busy wait. Several handler
+        # threads spinning on independent connections can starve each other.
+        # Other processes remain coordinated by SQLite; contention fails closed.
+        if not self._local_lock.acquire(timeout=1):
+            raise AdmissionStorageError("Shared provider budget storage is unavailable.")
+        try:
+            with self._database_transaction() as connection:
+                yield connection
+        finally:
+            self._local_lock.release()
+
+    @contextmanager
+    def _database_transaction(self) -> Iterator[sqlite3.Connection]:
         try:
             connection = self._connect()
             try:
@@ -79,13 +106,13 @@ class SharedAdmission:
             if policy[:3] != (self.requests, self.window, self.concurrency):
                 raise AdmissionPolicyError("Conflicting shared budget policy for the same upstream account.")
             db.execute("DELETE FROM attempts WHERE scope=? AND started<=? AND active_until<=?", (self.scope, now - self.window, now))
-            rate = db.execute("SELECT started FROM attempts WHERE scope=? AND started>? ORDER BY started", (self.scope, now - self.window)).fetchall()
-            active = db.execute("SELECT active_until FROM attempts WHERE scope=? AND active_until>? ORDER BY active_until", (self.scope, now)).fetchall()
+            rate = db.execute("SELECT COUNT(*),MIN(started) FROM attempts WHERE scope=? AND started>?", (self.scope, now - self.window)).fetchone()
+            active = db.execute("SELECT COUNT(*),MIN(active_until) FROM attempts WHERE scope=? AND active_until>?", (self.scope, now)).fetchone()
             wait = max(0, policy[3] - now)
-            if len(rate) >= self.requests:
-                wait = max(wait, rate[0][0] + self.window - now)
-            if len(active) >= self.concurrency:
-                wait = max(wait, active[0][0] - now)
+            if rate[0] >= self.requests:
+                wait = max(wait, rate[1] + self.window - now)
+            if active[0] >= self.concurrency:
+                wait = max(wait, active[1] - now)
             if wait > 0:
                 raise AdmissionDenied(wait)
             db.execute("INSERT INTO attempts VALUES (?,?,?,?)", (identifier, self.scope, now, now + self.lease))

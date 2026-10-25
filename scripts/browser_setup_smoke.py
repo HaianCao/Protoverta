@@ -10,12 +10,11 @@ import queue
 import tempfile
 import threading
 from contextlib import ExitStack
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
 
-def run(source: Path, package: str, browser_executable: str | None = None, *, installed=False):
+def run(source: Path, package: str, browser_executable: str | None = None, *, installed=False, screenshots=None):
     import sys
 
     from playwright.sync_api import sync_playwright
@@ -28,14 +27,23 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
     urls, servers, launches, failures = queue.Queue(), [], [], []
     with tempfile.TemporaryDirectory(prefix="protoverta-browser-") as temporary, ExitStack() as stack:
         root = Path(temporary)
-        safe = {key: value for key, value in os.environ.items() if key.upper() in {"PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP"}}
-        safe.update(APPDATA=str(root / "roaming"), LOCALAPPDATA=str(root / "local"), USERPROFILE=str(root / "profile"))
+        from test_environment import sanitized_environment
+
+        safe = sanitized_environment()
+        # Resolve the test browser cache before replacing LOCALAPPDATA; never use
+        # the user's browser profile. Cache binaries are read-only to this run.
+        safe["PLAYWRIGHT_BROWSERS_PATH"] = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", str(Path(os.environ.get("LOCALAPPDATA", temporary)) / "ms-playwright"))
+        for name in ("roaming", "local", "profile"):
+            (root / name).mkdir()
+        safe.update(APPDATA=str(root / "roaming"), LOCALAPPDATA=str(root / "local"), USERPROFILE=str(root / "profile"), HOME=str(root / "profile"))
         safe.update({("CODEX_CA_ENV_FILE" if codex else "CLAUDE_CA_ENV_FILE"): str(root / ".env")})
         stack.enter_context(patch.dict(os.environ, safe, clear=True))
         config = config_module.Config(path=root / "config.toml")
 
+        setup_server = web.ThreadingHTTPServer
+
         def server(address, handler):
-            result = ThreadingHTTPServer(address, handler)
+            result = setup_server(address, handler)
             servers.append(result)
             return result
 
@@ -71,6 +79,12 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
                     page.locator("#providerId" if codex else "#id").fill("fixture")
                     page.locator("#displayName").fill("Fixture <b>Provider</b>")
                     page.locator("#baseUrl").fill("https://example.invalid/v1")
+                    if codex:
+                        page.locator("#providerProtocol").select_option("chat_completions")
+                        page.locator("#useGateway").check()
+                    else:
+                        page.locator("#protocol").select_option("chat")
+                        assert page.locator("#executionMode").input_value() == "gateway"
                     page.locator("#apiKey").fill("synthetic-browser-key")
                     page.locator("#gatewayRuntimeFields").evaluate("(el) => el.closest('details').open = true")
                     page.locator("#runtime_retry_attempts").fill("2")
@@ -85,6 +99,11 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
                     page.wait_for_function("document.querySelectorAll('.model-option').length === 20")
                     page.locator(model).fill("model-19")
                     page.wait_for_function("document.querySelectorAll('.model-option').length === 1")
+                    page.locator("#editBtn" if codex else "#edit").click()
+                    page.locator("#displayName").focus()
+                    page.keyboard.press("Escape")
+                    assert page.locator("#providerForm").evaluate("el => el.classList.contains('hidden')")
+                    assert page.evaluate("document.activeElement.id") == ("editBtn" if codex else "edit")
                     page.locator("#editBtn" if codex else "#edit").click()
                     assert page.locator("#baseUrl").input_value() == "https://example.invalid/v1"
                     assert page.locator("#authMode").input_value() == "bearer"
@@ -101,11 +120,32 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
                         }""", codex)
                     assert saved.value.ok
                     page.locator(model).fill("manual-model")
+                    page.route("**/api/models**", lambda route: route.abort())
+                    page.locator("#refreshBtn" if codex else "#refresh").click()
+                    page.wait_for_function("id => !document.getElementById(id).disabled", arg="refreshBtn" if codex else "refresh")
+                    assert page.locator(model).is_enabled()
+                    assert page.locator(model).input_value() == "manual-model"
+                    page.unroute("**/api/models**")
+                    page.keyboard.press("Tab")
+                    assert page.evaluate("document.activeElement.tagName") != "BODY"
                     before = page.locator("html").get_attribute("data-theme")
                     page.locator("#themeToggle").click()
                     assert page.locator("html").get_attribute("data-theme") != before
+                    page.wait_for_timeout(300)  # Let the real CSS theme transition settle.
                     assert "_icon.png" in page.locator("#favicon").get_attribute("href")
                     assert "_icon" not in page.locator("#brandLogo").get_attribute("src")
+                    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+                    if screenshots:
+                        screenshots.mkdir(parents=True, exist_ok=True)
+                        page.screenshot(path=str(screenshots / (package + "-desktop.png")), full_page=True)
+                        page.locator("#themeToggle").click()
+                        page.wait_for_timeout(300)
+                        page.screenshot(path=str(screenshots / (package + "-alternate-theme.png")), full_page=True)
+                        page.locator("#themeToggle").click()
+                        page.wait_for_timeout(300)
+                        page.set_viewport_size({"width": 390, "height": 844})
+                        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+                        page.screenshot(path=str(screenshots / (package + "-mobile.png")), full_page=True)
                     with page.expect_response(lambda response: "/api/run" in response.url) as started:
                         page.locator("#runBtn" if codex else "#run").click()
                     assert started.value.ok
@@ -131,8 +171,9 @@ def main():
     parser.add_argument("--package", choices=["codex_adapter", "claudapter"], required=True)
     parser.add_argument("--browser-executable")
     parser.add_argument("--installed", action="store_true", help="Test the installed wheel, not checkout imports")
+    parser.add_argument("--screenshots", type=Path, help="Optional synthetic-fixture screenshots directory")
     args = parser.parse_args()
-    print(json.dumps(run(args.source, args.package, args.browser_executable, installed=args.installed)))
+    print(json.dumps(run(args.source, args.package, args.browser_executable, installed=args.installed, screenshots=args.screenshots)))
 
 
 if __name__ == "__main__":

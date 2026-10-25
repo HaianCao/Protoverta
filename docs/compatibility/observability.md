@@ -5,7 +5,8 @@ writes one JSON line to stderr for each dispatched POST when its handler finishe
 It does not create files or retain a global request history. The normal READY
 message remains on stdout. Without that flag the gateway does not log request
 records. Embedded callers can pass `observer=` to `make_handler`, `serve` or
-`gateway_session`; launchers do not yet expose a persistent diagnostics setting.
+`gateway_session`. Launcher previews now expose an opt-in per-session journal
+directory and last-session summary; see [setup diagnostics](advanced-adapters.md).
 
 ## Correlation and schema
 
@@ -23,7 +24,9 @@ Example shape (synthetic values):
 
 Fields are fixed: request ID, recognized inbound/upstream protocol, HTTP status
 or null, fixed outcome category, nonnegative elapsed milliseconds and streaming
-boolean. Unknown endpoint paths become `protocol="unknown"`; raw paths/query
+boolean, optional first-payload milliseconds and measured input/output/cache
+read/write counts. Missing measurements remain null, not zero. First payload is
+not model TTFT. Unknown endpoint paths become `protocol="unknown"`; raw paths/query
 strings, base URLs, provider/model names, keys, headers, messages, tool schemas,
 arguments, outputs, reasoning and exception text are not recorded. These local
 records contain no provider trace ID and cannot by themselves identify which
@@ -50,6 +53,9 @@ the existing native policy; telemetry never copies those bodies.
 - The built-in JSONL sink serializes writes. Embedded callbacks are synchronous;
   they must be bounded, thread-safe and nonblocking. A blocked sink can delay
   request-thread cleanup; no unbounded background queue is created to hide that.
+  This refers to `jsonl_observer`/custom callbacks. The optional launcher session
+  journal instead uses a bounded 128-record queue and a daemon file writer, with
+  dropped-record reporting when it can finish. See the setup diagnostics limits.
 - Ordinary observer exceptions are suppressed without logging their message,
   retrying upstream or changing the response. Process interrupts are not swallowed.
 - The callback receives records only, not config/credentials. Custom observers

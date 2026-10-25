@@ -19,6 +19,9 @@ Issues = "https://github.com/HaianCao/Protoverta/issues"
 test = ["pytest>=8", "ruff==0.17.2"]
 typing = ["mypy==2.4.0"]
 sdk-test = ["openai==3.37.0", "anthropic==2.3.0"]
+fuzz-test = ["hypothesis==6.170.9"]
+soak-test = ["psutil==7.2.2"]
+browser-test = ["playwright==1.64.1"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/protoverta"]

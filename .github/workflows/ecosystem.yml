@@ -58,12 +58,19 @@ jobs:
           if ($LASTEXITCODE) { throw 'Playwright install failed' }
           & .\validation\installed\Scripts\python.exe -m playwright install chromium
           if ($LASTEXITCODE) { throw 'Chromium install failed' }
+      - name: Generated stream properties against the installed core
+        shell: pwsh
+        run: |
+          & .\validation\installed\Scripts\python.exe -m pip install hypothesis==6.170.9 psutil==7.2.2
+          if ($LASTEXITCODE) { throw 'Property/resource dependencies failed' }
+          & .\validation\installed\Scripts\python.exe protoverta/scripts/check_fuzz.py --installed
+          if ($LASTEXITCODE) { throw 'Installed property gate failed' }
       - name: Browser E2E against installed frontend assets (CLI launch stubbed)
         shell: pwsh
         run: |
-          & .\validation\installed\Scripts\python.exe protoverta/scripts/browser_setup_smoke.py --source free-codex-cli --package codex_adapter --installed
+          & .\validation\installed\Scripts\python.exe protoverta/scripts/browser_setup_smoke.py --source free-codex-cli --package codex_adapter --installed --screenshots validation/screenshots
           if ($LASTEXITCODE) { throw 'Codex browser E2E failed' }
-          & .\validation\installed\Scripts\python.exe protoverta/scripts/browser_setup_smoke.py --source free-claude-cli --package claudapter --installed
+          & .\validation\installed\Scripts\python.exe protoverta/scripts/browser_setup_smoke.py --source free-claude-cli --package claudapter --installed --screenshots validation/screenshots
           if ($LASTEXITCODE) { throw 'Claude browser E2E failed' }
       - name: Install pinned official CLIs on the disposable runner
         shell: pwsh
@@ -91,6 +98,13 @@ jobs:
           $wheel = (Get-ChildItem validation/dist/protoverta/*.whl).FullName
           python protoverta/scripts/smoke_windows_install.py --wheel $wheel
           if ($LASTEXITCODE) { throw 'Isolated installer lifecycle failed' }
+      - name: Measured 5-minute loopback soak and source identity
+        shell: pwsh
+        run: |
+          & .\validation\installed\Scripts\python.exe protoverta/scripts/compatibility_snapshot.py --output validation/compatibility-snapshot.json
+          if ($LASTEXITCODE) { throw 'Source identity snapshot failed' }
+          & .\validation\installed\Scripts\python.exe protoverta/scripts/soak_local.py --seconds 300 --requests 15000 --concurrency 8 --installed --measure-resources | Tee-Object -FilePath validation/soak.json
+          if ($LASTEXITCODE) { throw 'Measured installed soak failed' }
       - name: Upgrade from the immutable public a6 wheel
         shell: pwsh
         run: |
@@ -105,3 +119,11 @@ jobs:
         with:
           name: ecosystem-distributions
           path: validation/dist
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compatibility-validation
+          path: |
+            validation/compatibility-snapshot.json
+            validation/soak.json
+            validation/screenshots

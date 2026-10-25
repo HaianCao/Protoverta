@@ -235,7 +235,8 @@ def test_gateway_does_not_forward_done_before_clean_eof():
         thread.join(timeout=2)
 
 
-def test_client_disconnect_stops_upstream_stream_processing():
+@pytest.mark.parametrize("disconnect", [BrokenPipeError, ConnectionResetError, ConnectionAbortedError])
+def test_client_disconnect_stops_upstream_stream_processing(disconnect):
     from protoverta.sse import encode_sse
 
     class Upstream(io.BytesIO):
@@ -247,10 +248,14 @@ def test_client_disconnect_stops_upstream_stream_processing():
 
     class DisconnectedWriter:
         def write(self, data):
-            raise BrokenPipeError("client closed the connection")
+            raise disconnect("client closed the connection")
 
         def flush(self):
             raise AssertionError("must not flush a disconnected writer")
+
+    class Connection:
+        def settimeout(self, seconds):
+            assert 0 < seconds <= 120
 
     config = GatewayConfig(Protocol.MESSAGES, "https://example.com/v1", "key", "local", "x-api-key")
     handler_type = make_handler(config)
@@ -258,6 +263,7 @@ def test_client_disconnect_stops_upstream_stream_processing():
     from protoverta.observability import RequestTrace
 
     handler._trace = RequestTrace("chat", "messages")
+    handler.connection = Connection()
     handler.wfile = DisconnectedWriter()
     handler.send_response = lambda status: None
     handler.send_header = lambda name, value: None
