@@ -100,6 +100,10 @@ class StreamEncoder:
         if delta.kind == "text":
             if delta.text is None:
                 raise StreamError("text delta has no text")
+            if self.saw_tool and self.protocol in {Protocol.CHAT, Protocol.RESPONSES}:
+                if delta.text == "":
+                    return []  # An empty delta carries no post-tool content.
+                raise StreamError("text after a tool call cannot be preserved in this target response")
             return self._text(delta)
         if delta.kind == "tool_start":
             if delta.tool_type not in ("function", "custom", "tool_search"):

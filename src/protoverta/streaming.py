@@ -209,7 +209,7 @@ class StreamDecoder:
             if not tool.opened or not tool.closed:
                 raise StreamError("stream completed with an unfinished tool call")
             if tool.tool_type == "function":
-                _valid_arguments(tool.arguments or "{}", "tool arguments")
+                _valid_arguments(tool.arguments, "tool arguments")
         if reason != "length" and (reason == "tool_calls") != self.saw_tool:
             raise StreamError("finish reason disagrees with tool calls")
         self.ended = True
@@ -244,6 +244,8 @@ class StreamDecoder:
             self._usage(usage)
             return deltas
         choice = _obj(choices[0], "Chat choice")
+        if _index(choice.get("index"), "Chat choice index") != 0:
+            raise StreamError("unsupported Chat choice index")
         if self.reason is not None:
             # OpenRouter may repeat the finished choice in its usage postlude.
             # Only an empty, unchanged completion with first-time usage qualifies.
@@ -340,6 +342,10 @@ class StreamDecoder:
             if reason not in ("stop", "tool_calls", "length"):
                 raise StreamError(f"unsupported Chat finish_reason: {reason}")
             self.reason = reason
+        if body.get("usage") is not None:
+            if reason is None:
+                raise StreamError("Chat usage requires a finishing choice or a usage postlude")
+            self._usage(_obj(body["usage"], "Chat usage"))
         return deltas
 
     def _messages(self, event: SSEEvent) -> list[Delta]:
@@ -385,7 +391,7 @@ class StreamDecoder:
                 call_id = _str(block.get("id"), "tool_use.id")
                 name = _str(block.get("name"), "tool_use.name")
                 self._check_call_id(call_id, index)
-                initial = _obj(block.get("input", {}), "tool_use.input")
+                initial = _obj(block.get("input"), "tool_use.input")
                 if initial:
                     raise StreamError("nonempty initial tool input is unsupported")
                 self.blocks[index] = "tool"
@@ -413,9 +419,15 @@ class StreamDecoder:
                 raise StreamError("Messages block_stop without block_start")
             if active == "tool":
                 tool = self.tools[index]
-                _valid_arguments(tool.arguments or "{}", "tool arguments")
+                normalized = []
+                if tool.arguments == "":
+                    # Messages explicitly began with input={}; no JSON tokens
+                    # means that empty object, not an empty argument string.
+                    tool.arguments = "{}"
+                    normalized.append(Delta("tool_delta", index=index, call_id=tool.call_id, text="{}"))
+                _valid_arguments(tool.arguments, "tool arguments")
                 tool.closed = True
-                return [Delta("tool_end", index=index, call_id=tool.call_id)]
+                return normalized + [Delta("tool_end", index=index, call_id=tool.call_id)]
             return []
         if kind == "message_delta":
             if self.reason is not None or self.blocks:

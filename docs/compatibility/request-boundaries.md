@@ -44,6 +44,25 @@ Tool probes also reject completed streams whose stop reason contradicts the
 presence of tool calls. Chat `stop` / Messages `end_turn` must not certify a
 tool-use result; length-limited output remains incomplete evidence.
 
+Translated request history requires nonempty tool call/result identities and at
+most one result per call. Opaque IDs are not normalized; parallel results may
+arrive in a different order from their calls. Native passthrough is unchanged.
+For Messages SSE, an explicit initial `input: {}` followed by no argument tokens
+is preserved as `{}` at block closure. Missing/non-object input, whitespace-only
+or malformed argument JSON is rejected; empty Chat argument strings are not
+repaired. Chat/Responses targets reject nonempty text after a tool call in both
+JSON and SSE to preserve the existing strict ordering subset. Empty text deltas
+carry no content and do not create post-tool items. Chat SSE choice indices must be
+exact integer zero, including repeated-choice usage postludes.
+
+Translated requests involving Messages require temperature in 0–1; Chat ↔
+Responses retains 0–2. Model/API-version restrictions may be narrower and are
+not inferred, rescaled or silently removed. Native passthrough is unchanged.
+Chat measured usage is accepted once on a finishing choice, an empty-choice tail,
+or the supported repeated-choice postlude. Duplicate/conflicting reports fail;
+nonnull usage before a finishing choice is explicitly unsupported. Null usage
+placeholders do not prevent later measurements.
+
 Doctor uses the configured public-reasoning policy when decoding both JSON and
 SSE probe results. Enabling unsigned Chat/Responses reasoning does not certify a
 reasoning feature, accept opaque/encrypted state or relax the Messages signature

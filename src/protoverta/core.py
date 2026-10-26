@@ -574,6 +574,7 @@ def _check_turns(request: Request, target: Protocol, *, messages_mid_system: boo
         if messages_mid_system:
             _check_mid_system_placement(request.turns)
     calls: set[str] = set()
+    results: set[str] = set()
     for turn in request.turns:
         seen_ordinary = False
         for part in turn.parts:
@@ -595,11 +596,19 @@ def _check_turns(request: Request, target: Protocol, *, messages_mid_system: boo
                     raise ConversionError("text after a tool call cannot be preserved in this target protocol")
         for part in turn.parts:
             if part.kind == "tool_call":
+                if not part.call_id:
+                    raise ConversionError("empty tool call ID")
                 if part.call_id in calls:
                     raise ConversionError("duplicate tool call ID")
                 calls.add(part.call_id)
-            elif part.kind == "tool_result" and part.call_id not in calls:
-                raise ConversionError(f"tool result has no matching call: {part.call_id}")
+            elif part.kind == "tool_result":
+                if not part.call_id:
+                    raise ConversionError("empty tool result call ID")
+                if part.call_id not in calls:
+                    raise ConversionError(f"tool result has no matching call: {part.call_id}")
+                if part.call_id in results:
+                    raise ConversionError("duplicate tool result for call ID")
+                results.add(part.call_id)
 
 
 def _check_mid_system_placement(turns: list[Turn]) -> None:
@@ -794,6 +803,8 @@ def convert_request(body: dict[str, Any], source: Protocol | str, target: Protoc
     # Preserve field-specific validation errors before checking opaque schemas.
     encode_json(body)
     if Protocol.MESSAGES in (source, target):
+        if request.temperature is not None and request.temperature > 1:
+            raise ConversionError("Messages temperature must be between 0 and 1")
         for tool in request.tools:
             if tool.get("strict") is True:
                 validate_strict_tool_schema(tool["parameters"])
