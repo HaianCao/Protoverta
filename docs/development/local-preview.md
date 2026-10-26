@@ -152,6 +152,45 @@ is needed. Keep any reports you need before removing that exact preview director
 
 ## Further automated gates
 
+To collect source coverage including the Python CLI child entry points:
+
+```powershell
+& $previewPython -m pip install coverage==7.17.0
+if ($LASTEXITCODE) { throw "Coverage tools installation failed" }
+& $previewPython "$workspace\protoverta\scripts\check_coverage.py" --codex-source "$workspace\free-codex-cli" --claude-source "$workspace\free-claude-cli"
+if ($LASTEXITCODE) { throw "Coverage acceptance failed; inspect the reported log" }
+```
+
+The checker creates a fresh temporary output directory. It runs all three source
+suites with branch measurement and verifies nonempty child-only coverage of each
+CLI using a harmless `--help` invocation. Sanitized child environments receive
+only the measurement configuration; credential allowlists remain unchanged.
+Native Codex/Claude executables, arbitrary Python grandchildren and unrelated
+process-timeout fixtures are not included in this Python CLI coverage claim.
+Coverage contexts identify children even when Windows venv launchers redirect
+to a different process ID. This is source measurement, separate from wheel tests.
+
+For the combined browser-to-foreground-launcher fixture:
+
+```powershell
+& $previewPython -m pip install playwright==1.64.1
+if ($LASTEXITCODE) { throw "Browser tools installation failed" }
+$env:PLAYWRIGHT_BROWSERS_PATH = "$previewRoot\browsers"
+& $previewPython -m playwright install chromium --only-shell
+if ($LASTEXITCODE) { throw "Test browser download failed" }
+& $previewPython "$workspace\protoverta\scripts\browser_setup_smoke.py" --source "$workspace\free-codex-cli" --package codex_adapter --installed --launch-fixture
+if ($LASTEXITCODE) { throw "Codex setup handoff failed" }
+& $previewPython "$workspace\protoverta\scripts\browser_setup_smoke.py" --source "$workspace\free-claude-cli" --package claudapter --installed --launch-fixture
+if ($LASTEXITCODE) { throw "Claude setup handoff failed" }
+```
+
+Here **Run** uses the real foreground launcher and local gateway with a controlled
+Python CLI child. The child verifies model selection, absence of the upstream key,
+and a gateway HTTP round trip; setup must close its listener while the child stays
+alive. The test then releases it and checks exit-code propagation. It does not
+execute a real agent or emulate a full interactive terminal/PTY. Real CLI smoke
+and manual terminal checks remain separate acceptance steps.
+
 The full core/consumer pytest suites, SDK and property gates, strict type scope,
 browser QA, load/cancellation checks and official schema audit have different
 purposes. See [conformance](conformance.md), [validation matrix](validation-matrix.md)

@@ -52,6 +52,30 @@ correct logo/favicon roles, no horizontal overflow at 390px, and Run shutdown.
 Screenshots contain synthetic data only. It does not certify WCAG, every keyboard
 interaction, all screen sizes, or the real terminal handoff.
 
+Add `--launch-fixture` to replace only CLI discovery with a controlled Python
+child while exercising the real foreground launcher and gateway. That child must
+complete a local HTTP round trip without receiving the upstream key. Setup's
+listener must already be closed while the child remains alive, and its exit code
+must propagate when released. This covers browser-to-foreground-process wiring;
+it does not replace real agent/PTY testing. See [the preview guide](local-preview.md).
+
+## Source and Python CLI child coverage
+
+```text
+pip install -e ".[test,coverage-test]"
+python scripts/check_coverage.py --codex-source ../free-codex-cli --claude-source ../free-claude-cli
+```
+
+Use a disposable development venv. The checker creates a fresh output directory,
+collects branch coverage and per-suite logs, and requires nonempty child-only
+coverage for a keyless CLI `--help` canary. Child identity is verified by coverage
+context rather than OS PID because Windows venv launchers can redirect to another
+Python process. The explicit pytest plugin adds only coverage configuration to
+scrubbed environments for the three project CLI modules. It does not expand the
+credential allowlist, instrument unrelated timeout fixtures, modify interpreter
+startup files, or measure native agents/arbitrary grandchildren. This optional
+tool does not impose a percentage threshold or a runtime dependency.
+
 ## Resource and installer checks
 
 ```text

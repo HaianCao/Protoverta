@@ -14,7 +14,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 
-def run(source: Path, package: str, browser_executable: str | None = None, *, installed=False, screenshots=None):
+def run(source: Path, package: str, browser_executable: str | None = None, *, installed=False, screenshots=None, launch_fixture=False):
     import sys
 
     from playwright.sync_api import sync_playwright
@@ -51,12 +51,21 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
         stack.enter_context(patch.object(web.webbrowser, "open", side_effect=urls.put))
         stack.enter_context(patch.object(web, "fetch_models", return_value=["model-" + str(i) for i in range(20)] if codex else [{"id": "model-" + str(i), "display_name": "Model " + str(i)} for i in range(20)]))
         stack.enter_context(patch.object(web, "preflight"))
-        stack.enter_context(patch.object(web, "launch", side_effect=lambda *args: launches.append(args) or 0))
+        foreground = None
+        if launch_fixture:
+            from setup_launch_fixture import SetupLaunchFixture
+
+            foreground = SetupLaunchFixture(root, web, importlib.import_module(package + ".launcher"))
+            stack.enter_context(patch.object(web, "launch", side_effect=foreground.launch))
+        else:
+            stack.enter_context(patch.object(web, "launch", side_effect=lambda *args: launches.append(args) or 0))
 
         def serve():
             try:
-                web.serve(config)
-            except (OSError, ValueError, RuntimeError) as exc:
+                result = web.serve(config)
+                if foreground:
+                    assert result == 7, "Foreground CLI exit code was lost"
+            except (OSError, ValueError, RuntimeError, AssertionError) as exc:
                 failures.append(type(exc).__name__)
 
         worker = threading.Thread(target=serve, daemon=True)
@@ -149,16 +158,23 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
                     with page.expect_response(lambda response: "/api/run" in response.url) as started:
                         page.locator("#runBtn" if codex else "#run").click()
                     assert started.value.ok
+                    if foreground:
+                        foreground.release_after_ready(url, worker)
                     worker.join(timeout=5)
-                    assert not worker.is_alive() and launches and not failures
+                    assert not worker.is_alive() and (foreground.calls if foreground else launches) and not failures
+                    if foreground:
+                        assert foreground.exit_codes == [7]
+                        assert (root / "child-finished").is_file()
                     restored = config_module.load(config.path).providers["fixture"]
                     assert restored.auth_mode == "api_key"
                     assert restored.gateway_runtime["retry_attempts"] == 2
                     assert not errors, errors
-                    return {"package": package, "passed": True, "launch_stubbed": True}
+                    return {"package": package, "passed": True, "launch_stubbed": not launch_fixture, "synthetic_foreground_cli": launch_fixture}
                 finally:
                     browser.close()
         finally:
+            if foreground:
+                foreground.release()
             if worker.is_alive():
                 for running in servers:
                     running.shutdown()
@@ -172,8 +188,9 @@ def main():
     parser.add_argument("--browser-executable")
     parser.add_argument("--installed", action="store_true", help="Test the installed wheel, not checkout imports")
     parser.add_argument("--screenshots", type=Path, help="Optional synthetic-fixture screenshots directory")
+    parser.add_argument("--launch-fixture", action="store_true", help="Exercise real foreground launcher/gateway with a synthetic CLI child")
     args = parser.parse_args()
-    print(json.dumps(run(args.source, args.package, args.browser_executable, installed=args.installed, screenshots=args.screenshots)))
+    print(json.dumps(run(args.source, args.package, args.browser_executable, installed=args.installed, screenshots=args.screenshots, launch_fixture=args.launch_fixture)))
 
 
 if __name__ == "__main__":

@@ -167,6 +167,7 @@ class _LifecycleValidator:
         self.ended = False
         self.sequence = -1
         self.open_items: set[int] = set()
+        self.seen_items: set[int] = set()
         self.finished_choices: set[int] = set()
         self.finish_reasons: dict[int, str] = {}
         self.usage_postludes: set[int] = set()
@@ -238,8 +239,9 @@ class _LifecycleValidator:
             if kind in {"content_block_start", "content_block_delta", "content_block_stop"}:
                 index = self._index(body, "index")
                 if kind == "content_block_start":
-                    if index in self.open_items or self.stop_reason:
+                    if index in self.seen_items or self.stop_reason:
                         raise StreamError("duplicate or late content block")
+                    self.seen_items.add(index)
                     self.open_items.add(index)
                 elif index not in self.open_items:
                     raise StreamError("Messages event without an open content block")
@@ -268,8 +270,9 @@ class _LifecycleValidator:
             raise StreamError("Responses event before response.created")
         elif kind == "response.output_item.added":
             index = self._index(body, "output_index")
-            if index in self.open_items:
+            if index in self.seen_items:
                 raise StreamError("duplicate Responses output item")
+            self.seen_items.add(index)
             self.open_items.add(index)
         elif kind == "response.output_item.done":
             index = self._index(body, "output_index")

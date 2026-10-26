@@ -1,5 +1,9 @@
 # Local validation, 2026-10-26
 
+The subsequent [risk-based coverage expansion](coverage-expansion-2026-10-26.md)
+adds 71 tests, fixes native stream index reuse, and measures Python CLI children.
+Counts below describe this earlier checkpoint, not that follow-up.
+
 ## Result and scope
 
 The declared text/function-tool conversion subset passes the source and installed
