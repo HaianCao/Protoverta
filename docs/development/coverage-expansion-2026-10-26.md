@@ -89,3 +89,48 @@ and unknown usage-detail limitations from the earlier report remain unresolved;
 these tests do not add reasoning-state migration or universal provider/model
 support. No remote CI, new live-provider evidence or long-duration soak is claimed.
 Follow the [preview guide](local-preview.md) for reproduction and manual checks.
+
+## Follow-up: timing-dependent preview failures
+
+A subsequent user preview run reported two failures and 1376 passes. This was
+not a percentage-threshold failure or a pip installation error. The malformed
+capability request test sent its next request as soon as the previous response
+body arrived; the handler could still own the sole admission slot until its
+finally block ran. The test now waits for the request observation, emitted after
+slot release, before asserting a successful follow-up. No automatic HTTP retry
+or production admission change was added; a leaked slot still fails the test.
+
+The descendant-pipe test also assumed its root process had exited within 0.5 s.
+A Windows venv executable can be a redirector, so the Python message printed by
+the child did not prove Popen's root had exited. This fixture now uses the native
+interpreter and explicitly waits for root exit before starting the pipe-cleanup
+measurement. Startup has a separate bounded wait; the cleanup timeout remains
+0.5 s. The actual job/group containment and descendant cleanup are unchanged.
+
+The coverage command now prints the suite being run, returns a concise nonzero
+error with failed test identities and the log path, and does not dump assertion
+values into that summary. The full report remains in pytest.log. Two additional
+tests cover failure reporting. No test was skipped or marked as an expected pass.
+
+The complete coordinated source coverage gate was rerun using the user's preview
+venv Python: core 1380 passed (225.81 s), CodexApter 189 plus 12 subtests, and
+ClaudApter 157 plus 9 subtests. All three CLI child-coverage checks passed and
+the command exited zero. Ruff passed. No runtime conversion code, provider
+configuration, API keys, user PATH or real installation was changed for this fix;
+rebuilding the preview wheels is not required to rerun this source test command.
+
+## Follow-up: browser waits under the actual setup CSP
+
+The user's browser run passed CodexApter but failed ClaudApter while waiting for
+model options: a wait_for_function expression attempted page-context eval, which
+the setup Content Security Policy forbids. The smoke script now uses Playwright
+locator assertions for option counts and enabled state, rather than polling
+JavaScript strings. It also checks the actual response's restrictive CSP and
+absence of unsafe-eval. No bypass_csp flag or application policy change was added.
+See [Playwright's locator assertions](https://playwright.dev/python/docs/api/class-locatorassertions).
+
+Both installed-consumer browser checks passed again with the user's preview
+venv and downloaded Chromium headless shell, including --launch-fixture, local
+gateway round trips and foreground exit-code propagation. Ruff passed. This
+fix changes only test tooling: no wheel rebuild, live provider request or user
+configuration change is needed.

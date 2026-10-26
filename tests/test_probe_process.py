@@ -2,6 +2,7 @@ import importlib
 import os
 import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -26,11 +27,25 @@ def test_timeout_cleans_descendant_even_after_its_parent_exits(monkeypatch, tmp_
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "scripts"))
     module = importlib.import_module("probe_process")
     code = "import subprocess,sys; subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']); print('parent-exited',flush=True)"
-    started = time.monotonic()
-    result = module.run_process([sys.executable, "-c", code], cwd=str(tmp_path), text=True, encoding="utf-8", errors="replace", timeout=0.5)
+    original_start = module._start
+    ready = []
+
+    @contextmanager
+    def exited_parent(*args, **kwargs):
+        with original_start(*args, **kwargs) as (process, job):
+            # Use the native interpreter, not a Windows venv redirector, and
+            # establish this fixture's precondition before measuring cleanup.
+            # No stdout/stderr is drained: the live descendant still owns them.
+            assert process.wait(timeout=10) == 0
+            ready.append(time.monotonic())
+            yield process, job
+
+    monkeypatch.setattr(module, "_start", exited_parent)
+    interpreter = getattr(sys, "_base_executable", sys.executable)
+    result = module.run_process([interpreter, "-c", code], cwd=str(tmp_path), text=True, encoding="utf-8", errors="replace", timeout=0.5)
     assert result.returncode == 124 and "parent-exited" in result.stdout
     assert "root exited 0; descendant pipes remained open" in result.stderr
-    assert time.monotonic() - started < 10
+    assert time.monotonic() - ready[0] < 10
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows process containment")

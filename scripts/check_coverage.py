@@ -27,7 +27,12 @@ def measure(project, package, output, core):
     result = subprocess.run(command, cwd=project, env=env, capture_output=True, timeout=600, check=False)
     (output / "pytest.log").write_bytes(result.stdout + result.stderr)
     if result.returncode:
-        raise RuntimeError(f"{project.name} suite failed; inspect {output / 'pytest.log'}")
+        # Show identities, not captured assertion values or arbitrary stderr.
+        # The complete, short-trace report remains in the isolated log file.
+        text = (result.stdout + result.stderr).decode("utf-8", errors="replace")
+        failures = [line.partition(" - ")[0] for line in text.splitlines() if line.startswith(("FAILED ", "ERROR "))]
+        detail = "\n" + "\n".join(failures[:8]) if failures else ""
+        raise RuntimeError(f"{project.name} pytest failed (exit {result.returncode}); inspect {output / 'pytest.log'}{detail}")
     int(pid_file.read_text(encoding="ascii"))  # Keep the root PID for diagnostics.
     # Windows venv python.exe may redirect to another OS process. Its measured
     # PID need not equal Popen.pid, so verify a CLI-only coverage context instead.
@@ -66,7 +71,12 @@ def main():
         parser.error("Use an empty output directory")
     results = []
     for project, package in [(core, "protoverta"), (args.codex_source.resolve(), "codex_adapter"), (args.claude_source.resolve(), "claudapter")]:
-        record = measure(project, package, output / package, core)
+        print(f"Running source tests: {project.name} (may take several minutes)", flush=True)
+        try:
+            record = measure(project, package, output / package, core)
+        except RuntimeError as exc:
+            print("Coverage check failed: " + str(exc), file=sys.stderr)
+            return 1
         results.append(record)
         print(json.dumps(record), flush=True)
     (output / "summary.json").write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")

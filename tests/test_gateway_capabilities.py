@@ -18,8 +18,8 @@ from protoverta.streaming import Delta
 
 
 @contextmanager
-def listener(config, upstream):
-    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(config, upstream_open=upstream))
+def listener(config, upstream, *, observer=None):
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(config, upstream_open=upstream, observer=observer))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -158,6 +158,7 @@ def test_gateway_mid_system_allowlist_is_exact_and_keeps_invalid_history_rejecte
 @pytest.mark.parametrize("tools", [1, True, "tool", {}, [1], [None]])
 def test_native_malformed_capability_tools_return_json_and_release_slot(tools):
     calls = []
+    handled = threading.Event()
 
     def upstream(request, *, timeout):
         calls.append(request)
@@ -165,13 +166,16 @@ def test_native_malformed_capability_tools_return_json_and_release_slot(tools):
 
     registry = CapabilityRegistry((CapabilityRecord("https://example.test/v1", "responses", "m", {"text": True}, "2026-10-24", "fixture"),))
     config = GatewayConfig("responses", "https://example.test/v1", "key", "local", capabilities=registry, max_concurrent_requests=1)
-    with listener(config, upstream) as url:
+    with listener(config, upstream, observer=lambda _: handled.set()) as url:
         with pytest.raises(HTTPError) as caught:
             post(url, {"model": "m", "input": "Hi", "tools": tools})
         assert caught.value.code == 422
         assert isinstance(json.load(caught.value)["error"], dict)
         caught.value.close()
         assert not calls
+        # Receiving the response body does not mean the server thread has left
+        # its finally block. Observations are emitted after admission.release().
+        assert handled.wait(3), "Rejected request did not finish cleanup"
         with post(url, {"model": "m", "input": "Hi"}) as response:
             assert response.status == 200
     assert len(calls) == 1

@@ -17,7 +17,7 @@ from unittest.mock import patch
 def run(source: Path, package: str, browser_executable: str | None = None, *, installed=False, screenshots=None, launch_fixture=False):
     import sys
 
-    from playwright.sync_api import sync_playwright
+    from playwright.sync_api import expect, sync_playwright
 
     if not installed:
         sys.path.insert(0, str(source.resolve() / "src"))
@@ -80,7 +80,10 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
                     page.on("pageerror", lambda exc: errors.append(str(exc)))
                     # Local setup/assets only; never contact a real provider.
                     page.route("**/*", lambda route: route.continue_() if route.request.url.startswith(url.split("/?")[0] + "/") else route.abort())
-                    page.goto(url)
+                    loaded = page.goto(url)
+                    assert loaded is not None
+                    policy = loaded.headers.get("content-security-policy", "")
+                    assert "default-src 'none'" in policy and "'unsafe-eval'" not in policy
                     select = "#providerSelect" if codex else "#provider"
                     page.locator(select).wait_for()
                     assert page.locator(select).is_disabled()
@@ -100,14 +103,16 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
                     with page.expect_response(lambda response: "/api/provider" in response.url and response.request.method == "POST") as saved:
                         page.locator("#saveProvider" if codex else "#providerForm button[type=submit]").click()
                     assert saved.value.ok
-                    page.wait_for_function("selector => document.querySelector(selector).options.length === 1", arg=select)
+                    expect(page.locator(select + " option")).to_have_count(1)
                     assert page.locator(select + " option").inner_text() == "Fixture <b>Provider</b>"
                     assert page.locator(select + " b").count() == 0
                     model = "#modelInput" if codex else "#model"
                     page.locator(model).fill("")
-                    page.wait_for_function("document.querySelectorAll('.model-option').length === 20")
+                    # Locator assertions retry without page-context eval, which
+                    # the real setup CSP intentionally disallows.
+                    expect(page.locator(".model-option")).to_have_count(20)
                     page.locator(model).fill("model-19")
-                    page.wait_for_function("document.querySelectorAll('.model-option').length === 1")
+                    expect(page.locator(".model-option")).to_have_count(1)
                     page.locator("#editBtn" if codex else "#edit").click()
                     page.locator("#displayName").focus()
                     page.keyboard.press("Escape")
@@ -131,7 +136,7 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
                     page.locator(model).fill("manual-model")
                     page.route("**/api/models**", lambda route: route.abort())
                     page.locator("#refreshBtn" if codex else "#refresh").click()
-                    page.wait_for_function("id => !document.getElementById(id).disabled", arg="refreshBtn" if codex else "refresh")
+                    expect(page.locator("#refreshBtn" if codex else "#refresh")).to_be_enabled()
                     assert page.locator(model).is_enabled()
                     assert page.locator(model).input_value() == "manual-model"
                     page.unroute("**/api/models**")
