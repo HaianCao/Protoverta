@@ -206,3 +206,34 @@ def test_probe_budget_stops_before_io_and_is_distinct_from_provider_429(diagnost
 def test_request_budget_must_be_an_explicit_positive_integer(diagnostics_module, limit):
     with pytest.raises(ValueError):
         diagnostics_module.StreamDiagnostics(max_upstream_requests=limit)
+
+
+@pytest.mark.parametrize("observed", [False, True])
+def test_transport_capture_keeps_gateway_session_observer(diagnostics_module, monkeypatch, observed):
+    from urllib.request import ProxyHandler, build_opener
+
+    from protoverta import server
+
+    opened = []
+    records = []
+    payload = {"model": "fixture", "choices": [{"message": {"role": "assistant", "content": "fixture-answer"}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 2, "completion_tokens": 1}}
+
+    def upstream(request, *, timeout):
+        opened.append(request)
+        return io.BytesIO(json.dumps(payload).encode())
+
+    monkeypatch.setattr(diagnostics_module, "build_opener", lambda *_: SimpleNamespace(open=upstream))
+    diagnostic = diagnostics_module.StreamDiagnostics()
+    original = server.make_handler
+    config = server.GatewayConfig("chat", "https://example.invalid/v1", "synthetic-upstream", "synthetic-local")
+    with diagnostic.capture(), server.gateway_session(config, observer=records.append if observed else None) as origin:
+        request = Request(origin + "/v1/responses", data=b'{"model":"fixture","input":"fixture"}', headers={"Authorization": "Bearer synthetic-local", "Content-Type": "application/json"})
+        with build_opener(ProxyHandler({})).open(request, timeout=5) as response:
+            assert response.status == 200
+            assert b"fixture-answer" in response.read()
+    assert server.make_handler is original
+    assert len(opened) == diagnostic.requests == 1
+    assert len(records) == int(observed)
+    assert not diagnostic.failures
+    if observed:
+        assert records[0].outcome == "success"

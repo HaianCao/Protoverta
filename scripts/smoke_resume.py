@@ -42,6 +42,10 @@ def run_resume(client: str, source: Protocol, target: Protocol, adapter_source: 
         raise ValueError(f"{client} is not on PATH")
     previous = "FIRST_ANSWER_" + secrets.token_hex(12)
     final = "RESUME_OK_" + secrets.token_hex(12)
+    # Persisted native Responses sessions can retain their initial summary mode
+    # when resumed on another model. This probe measures portable text/tool
+    # history, so disable summaries from the first invocation, not just replay.
+    client_options = {"codex_config": {"model_reasoning_summary": "none"}} if client == "codex" else {}
     requests = []
     initial_finished = False
     fixture_path = ""
@@ -88,13 +92,13 @@ def run_resume(client: str, source: Protocol, target: Protocol, adapter_source: 
         Path(fixture_path).write_text("Synthetic resume tool fixture\n", encoding="utf-8")
         with fixture_server(open_upstream) as origin:
             config = GatewayConfig(source, origin + "/v1", "fake-upstream-key", "smoke-local-token")
-            first = run_client(client, executable, "http://127.0.0.1:0", origin, config, env, directory, tool_loop, adapter_source, False, source, timeout, "protoverta-first", prompt="Reply briefly. Do not use tools.", persist_session=True)
+            first = run_client(client, executable, "http://127.0.0.1:0", origin, config, env, directory, tool_loop, adapter_source, False, source, timeout, "protoverta-first", prompt="Reply briefly. Do not use tools.", persist_session=True, **client_options)
             if first.returncode != 0 or previous not in first.stdout or (tool_loop and not any(request["tool_history_present"] for request in requests)):
                 return {"passed": False, "stage": "initial", "client": client, "error": (first.stderr + first.stdout)[-2000:]}
             identifier = session_id(client, first.stdout)
             config = GatewayConfig(target, origin + "/v1", "fake-upstream-key", "smoke-local-token")
             trace_file = root / "request-shapes.json" if trace else None
-            second = run_client(client, executable, "http://127.0.0.1:0", origin, config, env, directory, tool_loop, adapter_source, False, target, timeout, "protoverta-second" if change_model else "protoverta-first", prompt="Continue our previous conversation. Do not use tools.", persist_session=True, resume_id=identifier, provider_id="alternate" if change_provider else "smoke", trace_file=trace_file)
+            second = run_client(client, executable, "http://127.0.0.1:0", origin, config, env, directory, tool_loop, adapter_source, False, target, timeout, "protoverta-second" if change_model else "protoverta-first", prompt="Continue our previous conversation. Do not use tools.", persist_session=True, resume_id=identifier, provider_id="alternate" if change_provider else "smoke", trace_file=trace_file, **client_options)
             try:
                 same_session = session_id(client, second.stdout) == identifier
             except (ValueError, KeyError, StopIteration):

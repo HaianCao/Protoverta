@@ -1,5 +1,20 @@
 # Session replay compatibility
 
+## Follow-up on 2026-10-26
+
+Codex CLI 0.164.0 and Claude Code 2.1.308 were retested with temporary sessions
+and loopback fixtures. Codex Responses -> Chat and Chat -> Chat passed after a
+completed read-only tool loop while changing provider configuration ID/model.
+Claude Messages -> Responses also passed with completed tool history and both
+changes. The Codex Responses initial turn explicitly used
+`model_reasoning_summary="none"`; otherwise a persisted native summary setting
+caused replay to be rejected before forwarding. This does not make existing
+reasoning summaries or opaque state portable. The resume probe now sets this
+policy from the initial turn and its optional shape trace preserves the gateway
+observer. See [the current validation report](../development/validation-2026-10-26.md).
+
+## Earlier matrix and scope
+
 Verified locally on 2026-10-23 with Codex CLI 0.163.0 and Claude Code 2.1.308,
 both through their source launchers and the production gateway. The upstreams
 are scripted loopback SSE fixtures, not real provider/model endpoints.

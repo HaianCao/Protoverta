@@ -90,3 +90,24 @@ def test_trace_handles_opaque_or_malformed_shapes_without_content_leak(monkeypat
     assert result["public_reasoning_items"] == 0
     assert result["reasoning_shapes"][0]["opaque_present"] is True
     assert "private" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("client", ["codex", "claude"])
+def test_resume_probe_uses_portable_initial_reasoning_policy(monkeypatch, tmp_path, client):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "scripts"))
+    module = importlib.import_module("smoke_resume")
+    monkeypatch.setattr(module.shutil, "which", lambda _: "synthetic.exe")
+    captured = []
+
+    def fail_initial(*args, **kwargs):
+        captured.append(kwargs)
+        return SimpleNamespace(returncode=1, stdout="", stderr="synthetic failure")
+
+    monkeypatch.setattr(module, "run_client", fail_initial)
+    result = module.run_resume(client, module.Protocol.RESPONSES, module.Protocol.CHAT, tmp_path)
+    assert result["stage"] == "initial" and not result["passed"]
+    assert len(captured) == 1 and captured[0]["persist_session"]
+    if client == "codex":
+        assert captured[0]["codex_config"] == {"model_reasoning_summary": "none"}
+    else:
+        assert "codex_config" not in captured[0]

@@ -237,9 +237,9 @@ class StreamDiagnostics:
             if observe_transport:
                 original_handler = server.make_handler
 
-                def make_handler(config, *, upstream_open=None):
+                def make_handler(config, *, upstream_open=None, observer=None):
                     opener = upstream_open or build_opener(server._RedirectBlocker()).open
-                    return original_handler(config, upstream_open=self.wrap_open(opener))
+                    return original_handler(config, upstream_open=self.wrap_open(opener), observer=observer)
 
                 stack.enter_context(patch.object(server, "make_handler", make_handler))
             yield self
