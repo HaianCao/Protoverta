@@ -156,6 +156,10 @@ def _list(value: Any, label: str) -> list[Any]:
     return value
 
 
+def _optional_list(value: Any, label: str) -> list[Any]:
+    return [] if value is None else _list(value, label)
+
+
 def _optional_positive_int(value: Any, label: str) -> int | None:
     if value is None:
         return None
@@ -339,7 +343,7 @@ def _decode_chat(body: dict[str, Any], *, public_reasoning: bool = False) -> Req
             if "reasoning_content" in item:
                 parts.insert(0, Part("reasoning_text", text=_string(item["reasoning_content"], "reasoning_content")))
             if role == "assistant":
-                for index, call in enumerate(_list(item.get("tool_calls") or [], "tool_calls")):
+                for index, call in enumerate(_optional_list(item.get("tool_calls"), "tool_calls")):
                     call = _object(call, "tool_call")
                     parts.append(_chat_call(call, index))
             turns.append(Turn(role, parts))
@@ -349,7 +353,7 @@ def _decode_chat(body: dict[str, Any], *, public_reasoning: bool = False) -> Req
         else:
             raise ConversionError(f"unsupported Chat role: {role}")
     tools: list[dict[str, Any]] = []
-    for item in _list(body.get("tools") or [], "tools"):
+    for item in _optional_list(body.get("tools"), "tools"):
         item = _object(item, "tool")
         if item.get("type") == "custom":
             _only(item, {"type", "custom"}, "tool")
@@ -425,7 +429,7 @@ def _decode_messages(body: dict[str, Any]) -> Request:
             raise ConversionError("Messages role must be user, assistant or system")
         turns.append(Turn(role, _message_parts(item.get("content"), "message.content")))
     tools: list[dict[str, Any]] = []
-    for item in _list(body.get("tools") or [], "tools"):
+    for item in _optional_list(body.get("tools"), "tools"):
         item = _object(item, "tool")
         _only(item, {"name", "description", "input_schema", "strict"}, "tool")
         tools.append({"name": _string(item.get("name"), "tool name"), "description": item.get("description", ""), "parameters": _object(item.get("input_schema"), "input_schema"), **_strict_tool(item)})
@@ -526,7 +530,7 @@ def _decode_responses(body: dict[str, Any], *, public_reasoning: bool = False) -
             grouped_turns.append(turn)
     turns = grouped_turns
     tools: list[dict[str, Any]] = []
-    for item in _list(body.get("tools") or [], "tools"):
+    for item in _optional_list(body.get("tools"), "tools"):
         item = _object(item, "tool")
         if item.get("type") == "custom":
             tools.append(custom_definition(item, "responses"))
@@ -874,7 +878,7 @@ def _decode_result(body: dict[str, Any], source: Protocol, *, public_reasoning: 
         parts = _chat_content(msg.get("content"), "message.content")
         if public_reasoning and msg.get("reasoning_content") is not None:
             parts.insert(0, Part("reasoning_text", text=_string(msg["reasoning_content"], "reasoning_content")))
-        for index, call in enumerate(_list(msg.get("tool_calls") or [], "tool_calls")):
+        for index, call in enumerate(_optional_list(msg.get("tool_calls"), "tool_calls")):
             call = _object(call, "tool_call")
             parts.append(_chat_call(call, index))
         usage = _object(body.get("usage") or {}, "usage")

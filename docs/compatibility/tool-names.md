@@ -26,6 +26,12 @@ user/system/developer message is rejected even when empty or null. Malformed
 roles are never repaired by moving content or dropping tool fields. Native
 passthrough routes continue to leave provider validation to the native API.
 
+Optional `tools` arrays and Chat `tool_calls` arrays distinguish missing/null
+from malformed values. Missing, null and empty arrays keep their existing empty
+semantics; booleans, numbers, strings and objects are rejected, including falsy
+values such as `false`, `0`, `""` and `{}`. This applies to translated requests
+and completed Chat responses, consistently with the streaming array validator.
+
 The explicit `codex` and `claude` compatibility profiles enable this reversible
 name policy by default, so existing source launchers using those profiles pick
 it up with a compatible core build. Set `--tool-names reject` to override the
