@@ -18,6 +18,14 @@ tool results and call IDs are never searched/replaced. Unknown generated aliases
 fail rather than being guessed. Namespace restoration composes after this policy.
 Native routes are unchanged, even when aliasing is enabled.
 
+Historical tool roles are validated before translated requests reach the
+upstream. Calls belong to assistant turns; results belong to user/tool-result
+turns (Chat uses its `tool` role, Messages uses a user `tool_result`, and
+Responses uses a separate call-output item). A Chat `tool_calls` field on a
+user/system/developer message is rejected even when empty or null. Malformed
+roles are never repaired by moving content or dropping tool fields. Native
+passthrough routes continue to leave provider validation to the native API.
+
 The explicit `codex` and `claude` compatibility profiles enable this reversible
 name policy by default, so existing source launchers using those profiles pick
 it up with a compatible core build. Set `--tool-names reject` to override the

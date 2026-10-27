@@ -332,6 +332,8 @@ def _decode_chat(body: dict[str, Any], *, public_reasoning: bool = False) -> Req
         item = _object(item, "message")
         role = _string(item.get("role"), "message.role")
         if role in {"system", "developer", "user", "assistant"}:
+            if role != "assistant" and "tool_calls" in item:
+                raise ConversionError("Chat tool_calls require the assistant role")
             _only(item, {"role", "content", "tool_calls"} | ({"reasoning_content"} if public_reasoning else set()), "message")
             parts = _chat_content(item.get("content"), "message.content")
             if "reasoning_content" in item:
@@ -578,6 +580,10 @@ def _check_turns(request: Request, target: Protocol, *, messages_mid_system: boo
     for turn in request.turns:
         seen_ordinary = False
         for part in turn.parts:
+            if part.kind == "tool_call" and turn.role != "assistant":
+                raise ConversionError("tool calls require the assistant role")
+            if part.kind == "tool_result" and turn.role != "user":
+                raise ConversionError("tool results require the user/tool-result role")
             if part.result_parts is not None and target == Protocol.CHAT:
                 raise ConversionError("Chat cannot preserve image-bearing tool results without relocating their role")
             if part.kind == "reasoning_text":
