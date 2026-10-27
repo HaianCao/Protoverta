@@ -218,3 +218,5 @@ Operational contracts: [HTTP boundaries and count errors](docs/compatibility/req
 [explicit routing and token quotas](docs/compatibility/routing-and-token-quotas.md).
 Development evidence: [versioned validation matrix](docs/development/validation-matrix.md)
 and [current OpenResponses schema gaps](docs/development/openresponses-audit.md).
+Isolated acceptance: [local preview](docs/development/local-preview.md),
+[harness tools and session MCP](docs/development/harness-tools.md).

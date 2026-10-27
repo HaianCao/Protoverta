@@ -465,6 +465,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 payload = decode_json(self.rfile.read(length))
                 if not isinstance(payload, dict):
                     raise ConversionError("request body must be a JSON object")
+                response_request = copy.deepcopy(payload)
                 if target_url.path in ("/v1/messages/count_tokens", "/v1/responses/input_tokens"):
                     if target_url.query:
                         raise ConversionError("count endpoint query parameters are unsupported")
@@ -607,18 +608,10 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 mapped = namespace_map.restore(result) if namespace_map else copy.deepcopy(result)
                 if search_map is not None:
                     mapped = search_map.restore(mapped)
-                # Generated Responses snapshots must describe the requested
-                # format instead of incorrectly echoing plain-text defaults.
-                if protocol == Protocol.RESPONSES and "text" in payload:
-                    snapshot = mapped.get("response", mapped if "output" in mapped else None)
-                    if isinstance(snapshot, dict):
-                        snapshot["text"] = copy.deepcopy(payload["text"])
                 if protocol == Protocol.RESPONSES:
-                    snapshot = mapped.get("response", mapped if "output" in mapped else None)
-                    if isinstance(snapshot, dict):
-                        for option in ("top_p", "temperature"):
-                            if payload.get(option) is not None:
-                                snapshot[option] = payload[option]
+                    from .response_context import restore_request_context
+
+                    mapped = restore_request_context(mapped, response_request)
                 return mapped
 
             lease = None
@@ -644,7 +637,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 with response:
                     budget.remaining()
                     if streaming:
-                        transform = restore_response if protocol == Protocol.RESPONSES and (namespace_map or "text" in payload or any(payload.get(option) is not None for option in ("top_p", "temperature"))) else None
+                        transform = restore_response if protocol == Protocol.RESPONSES and protocol != config.upstream_protocol else None
                         self._stream(response, config.upstream_protocol, protocol, transform, tool_name_map.decode if tool_name_map is not None else None, budget, search_map.stream_delta if search_map is not None else None)
                         return
                     raw = bytearray()

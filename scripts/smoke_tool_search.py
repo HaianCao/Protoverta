@@ -27,7 +27,7 @@ LOOKUP = "fixture_lookup"
 VALUE = "LOCAL_SEARCH_FIXTURE_VALUE"
 
 
-def serve_mcp():
+def serve_mcp(*, verify_env=False):
     for line in sys.stdin:
         request = json.loads(line)
         if "id" not in request:
@@ -38,7 +38,8 @@ def serve_mcp():
         elif method == "tools/list":
             result = {"tools": [{"name": LOOKUP, "description": "Return a fixed synthetic test value; no I/O or side effects.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}, "annotations": {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False}}]}
         elif method == "tools/call" and request.get("params", {}).get("name") == LOOKUP:
-            result = {"content": [{"type": "text", "text": VALUE}], "isError": False}
+            env_ok = not verify_env or os.environ.get("PROTOVERTA_MCP_FIXTURE_TOKEN") == "local-mcp-env"
+            result = {"content": [{"type": "text", "text": VALUE if env_ok else "Fixture environment reference did not resolve"}], "isError": not env_ok}
         elif method == "resources/list":
             result = {"resources": []}
         elif method == "prompts/list":
@@ -119,6 +120,15 @@ def run(upstream, adapter_source=None, installed_adapter=False):
         catalog_path = root / "models.json"
         catalog_path.write_text(json.dumps({"models": [model]}), encoding="utf-8")
         options = {"model_catalog_json": str(catalog_path), "mcp_servers.fixture.command": sys.executable, "mcp_servers.fixture.args": [str(Path(__file__).resolve()), "--mcp"], "mcp_servers.fixture.required": True, "features.multi_agent": False, "features.daemon_auto_start": False, "features.apps": False, "features.plugins": False}
+        if adapter_source is not None or installed_adapter:
+            # Exercise the wrapper's session-scoped integration, not only raw
+            # Codex -c options. The catalog belongs only to this fixture model.
+            mcp_path = root / "mcp.json"
+            mcp_path.write_text(json.dumps({"mcpServers": {"fixture": {"command": sys.executable, "args": [str(Path(__file__).resolve()), "--mcp", "--mcp-verify-env"], "env_vars": ["PYTHONPATH", "PROTOVERTA_MCP_FIXTURE_TOKEN"]}}}), encoding="utf-8")
+            env.update(CODEX_CA_MCP_CONFIG=str(mcp_path), CODEX_CA_MODEL_CATALOG=str(catalog_path))
+            env["PROTOVERTA_MCP_FIXTURE_TOKEN"] = "local-mcp-env"
+            env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1] / "src")
+            options = {key: value for key, value in options.items() if not key.startswith("mcp_servers.") and key != "model_catalog_json"}
 
         def open_upstream(request, *, timeout):
             nonlocal rounds
@@ -175,13 +185,14 @@ def run(upstream, adapter_source=None, installed_adapter=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mcp", action="store_true")
+    parser.add_argument("--mcp-verify-env", action="store_true")
     parser.add_argument("--upstream", type=Protocol, choices=list(Protocol), default=Protocol.CHAT)
     adapter = parser.add_mutually_exclusive_group()
     adapter.add_argument("--adapter-source", type=Path)
     adapter.add_argument("--installed-adapter", action="store_true")
     args = parser.parse_args()
     if args.mcp:
-        serve_mcp()
+        serve_mcp(verify_env=args.mcp_verify_env)
         return 0
     result = run(args.upstream, args.adapter_source, args.installed_adapter)
     print(json.dumps(result, indent=2))

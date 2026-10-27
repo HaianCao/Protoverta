@@ -93,9 +93,20 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
                     page.locator("#baseUrl").fill("https://example.invalid/v1")
                     if codex:
                         page.locator("#providerProtocol").select_option("chat_completions")
+                        assert page.locator("#upstreamReasoning").input_value() == "auto"
+                        expect(page.locator("#publicReasoning")).to_be_hidden()
+                        page.locator("#reasoningSettings summary").click()
+                        page.locator("#upstreamReasoning").select_option("provider_default")
+                        expect(page.locator("#publicReasoning")).to_be_visible()
+                        page.locator("#publicReasoning").check()
+                        expect(page.locator("#publicReasoning")).to_be_checked()
+                        page.locator("#publicReasoning").uncheck()
+                        page.locator("#upstreamReasoning").select_option("auto")
+                        expect(page.locator("#publicReasoning")).to_be_hidden()
                         page.locator("#useGateway").check()
                     else:
                         page.locator("#protocol").select_option("chat")
+                        assert page.locator("#upstreamReasoning").input_value() == "auto"
                         assert page.locator("#executionMode").input_value() == "gateway"
                     page.locator("#apiKey").fill("synthetic-browser-key")
                     page.locator("#gatewayRuntimeFields").evaluate("(el) => el.closest('details').open = true")
@@ -104,6 +115,11 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
                         page.locator("#saveProvider" if codex else "#providerForm button[type=submit]").click()
                     assert saved.value.ok
                     expect(page.locator(select + " option")).to_have_count(1)
+                    if codex:
+                        expect(page.locator("#reasoning")).to_be_enabled()
+                    else:
+                        expect(page.locator("#effort")).to_be_disabled()
+                        expect(page.locator("#effortHint")).to_contain_text("not applied")
                     assert page.locator(select + " option").inner_text() == "Fixture <b>Provider</b>"
                     assert page.locator(select + " b").count() == 0
                     model = "#modelInput" if codex else "#model"

@@ -66,7 +66,11 @@ def test_gateway_namespace_round_trip_and_request_isolation(protocol, stream, co
                 assert events[-1]["type"] == "response.completed"
                 items = [event["item"] for event in events if "item" in event] + events[-1]["response"]["output"]
             else:
-                items = json.loads(wire)["output"]
+                result = json.loads(wire)
+                assert result["tools"] == body["tools"]
+                assert result["tool_choice"] == body["tool_choice"]
+                assert result["max_output_tokens"] == 64
+                items = result["output"]
             calls = [item for item in items if item["type"] == "function_call"]
             assert calls
             assert all((item["namespace"], item["name"], item["call_id"]) == (namespace, "lookup", "call_1") for item in calls)
@@ -107,6 +111,7 @@ def test_gateway_structured_format_reaches_upstream_and_response_snapshots(proto
         if stream:
             snapshots = [json.loads(event.data)["response"] for event in SSEParser().feed(wire) if "response" in json.loads(event.data)]
             assert snapshots and all(snapshot["text"]["format"] == format_value for snapshot in snapshots)
+            assert all(snapshot["max_output_tokens"] == 64 for snapshot in snapshots)
             assert snapshots[-1]["status"] == "completed"
         else:
             assert json.loads(wire)["text"]["format"] == format_value

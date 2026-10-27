@@ -110,7 +110,10 @@ def run_smoke(
     timeout: int = 45,
     model: str | None = None,
     upstream_reasoning: str = "provider_default",
+    mcp_fixture: bool = False,
 ) -> dict:
+    if mcp_fixture and (client != "claude" or not tool_loop or not (adapter_source or installed_adapter)):
+        raise ValueError("MCP fixture requires Claude, --tool-loop and an adapter")
     executable = shutil.which(client)
     if not executable:
         raise RuntimeError(f"{client} is not on PATH")
@@ -135,13 +138,15 @@ def run_smoke(
                 tool.get("name") or tool.get("function", {}).get("name")
                 for tool in body.get("tools", [])
             }
+            if mcp_fixture:
+                name = next((value for value in available if value and "fixture_lookup" in value), "missing-mcp-fixture")
             if name not in available:
                 raise RuntimeError(
                     f"Smoke tool {name} is absent from the client request"
                 )
             arguments = (
                 "{}"
-                if client == "codex"
+                if client == "codex" or mcp_fixture
                 else json.dumps({"file_path": str(task_root / "fixture.txt")})
             )
             for index in range(2):
@@ -168,6 +173,8 @@ def run_smoke(
             )
         else:
             if tool_loop:
+                if mcp_fixture and "LOCAL_SEARCH_FIXTURE_VALUE" not in json.dumps(body):
+                    raise ValueError("Client did not replay a successful fixture MCP result")
                 if upstream == Protocol.RESPONSES:
                     tool_result_count = sum(
                         item.get("type") == "function_call_output"
@@ -231,6 +238,17 @@ def run_smoke(
         )
         (task_root / "codex").mkdir()
         (task_root / "claude").mkdir()
+        if mcp_fixture:
+            mcp_path = task_root / "mcp.json"
+            # Windows names are case-insensitive even after env was copied to
+            # a plain dict by the wrapper; exercise the actual MCP expansion.
+            token_name = "PROTOVERTA_MCP_FIXTURE_TOKEN"
+            if os.name == "nt":
+                token_name = token_name.lower()
+            mcp_path.write_text(json.dumps({"mcpServers": {"fixture": {"command": sys.executable, "args": [str(Path(__file__).with_name("smoke_tool_search.py")), "--mcp", "--mcp-verify-env"], "env_vars": ["PYTHONPATH", token_name]}}}), encoding="utf-8")
+            env["CLAUDE_CA_MCP_CONFIG"] = str(mcp_path)
+            env["PROTOVERTA_MCP_FIXTURE_TOKEN"] = "local-mcp-env"
+            env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1] / "src")
         (task_root / "fixture.txt").write_text(
             "Protoverta local tool fixture.\n", encoding="utf-8"
         )
@@ -241,6 +259,11 @@ def run_smoke(
                 side_effect=inspect_conversion,
             ),
         ):
+            reasoning_policy, public_reasoning = upstream_reasoning, False
+            if reasoning_policy == "auto":
+                from protoverta.automatic_reasoning import automatic_reasoning
+
+                reasoning_policy, public_reasoning = automatic_reasoning("responses" if client == "codex" else "messages", upstream, upstream_origin + "/v1")
             config = GatewayConfig(
                 upstream,
                 upstream_origin + "/v1",
@@ -248,7 +271,8 @@ def run_smoke(
                 "smoke-local-token",
                 client_profile="codex" if client == "codex" else "claude",
                 default_max_output_tokens=4096,
-                upstream_reasoning=upstream_reasoning,
+                upstream_reasoning=reasoning_policy,
+                public_reasoning=public_reasoning,
                 messages_usage_policy="deferred"
                 if client == "claude" and upstream != Protocol.MESSAGES
                 else "strict",
@@ -268,6 +292,8 @@ def run_smoke(
                     upstream,
                     timeout,
                     model,
+                    mcp_tool_name="mcp__fixture__fixture_lookup" if mcp_fixture else None,
+                    adapter_reasoning_policy="auto" if upstream_reasoning == "auto" else None,
                 )
         return {
             "client": client,
@@ -307,6 +333,8 @@ def run_client(
     provider_id: str = "smoke",
     trace_file: Path | None = None,
     codex_config: dict | None = None,
+    mcp_tool_name: str | None = None,
+    adapter_reasoning_policy: str | None = None,
 ):
     if client == "codex":
         settings = {
@@ -374,7 +402,7 @@ def run_client(
             "--tools",
             "Read" if tool_loop else "",
             "--allowedTools",
-            "Read",
+            mcp_tool_name or "Read",
             "--no-session-persistence",
             "--system-prompt",
             "This is a local protocol smoke test.",
@@ -383,6 +411,7 @@ def run_client(
             prompt or "Reply with PROTOVERTA_SMOKE_OK.",
         ]
     if adapter_source is not None or installed_adapter:
+        adapter_policy = adapter_reasoning_policy or config.upstream_reasoning
         config_path = Path(directory) / "adapter.toml"
         if adapter_source is not None:
             env["PYTHONPATH"] = os.pathsep.join(
@@ -399,7 +428,7 @@ def run_client(
                 Protocol.RESPONSES: "responses",
             }[upstream]
             config_path.write_text(
-                f'schema_version = 1\n[providers.smoke]\ndisplay_name = "Smoke"\nbase_url = "{upstream_origin}/v1"\nprotocol = "{protocol}"\nexecution_mode = "gateway"\nupstream_reasoning = "{config.upstream_reasoning}"\npublic_reasoning = {str(config.public_reasoning).lower()}\nclient_tool_search = "{config.client_tool_search}"\nauth_secret_ref = "smoke-main"\n[secrets.smoke-main]\nbackend = "environment"\nenv_var = "SMOKE_TOKEN"\n',
+                f'schema_version = 1\n[providers.smoke]\ndisplay_name = "Smoke"\nbase_url = "{upstream_origin}/v1"\nprotocol = "{protocol}"\nexecution_mode = "gateway"\nupstream_reasoning = "{adapter_policy}"\npublic_reasoning = {str(config.public_reasoning and adapter_policy != "auto").lower()}\nclient_tool_search = "{config.client_tool_search}"\nauth_secret_ref = "smoke-main"\n[secrets.smoke-main]\nbackend = "environment"\nenv_var = "SMOKE_TOKEN"\n',
                 encoding="utf-8",
             )
             options = [
@@ -434,7 +463,7 @@ def run_client(
                 else upstream_origin + "/v1"
             )
             config_path.write_text(
-                f'schema_version = 1\n[[providers]]\nid = "smoke"\ndisplay_name = "Smoke"\nbase_url = "{base}"\nprotocol = "{upstream.value}"\nexecution_mode = "gateway"\nupstream_reasoning = "{config.upstream_reasoning}"\n',
+                f'schema_version = 1\n[[providers]]\nid = "smoke"\ndisplay_name = "Smoke"\nbase_url = "{base}"\nprotocol = "{upstream.value}"\nexecution_mode = "gateway"\nupstream_reasoning = "{adapter_policy}"\n',
                 encoding="utf-8",
             )
             env["CLAUDE_CA_CONFIG"] = str(config_path)
@@ -522,7 +551,8 @@ def run_client(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--client", choices=["codex", "claude"], required=True)
-    parser.add_argument("--upstream-reasoning", choices=["provider_default", "disabled", "openrouter_disabled"], default="provider_default")
+    parser.add_argument("--upstream-reasoning", choices=["auto", "provider_default", "disabled", "openrouter_disabled"], default="provider_default")
+    parser.add_argument("--mcp-fixture", action="store_true", help="Claude adapter: execute the fixed read-only MCP tool")
     parser.add_argument(
         "--upstream", type=Protocol, choices=list(Protocol), required=True
     )
@@ -555,6 +585,7 @@ def main() -> int:
         installed_adapter=args.installed_adapter,
         model=args.model,
         upstream_reasoning=args.upstream_reasoning,
+        mcp_fixture=args.mcp_fixture,
     )
     print(json.dumps(result, indent=2))
     return 0 if result["passed"] else 1

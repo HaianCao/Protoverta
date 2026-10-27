@@ -1,4 +1,4 @@
-"""Check a6 -> next-wheel compatibility in a fresh temporary Python environment."""
+"""Check a previous local wheel -> current build in a fresh temporary environment."""
 
 from __future__ import annotations
 
@@ -8,6 +8,8 @@ import subprocess
 import tempfile
 import tomllib
 import venv
+import zipfile
+from email.parser import BytesParser
 from pathlib import Path
 
 FIXTURE = '''
@@ -41,12 +43,27 @@ print(stage+': legacy config/key bytes unchanged; runtime compatibility PASS')
 '''
 
 
+def wheel_version(path):
+    with zipfile.ZipFile(path) as archive:
+        names = [item for item in archive.infolist() if item.filename.endswith(".dist-info/METADATA")]
+        if len(names) != 1 or names[0].file_size > 65536:
+            raise ValueError("Wheel must have one bounded package METADATA file")
+        metadata = BytesParser().parsebytes(archive.read(names[0]))
+    version = metadata.get("Version")
+    if metadata.get("Name") != "protoverta" or not version or any(char.isspace() for char in version):
+        raise ValueError("Expected Protoverta wheel metadata with an explicit version")
+    return version
+
+
 def validate(previous, next_wheel, codex, claude):
     for wheel in (previous, next_wheel, codex, claude):
         if not wheel.is_file() or wheel.suffix != ".whl":
             raise ValueError("Expected local wheel: " + str(wheel))
     core = Path(__file__).resolve().parents[1]
     version = tomllib.loads((core / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    previous_version = wheel_version(previous)
+    if wheel_version(next_wheel) != version:
+        raise ValueError("Next wheel version does not match this checkout")
     env = {key: value for key, value in os.environ.items() if key.upper() in {"PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP"}}
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     with tempfile.TemporaryDirectory(prefix="protoverta-upgrade-check-") as directory:
@@ -60,7 +77,7 @@ def validate(previous, next_wheel, codex, claude):
             subprocess.run([str(python), *map(str, args)], cwd=root, env=env, check=True, timeout=180)
 
         command("-m", "pip", "install", "--no-deps", "--disable-pip-version-check", previous.resolve(), codex.resolve(), claude.resolve())
-        command("-B", "-c", FIXTURE, root, "legacy", "0.3.0a6")
+        command("-B", "-c", FIXTURE, root, "legacy", previous_version)
         command("-m", "pip", "install", "--no-deps", "--disable-pip-version-check", "--force-reinstall", next_wheel.resolve())
         command("-B", "-c", FIXTURE, root, "upgraded", version)
 

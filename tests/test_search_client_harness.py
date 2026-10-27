@@ -1,4 +1,5 @@
 import importlib
+import io
 import json
 import subprocess
 import sys
@@ -86,3 +87,18 @@ def test_fixture_mcp_lists_and_calls_only_fixed_read_only_tool(harness):
     assert responses[1]["result"]["tools"][0]["annotations"]["readOnlyHint"] is True
     assert responses[2]["result"] == {"content": [{"type": "text", "text": harness.VALUE}], "isError": False}
     assert responses[3]["error"]["code"] == -32601
+
+
+@pytest.mark.parametrize("configured", [False, True])
+def test_mcp_fixture_can_require_real_environment_expansion(harness, monkeypatch, configured):
+    if configured:
+        monkeypatch.setenv("PROTOVERTA_MCP_FIXTURE_TOKEN", "local-mcp-env")
+    else:
+        monkeypatch.delenv("PROTOVERTA_MCP_FIXTURE_TOKEN", raising=False)
+    output = io.StringIO()
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"id": 1, "method": "tools/call", "params": {"name": harness.LOOKUP}}) + "\n"))
+    monkeypatch.setattr(sys, "stdout", output)
+    harness.serve_mcp(verify_env=True)
+    result = json.loads(output.getvalue())["result"]
+    assert result["isError"] is (not configured)
+    assert (result["content"][0]["text"] == harness.VALUE) is configured

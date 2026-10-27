@@ -983,6 +983,13 @@ def _encode_result(result: Result, target: Protocol) -> dict[str, Any]:
     output.extend({"id": ("ct_" if p.tool_type == "custom" else "fc_") + secrets.token_hex(12), **_encode_response_call(p), "status": "completed"} for p in calls)
     out = {"id": "resp_" + secrets.token_hex(12), "created_at": int(time.time()), "object": "response", "model": result.model, "status": "incomplete" if result.finish_reason == "length" else "completed", "output": output, "parallel_tool_calls": len(calls) > 1, "error": None, "incomplete_details": {"reason": "max_output_tokens"} if result.finish_reason == "length" else None}
     out.update(tools=[], tool_choice="auto")
+    # Facts about this newly generated, non-persisted Responses envelope.
+    # Request context can restore actual instructions/limits at the gateway;
+    # provider sampling defaults and token details must remain unknown.
+    out.update(completed_at=int(time.time()) if out["status"] == "completed" else None,
+               previous_response_id=None, instructions=None, max_output_tokens=None,
+               max_tool_calls=None, reasoning=None, store=False, background=False,
+               safety_identifier=None, prompt_cache_key=None)
     if result.input_tokens is not None and result.output_tokens is not None:
         out["usage"] = _encode_usage(result, target)
     return out

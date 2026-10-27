@@ -1,7 +1,7 @@
 # Chạy thử bản mới mà không thay thế bản đang dùng
 
 Hướng dẫn dành cho Windows, dùng PowerShell 5.1 hoặc PowerShell 7. Bạn sẽ build
-ba dự án và cài vào **venv riêng trong thư mục tạm**, không cài đè wrapper hiện
+ba dự án và cài vào **venv riêng trong thư mục preview**, không cài đè wrapper hiện
 tại, không cần activate venv và không thêm PATH.
 
 Hai launcher phải ở nhánh **integration/protoverta**; bản main ổn định của chúng
@@ -65,8 +65,16 @@ PATH; vì vậy không bắt buộc cài thêm py khi Python phù hợp đã có
 
 ## 2. Build và cài ba wheel vào venv riêng
 
+Phần tool, reasoning và cấu hình MCP riêng từng lần chạy được giải thích trong
+[harness-tools.md](harness-tools.md). Không cần MCP để kiểm tra chuyển giao thức.
+
 ~~~powershell
-$previewRoot = Join-Path $env:TEMP ("protoverta-preview-" + [guid]::NewGuid().ToString("N"))
+$previewBase = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'ProtovertaPreviews'
+$previewRoot = Join-Path $previewBase ([guid]::NewGuid().ToString('N'))
+$tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+if (($previewRoot.TrimEnd('\') + '\').StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Preview phải nằm ngoài TEMP để Codex tạo được helper. Chọn thư mục preview riêng ngoài TEMP.'
+}
 New-Item -ItemType Directory -Path $previewRoot -ErrorAction Stop | Out-Null
 & $pythonExe @pythonArgs -m venv "$previewRoot\venv"
 if ($LASTEXITCODE -ne 0) { throw "Không tạo được venv preview" }
@@ -89,6 +97,10 @@ Write-Host "Thư mục preview: $previewRoot"
 ~~~
 
 Tải công cụ build có thể cần Internet. Ba wheel của dự án lấy từ source local.
+Không đặt `CODEX_HOME` dưới TEMP: Codex có thể từ chối tạo PATH alias/helper
+ở đó. Thư mục mới trên nằm dưới `LocalApplicationData\ProtovertaPreviews`,
+không thay đổi bản cài hay config thật. Preview cũ trong TEMP vẫn giữ nguyên;
+hãy tạo preview mới nếu cần kiểm tra helper, thay vì di chuyển session đang mở.
 **Luôn gọi executable bằng đường dẫn trong $previewRoot\venv\Scripts**; gõ riêng
 codex-ca hoặc claude-ca có thể chạy bản cũ trên PATH. Khi sửa code sau bước này,
 cần build/cài lại wheel preview để thử đúng code mới.
