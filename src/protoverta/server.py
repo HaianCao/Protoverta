@@ -151,8 +151,12 @@ class GatewayConfig:
         validate_openrouter(self)
         if self.shared_token_limit is not None and (type(self.shared_token_limit) is not int or not 0 < self.shared_token_limit <= 2**63 - 1 or self.shared_admission_db is None or not callable(self.token_counter)):
             raise ValueError("shared_token_limit requires a positive limit, dedicated shared database and exact operator token counter")
+        if not isinstance(self.upstream_base_url, str) or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in self.upstream_base_url):
+            raise ValueError("upstream_base_url must be text without whitespace or control characters")
         parsed = urlsplit(self.upstream_base_url)
-        _ = parsed.port
+        port = parsed.port
+        if port is not None and port < 1:
+            raise ValueError("upstream_base_url port must be between 1 and 65535")
         local_http = parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost", "::1"}
         if (parsed.scheme != "https" and not local_http) or not parsed.hostname or parsed.username is not None or parsed.password is not None or parsed.query or parsed.fragment or any(char.isspace() for char in self.upstream_base_url):
             raise ValueError("upstream_base_url must be HTTPS (HTTP is allowed only for loopback), without credentials, query or fragment")

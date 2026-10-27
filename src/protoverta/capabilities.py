@@ -77,10 +77,12 @@ def _policy_key(policies):
 
 
 def _prefix(value: str) -> str:
-    if not isinstance(value, str) or any(char.isspace() for char in value):
+    if not isinstance(value, str) or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in value):
         raise ValueError("capability base_url must be an API prefix")
     parsed = urlsplit(value)
-    _ = parsed.port
+    port = parsed.port
+    if port is not None and port < 1:
+        raise ValueError("capability base_url port must be between 1 and 65535")
     local = parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost", "::1"}
     if not parsed.hostname or (parsed.scheme != "https" and not local) or parsed.username is not None or parsed.password is not None or parsed.query or parsed.fragment:
         raise ValueError("capability base_url requires HTTPS or loopback HTTP, without credentials/query/fragment")
