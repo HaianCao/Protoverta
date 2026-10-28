@@ -78,6 +78,10 @@ tool does not impose a percentage threshold or a runtime dependency.
 
 ## Resource and installer checks
 
+For a duration-enforced run and outstanding live acceptance gates, see
+[operational acceptance](operational-acceptance.md). The bounded command below
+may stop at its request cap; it is not evidence of a multi-hour soak.
+
 ```text
 pip install -e ".[soak-test]"
 python scripts/soak_local.py --seconds 300 --requests 15000 --concurrency 8 --measure-resources

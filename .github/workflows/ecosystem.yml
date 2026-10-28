@@ -13,6 +13,12 @@ on:
         description: ClaudApter commit SHA to test
         required: true
         type: string
+      soak_seconds:
+        description: Local sustained soak duration (seconds; no provider requests)
+        required: true
+        default: '300'
+        type: choice
+        options: ['300', '7200']
 
 permissions:
   contents: read
@@ -20,7 +26,7 @@ permissions:
 jobs:
   integration:
     runs-on: windows-latest
-    timeout-minutes: 35
+    timeout-minutes: ${{ inputs.soak_seconds == '7200' && 210 || 75 }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -98,12 +104,19 @@ jobs:
           $wheel = (Get-ChildItem validation/dist/protoverta/*.whl).FullName
           python protoverta/scripts/smoke_windows_install.py --wheel $wheel
           if ($LASTEXITCODE) { throw 'Isolated installer lifecycle failed' }
-      - name: Measured 5-minute loopback soak and source identity
+      - name: Measured sustained loopback soak and source identity
         shell: pwsh
+        env:
+          SOAK_SECONDS: ${{ inputs.soak_seconds }}
         run: |
+          $duration = [int]$env:SOAK_SECONDS
+          if ($duration -notin @(300, 7200)) { throw 'Unsupported soak duration' }
+          $workers = 4
+          $interval = '0.2'
+          if ($duration -eq 7200) { $workers = 2; $interval = '1' }
           & .\validation\installed\Scripts\python.exe protoverta/scripts/compatibility_snapshot.py --output validation/compatibility-snapshot.json
           if ($LASTEXITCODE) { throw 'Source identity snapshot failed' }
-          & .\validation\installed\Scripts\python.exe protoverta/scripts/soak_local.py --seconds 300 --requests 15000 --concurrency 8 --installed --measure-resources | Tee-Object -FilePath validation/soak.json
+          & .\validation\installed\Scripts\python.exe protoverta/scripts/soak_local.py --sustained --seconds $duration --requests 15000 --concurrency $workers --interval $interval --installed --measure-resources --report validation/soak.json
           if ($LASTEXITCODE) { throw 'Measured installed soak failed' }
       - name: Upgrade from the immutable public a6 wheel
         shell: pwsh

@@ -17,12 +17,13 @@ from urllib.request import Request, urlopen
 from test_environment import sanitized_environment
 
 
-def run_soak(*, seconds=60, requests=5000, concurrency=4, interval=0.02, measure_resources=False):
+def run_soak(*, seconds=60, requests=5000, concurrency=4, interval=0.02, measure_resources=False, sustained=False, progress=None):
     from protoverta.server import GatewayConfig, GatewayHTTPServer, make_handler
     from protoverta.sse import SSEParser, encode_sse
 
-    if not 1 <= seconds <= 600 or type(requests) is not int or not 1 <= requests <= 15000 or type(concurrency) is not int or not 1 <= concurrency <= 16 or not 0.01 <= interval <= 1:
-        raise ValueError("soak limits: 1-600 seconds, 1-15000 requests, 1-16 workers, 0.01-1 second interval")
+    max_seconds, max_requests = (14400, 100000) if sustained else (600, 15000)
+    if not 1 <= seconds <= max_seconds or type(requests) is not int or not 1 <= requests <= max_requests or type(concurrency) is not int or not 1 <= concurrency <= 16 or not 0.01 <= interval <= 1:
+        raise ValueError(f"soak limits: 1-{max_seconds} seconds, 1-{max_requests} requests, 1-16 workers, 0.01-1 second interval")
     from resource_monitor import ResourceMonitor
 
     warmup = None
@@ -45,6 +46,22 @@ def run_soak(*, seconds=60, requests=5000, concurrency=4, interval=0.02, measure
     opened = closed = active = peak = issued = 0
     started = time.monotonic()
     deadline = started + seconds
+    last_progress = started - 30
+    workload_seconds = 0
+    duration_reached = False
+
+    def heartbeat():
+        nonlocal last_progress
+        if progress is None:
+            return
+        with lock:
+            now = time.monotonic()
+            if now - last_progress < 30:
+                return
+            last_progress = now
+            record = {"event": "soak_progress", "elapsed_seconds": round(now - started, 3),
+                      "issued": issued, "active": active, "failures": counts["failed_clients"]}
+        progress(record)
 
     def upstream(request, timeout):
         nonlocal opened, closed, active, peak
@@ -101,6 +118,7 @@ def run_soak(*, seconds=60, requests=5000, concurrency=4, interval=0.02, measure
             def worker():
                 nonlocal issued
                 while time.monotonic() < deadline:
+                    heartbeat()
                     with lock:
                         if issued >= requests:
                             return
@@ -132,21 +150,24 @@ def run_soak(*, seconds=60, requests=5000, concurrency=4, interval=0.02, measure
                                     assert all(item.event not in ("response.completed", "message_stop") for item in events)
                                 else:
                                     assert events[-1].event == ("response.completed" if protocol == "responses" else "message_stop")
-                                    assert ("reply_" + str(index)) in raw.decode()
+                                    assert json.dumps("reply_" + str(index)) in raw.decode()
                             else:
-                                assert ("reply_" + str(index)) in raw.decode()
+                                assert json.dumps("reply_" + str(index)) in raw.decode()
                             with lock:
                                 counts["verified_clients"] += 1
                     except Exception as exc:  # noqa: BLE001 -- bounded, shape-only failure report
                         if isinstance(exc, HTTPError):
                             exc.close()  # The load client owns rejected responses too.
                         with lock:
+                            counts["failed_clients"] += 1
                             if len(failures) < 10:
                                 failures.append(type(exc).__name__)
                     time.sleep(interval)
 
             with ThreadPoolExecutor(concurrency) as pool:
                 list(pool.map(lambda _: worker(), range(concurrency)))
+            workload_seconds = time.monotonic() - started
+            duration_reached = time.monotonic() >= deadline
         finally:
             for server in servers:
                 server.shutdown()
@@ -161,7 +182,9 @@ def run_soak(*, seconds=60, requests=5000, concurrency=4, interval=0.02, measure
     if resources is not None:
         resources["cold_baseline"] = cold_resources
         resources["baseline_kind"] = "after explicit 5-second same-workload warmup"
-    return {"passed": not failures and active == 0 and opened == closed and leaked == 0 and issued > 0 and (warmup is None or warmup["passed"]) and (resources is None or resources.get("available") and resources.get("policy_passed")),
+    return {"passed": not failures and active == 0 and opened == closed and leaked == 0 and issued > 0 and (not sustained or duration_reached) and (warmup is None or warmup["passed"]) and (resources is None or resources.get("available") and resources.get("policy_passed")),
+            "mode": "sustained" if sustained else "bounded", "duration_requested_seconds": seconds,
+            "duration_reached": duration_reached, "workload_seconds": round(workload_seconds, 3),
             "seconds": round(time.monotonic() - started, 3), "issued": issued, "opened": opened, "closed": closed,
             "active_after": active, "peak_active": peak, "lifetime_threads_after": leaked,
             "counts": dict(counts), "failure_types": failures, "local_fixtures_only": True, "resources": resources, "warmup": warmup}
@@ -175,6 +198,8 @@ def main():
     parser.add_argument("--interval", type=float, default=0.02)
     parser.add_argument("--installed", action="store_true")
     parser.add_argument("--measure-resources", action="store_true", help="Requires soak-test extra; fail if process metrics are unavailable or bounded resource policy fails")
+    parser.add_argument("--sustained", action="store_true", help="Allow up to four hours; FAIL if request budget ends before requested duration")
+    parser.add_argument("--report", type=Path, help="Write final JSON report (nonzero exit still means failure)")
     args = parser.parse_args()
     import os
 
@@ -183,7 +208,10 @@ def main():
     os.environ.update(safe)
     if not args.installed:
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-    result = run_soak(seconds=args.seconds, requests=args.requests, concurrency=args.concurrency, interval=args.interval, measure_resources=args.measure_resources)
+    progress = (lambda record: print(json.dumps(record), file=sys.stderr, flush=True)) if args.sustained else None
+    result = run_soak(seconds=args.seconds, requests=args.requests, concurrency=args.concurrency, interval=args.interval, measure_resources=args.measure_resources, sustained=args.sustained, progress=progress)
+    if args.report:
+        args.report.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(result))
     return 0 if result["passed"] else 1
 
