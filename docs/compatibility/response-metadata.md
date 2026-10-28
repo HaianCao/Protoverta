@@ -55,6 +55,15 @@ Responses schema must supply known request metadata or use native Responses.
 Other schema/usage gaps remain separately tracked; no missing usage subtotal,
 sampling default, reasoning signature or service tier is invented.
 
+Within explicitly supplied function tools, omitted `description`, `parameters`
+and `strict` are projected as nullable unknown values in response metadata.
+Explicit `""`, `{}` and `false` are preserved. This normalization changes only
+the copied response snapshot, not the original or upstream request, and does not
+enable strict tool execution. Generated SSE also includes the same nullable
+`max_tool_calls`, `safety_identifier` and `prompt_cache_key` envelope as JSON.
+These additions do not establish full OpenResponses conformance; see the
+[independent schema audit](../development/openresponses-audit.md).
+
 The pinned strict SDK gate uses explicit policy in its positive Responses
 fixtures. Separate negative cases verify that omitted policy is rejected at
 `response.created`; that failure is not presented as successful compatibility.

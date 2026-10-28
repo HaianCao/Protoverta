@@ -193,6 +193,7 @@ class StreamEncoder:
             "created_at": self.created, "completed_at": int(time.time()) if status == "completed" else None,
             "status": status, "error": None, "incomplete_details": incomplete_details,
             "instructions": None, "max_output_tokens": None, "model": self.model,
+            "max_tool_calls": None, "safety_identifier": None, "prompt_cache_key": None,
             "output": self.output.copy() if status != "in_progress" else [],
             "previous_response_id": None,
             "reasoning": {"effort": None, "summary": None}, "store": False,

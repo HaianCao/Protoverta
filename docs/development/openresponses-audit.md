@@ -33,7 +33,49 @@ cases fail. The runner is trusted test tooling: a source revision check does not
 prove that an arbitrary operator-supplied bundle was built from that source.
 Keep its hash with the test record. No foreign source/validator is vendored.
 
-## Observed result, 2026-10-25
+## Latest result, 2026-10-28
+
+After the K1 request-policy correction and the K2 nullable metadata fixes, the
+same pinned suite still reports **0 passed, 12 failed, 0 skipped**. The audit
+process exits **1**, with `summary.outcome=FAILED_FULL_SCHEMA`. This is a partial
+improvement, not full-schema acceptance. All six selected cases run on each of
+the two synthetic upstreams; missing, duplicate, skipped or unknown case statuses
+are rejected. Reports now group field errors so that progress cannot be confused
+with a passing verdict.
+
+Safe corrections made in K2:
+
+- SSE includes nullable `max_tool_calls`, `safety_identifier` and
+  `prompt_cache_key`, matching the generated JSON envelope.
+- Explicit function-tool metadata includes `description`, `parameters` and
+  `strict` as null when omitted. Explicit empty strings/objects and false remain
+  unchanged; input requests are not mutated.
+- The synthetic Chat SSE fixture now carries the same explicitly declared zero
+  reasoning-token measurement as its JSON fixture. Messages cannot carry that
+  subtotal, so its converted usage still leaves it unknown. This fixture change
+  is not provider evidence.
+
+These remove the two `tools.0.strict` findings and six nullable-envelope findings.
+The fixture correction reduces usage findings from seven to six. Remaining
+findings (counts across the twelve selected cases) are: tools/text/truncation
+10 each; tool_choice/parallel_tool_calls/temperature/top_p/service_tier 12 each;
+presence_penalty/frequency_penalty/top_logprobs 12 each; usage 6.
+
+The suite omits several request metadata fields that K1 deliberately refuses to
+guess. Sampling defaults and serving tier require evidence from the upstream;
+Messages lacks the reasoning usage breakdown this schema requires. Penalty and
+logprob controls are outside the current portable request subset. A real
+full-schema solution therefore needs supported explicit controls and measured
+provider facts, or a separately specified contract for unavailable data. It
+cannot be achieved by silently substituting zero/default/empty values or
+discarding known usage totals as null. Native Responses is the option when the
+upstream supplies its own complete contract.
+
+Evidence report: `%TEMP%/protoverta-k2-final-rgjvtnd6/audit.json`. The pinned
+validator and test cases were not changed. SDK/semantic acceptance remains a
+separate gate; it cannot override this full-schema failure.
+
+## Historical result, 2026-10-25
 
 **12/12 selected checks fail the full required response schema**, on synthetic
 Chat and Messages routes. JSON output is missing required snapshot fields such as

@@ -49,7 +49,8 @@ def test_completed_response_uses_only_explicit_request_context(source, parallel)
     before = copy.deepcopy(original)
     body = convert_response(chat_result(1), "chat", source)
     output = convert_response(body, source, "responses", request_context=original)
-    assert {field: output[field] for field in POLICY_FIELDS} == original
+    expected = {**original, "tools": [{**original["tools"][0], "description": None, "strict": None}]}
+    assert {field: output[field] for field in POLICY_FIELDS} == expected
     output["tools"].clear()
     assert original == before
 

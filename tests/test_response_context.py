@@ -10,7 +10,7 @@ def test_snapshot_context_does_not_infer_usage_defaults_or_mutate_input():
                "tool_choice": {"type": "function", "name": "lookup"}, "max_output_tokens": 64}
     output = restore_request_context(result, request)
     assert output["parallel_tool_calls"] is True
-    assert output["tools"] == request["tools"]
+    assert output["tools"] == [{**request["tools"][0], "description": None, "parameters": None, "strict": None}]
     assert output["tool_choice"] == request["tool_choice"]
     assert output["store"] is False and output["background"] is False
     assert output["previous_response_id"] is None

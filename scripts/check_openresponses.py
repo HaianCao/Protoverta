@@ -11,6 +11,7 @@ import json
 import subprocess
 import sys
 import threading
+from collections import Counter
 from pathlib import Path
 
 from test_environment import sanitized_environment
@@ -36,11 +37,43 @@ def fixture(protocol):
             reason = "tool_calls"
         if body.get("stream"):
             encoder = StreamEncoder(protocol)
-            deltas = [Delta("start", model="fixture-model", input_tokens=19, output_tokens=0), Delta("text", index=0, text="Hello synthetic world"), Delta("finish", reason="stop", input_tokens=19, output_tokens=7, cached_input_tokens=0, cache_creation_input_tokens=0)]
+            # Match the explicit synthetic measurement in the JSON fixture.
+            # Messages cannot carry a reasoning subtotal; its receiver still
+            # reports that field as unknown rather than manufacturing zero.
+            deltas = [Delta("start", model="fixture-model", input_tokens=19, output_tokens=0), Delta("text", index=0, text="Hello synthetic world"), Delta("finish", reason="stop", input_tokens=19, output_tokens=7, cached_input_tokens=0, cache_creation_input_tokens=0, reasoning_output_tokens=usage["completion_tokens_details"]["reasoning_tokens"])]
             return io.BytesIO(b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta)))
         result = {"model": "fixture-model", "choices": [{"message": message, "finish_reason": reason}], "usage": usage}
         return io.BytesIO(json.dumps(convert_response(result, "chat", protocol)).encode())
     return upstream
+
+
+def summarize(reports):
+    counts = Counter(item["status"] for report in reports for item in report["results"])
+    total = sum(counts.values())
+    passed = len(reports) == 2 and {report["upstream"] for report in reports} == {"chat", "messages"} and total == 2 * len(CASES) and counts["passed"] == total and all(report["exit_code"] == 0 for report in reports)
+    fields = Counter(error.split(":", 1)[0] for report in reports for item in report["results"] for error in item["errors"])
+    groups = {}
+    for field, count in sorted(fields.items()):
+        root = field.split(".", 1)[0]
+        if root in {"tools", "tool_choice", "parallel_tool_calls", "text", "temperature", "top_p"}:
+            group = "request_metadata_or_nullable_tool_fields"
+        elif root in {"usage", "service_tier"}:
+            group = "upstream_measurements_or_provider_facts"
+        elif root in {"presence_penalty", "frequency_penalty", "top_logprobs"}:
+            group = "controls_outside_portable_subset"
+        else:
+            group = "envelope_or_unclassified"
+        groups.setdefault(group, {})[field] = count
+    return {"outcome": "PASSED_FULL_SCHEMA" if passed else "FAILED_FULL_SCHEMA", "passed": counts["passed"], "failed": counts["failed"],
+            "skipped": counts["skipped"], "total": total, "field_groups": groups}
+
+
+def validate_cases(output):
+    results = output["results"]
+    if len(results) != len(CASES) or {item["id"] for item in results} != set(CASES) or output["summary"].get("skipped"):
+        raise ValueError("official suite returned missing, duplicate or skipped checks")
+    if any(item["status"] not in {"passed", "failed"} for item in results):
+        raise ValueError("official suite returned an unknown or skipped status")
 
 
 def run(suite, runner, *, installed=False):
@@ -64,14 +97,13 @@ def run(suite, runner, *, installed=False):
         try:
             result = subprocess.run(["node", str(runner), "--base-url", f"http://127.0.0.1:{server.server_port}/v1", "--api-key", "synthetic-local", "--model", "fixture-model", "--filter", ",".join(CASES), "--json"], env=env, capture_output=True, text=True, timeout=90, check=False)
             output = json.loads(result.stdout)
-            if {item["id"] for item in output["results"]} != set(CASES) or output["summary"].get("skipped"):
-                raise ValueError("official suite returned missing or skipped checks")
+            validate_cases(output)
             reports.append({"upstream": protocol, "exit_code": result.returncode, "summary": output["summary"], "results": [{"id": item["id"], "status": item["status"], "errors": item.get("errors", [])} for item in output["results"]]})
         finally:
             server.shutdown()
             server.server_close()
             worker.join(5)
-    return {"official_revision": PIN, "runner_sha256": hashlib.sha256(runner.read_bytes()).hexdigest(), "cases": CASES, "local_fixtures_only": True, "provider_certification": False, "reports": reports}
+    return {"official_revision": PIN, "runner_sha256": hashlib.sha256(runner.read_bytes()).hexdigest(), "cases": CASES, "local_fixtures_only": True, "provider_certification": False, "summary": summarize(reports), "reports": reports}
 
 
 def main():
@@ -86,7 +118,7 @@ def main():
     if args.report:
         args.report.write_text(raw + "\n", encoding="utf-8")
     print(raw)
-    return 0 if all(item["exit_code"] == 0 for item in report["reports"]) else 1
+    return 0 if report["summary"]["outcome"] == "PASSED_FULL_SCHEMA" else 1
 
 
 if __name__ == "__main__":

@@ -62,6 +62,12 @@ def restore_request_context(result: dict, request: dict) -> dict:
         for name in CONTEXT_FIELDS:
             if request.get(name) is not None:
                 snapshot[name] = copy.deepcopy(request[name])
+        for tool in snapshot.get("tools", []):
+            if isinstance(tool, dict) and tool.get("type") == "function":
+                # The response metadata schema permits unknown/unset values as
+                # null. Do not infer provider defaults (especially strictness).
+                for name in ("description", "parameters", "strict"):
+                    tool.setdefault(name, None)
         snapshot["store"] = False  # This gateway does not persist Responses.
         snapshot["background"] = False  # Request runs in this HTTP exchange.
         snapshot["previous_response_id"] = None  # Opaque references are rejected.
