@@ -24,7 +24,10 @@ contributors can still run it without provider SDK dependencies.
 
 The gate exercises all six translated directions through real loopback HTTP
 listeners with strict SDK response validation and retries disabled. Five routes
-have positive accumulation checks. Messages → Responses has explicit negative
+have positive accumulation checks. Positive Responses fixtures explicitly send
+tools, tool choice and parallel-call permission. Missing request policy is not
+filled with guesses: two additional strict SDK cases assert the missing-field
+failure at response.created. Messages → Responses has explicit negative
 schema checks for unknown reasoning usage, not a positive SDK compatibility claim.
 Provider transport is an injected fixture callback: no request reaches a vendor,
 no real key is needed, proxies are disabled on the SDK client, and fixture model
@@ -58,7 +61,7 @@ workflow definitions are not evidence that remote CI has run.
   translated Responses terminal snapshots fail the pinned OpenAI SDK's strict
   `output_tokens_details` requirement. Two SDK tests assert that exact schema
   failure (completed and incomplete), without disabling strict validation,
-  skipping tests or fabricating zero. The 19-test suite therefore includes
+  skipping tests or fabricating zero. The 21-test suite therefore includes
   negative compatibility evidence; it does not certify six successful SDK routes.
   Protocol-level text/tool conversion remains available, with this documented
   schema limitation. A full-schema consumer needs provider-reported measurements
@@ -89,6 +92,8 @@ workflow definitions are not evidence that remote CI has run.
 
 These local tests are independent-client evidence for the declared subset, not
 full schema validation, universal model compatibility or live certification.
+See [generated Responses metadata](../compatibility/response-metadata.md) for
+the standalone request-context API and the alpha metadata contract correction.
 Property tests are a separate pinned gate:
 `pip install -e ".[test,fuzz-test]"` then `python scripts/check_fuzz.py`.
 It runs 24 six-direction properties with 50 generated examples each, covering

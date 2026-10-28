@@ -64,6 +64,14 @@ def client_for(target, origin):
         yield client
 
 
+def response_policy():
+    # Positive SDK cases supply the request policy instead of relying on
+    # fabricated response defaults. Fixture tools match the emitted calls.
+    return {"parallel_tool_calls": True, "tool_choice": "auto", "tools": [
+        {"type": "function", "name": name, "parameters": {"type": "object", "properties": {}}, "strict": False}
+        for name in sorted({name for _, name, _ in CALLS})]}
+
+
 def consume(client, target):
     if target == "messages":
         with client.messages.stream(model=MODEL, max_tokens=32, messages=[{"role": "user", "content": "synthetic"}]) as stream:
@@ -73,7 +81,7 @@ def consume(client, target):
                 "calls": [(block.id, block.name, block.input) for block in result.content if block.type == "tool_use"],
                 "reason": result.stop_reason, "usage": (result.usage.input_tokens, result.usage.output_tokens), "events": events}
     if target == "responses":
-        with client.responses.stream(model=MODEL, input="synthetic", max_output_tokens=32) as stream:
+        with client.responses.stream(model=MODEL, input="synthetic", max_output_tokens=32, **response_policy()) as stream:
             try:
                 events = list(stream)
             except openai.APIResponseValidationError as exc:
@@ -143,13 +151,24 @@ def test_sdk_sees_max_tokens_as_incomplete_not_full_success(source, target):
 @pytest.mark.parametrize("length", [False, True])
 def test_strict_responses_sdk_rejects_unknown_messages_reasoning_usage(length):
     with listener("messages", tools=not length, length=length) as (origin, calls), client_for("responses", origin) as client:
-        with client.responses.stream(model=MODEL, input="synthetic", max_output_tokens=32) as stream, pytest.raises(openai.APIResponseValidationError) as caught:
+        with client.responses.stream(model=MODEL, input="synthetic", max_output_tokens=32, **response_policy()) as stream, pytest.raises(openai.APIResponseValidationError) as caught:
             list(stream)
         terminal = "ResponseIncompleteEvent" if length else "ResponseCompletedEvent"
         errors = caught.value.__cause__.errors(include_input=False, include_url=False)
         relevant = [error for error in errors if error["loc"][0] == terminal]
         assert [(error["type"], error["loc"][1:]) for error in relevant] == [
             ("missing", ("response", "usage", "output_tokens_details"))]
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("source", ["chat", "messages"])
+def test_strict_responses_sdk_rejects_unknown_request_policy(source):
+    with listener(source) as (origin, calls), client_for("responses", origin) as client:
+        with client.responses.stream(model=MODEL, input="synthetic", max_output_tokens=32) as stream, pytest.raises(openai.APIResponseValidationError) as caught:
+            list(stream)
+        errors = caught.value.__cause__.errors(include_input=False, include_url=False)
+        missing = {error["loc"][2] for error in errors if error["type"] == "missing" and error["loc"][:2] == ("ResponseCreatedEvent", "response")}
+        assert missing == {"parallel_tool_calls", "tools", "tool_choice"}
     assert len(calls) == 1
 
 

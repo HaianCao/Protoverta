@@ -31,7 +31,7 @@ def _event(kind: str, body: dict[str, Any]) -> SSEEvent:
 class StreamEncoder:
     """Convert ordered canonical deltas to one target protocol's SSE events."""
 
-    def __init__(self, protocol: Protocol | str, *, response_transform: Callable[[dict], dict] | None = None, public_reasoning: bool = False) -> None:
+    def __init__(self, protocol: Protocol | str, *, response_transform: Callable[[dict], dict] | None = None, public_reasoning: bool = False, request_context: dict | None = None) -> None:
         self.protocol = Protocol(protocol)
         if not isinstance(public_reasoning, bool):
             raise TypeError("public_reasoning must be a boolean")
@@ -42,6 +42,13 @@ class StreamEncoder:
         if response_transform is not None and self.protocol != Protocol.RESPONSES:
             raise ValueError("response_transform is only supported for Responses output")
         self.response_transform = response_transform
+        if request_context is not None:
+            if self.protocol != Protocol.RESPONSES:
+                raise ValueError("request_context is only supported for Responses output")
+            from .response_context import bind_response_context
+
+            context_transform = bind_response_context(request_context)
+            self.response_transform = lambda event: context_transform(response_transform(event) if response_transform is not None else event)
         self.started = False
         self.ended = False
         self.model = ""
@@ -187,10 +194,10 @@ class StreamEncoder:
             "status": status, "error": None, "incomplete_details": incomplete_details,
             "instructions": None, "max_output_tokens": None, "model": self.model,
             "output": self.output.copy() if status != "in_progress" else [],
-            "parallel_tool_calls": True, "previous_response_id": None,
+            "previous_response_id": None,
             "reasoning": {"effort": None, "summary": None}, "store": False,
             "temperature": None, "text": {"format": {"type": "text"}},
-            "tool_choice": "auto", "tools": [], "top_p": None,
+            "top_p": None,
             "truncation": "disabled", "usage": usage, "user": None, "metadata": {},
         }
 

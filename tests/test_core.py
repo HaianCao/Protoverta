@@ -26,7 +26,7 @@ def test_all_six_text_response_edges(source, target):
     assert output["model"] == "example"
     assert "hello" in str(output)
     if target == Protocol.RESPONSES:
-        assert output["tools"] == [] and output["tool_choice"] == "auto"
+        assert not {"tools", "tool_choice", "parallel_tool_calls"} & output.keys()
         assert "input_tokens_details" not in output["usage"]
         assert "output_tokens_details" not in output["usage"]
 

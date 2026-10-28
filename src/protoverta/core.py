@@ -991,8 +991,7 @@ def _encode_result(result: Result, target: Protocol) -> dict[str, Any]:
     if text:
         output.append({"id": "msg_" + secrets.token_hex(12), "type": "message", "role": "assistant", "status": "incomplete" if result.finish_reason == "length" else "completed", "content": [{"type": "output_text", "text": text, "annotations": [], "logprobs": []}]})
     output.extend({"id": ("ct_" if p.tool_type == "custom" else "fc_") + secrets.token_hex(12), **_encode_response_call(p), "status": "completed"} for p in calls)
-    out = {"id": "resp_" + secrets.token_hex(12), "created_at": int(time.time()), "object": "response", "model": result.model, "status": "incomplete" if result.finish_reason == "length" else "completed", "output": output, "parallel_tool_calls": len(calls) > 1, "error": None, "incomplete_details": {"reason": "max_output_tokens"} if result.finish_reason == "length" else None}
-    out.update(tools=[], tool_choice="auto")
+    out = {"id": "resp_" + secrets.token_hex(12), "created_at": int(time.time()), "object": "response", "model": result.model, "status": "incomplete" if result.finish_reason == "length" else "completed", "output": output, "error": None, "incomplete_details": {"reason": "max_output_tokens"} if result.finish_reason == "length" else None}
     # Facts about this newly generated, non-persisted Responses envelope.
     # Request context can restore actual instructions/limits at the gateway;
     # provider sampling defaults and token details must remain unknown.
@@ -1005,11 +1004,18 @@ def _encode_result(result: Result, target: Protocol) -> dict[str, Any]:
     return out
 
 
-def convert_response(body: dict[str, Any], source: Protocol | str, target: Protocol | str, *, public_reasoning: bool = False) -> dict[str, Any]:
+def convert_response(body: dict[str, Any], source: Protocol | str, target: Protocol | str, *, public_reasoning: bool = False, request_context: dict | None = None) -> dict[str, Any]:
     """Convert a completed text/function response without inventing usage."""
     source, target = Protocol(source), Protocol(target)
     if not isinstance(public_reasoning, bool):
         raise TypeError("public_reasoning must be a boolean")
+    transform = None
+    if request_context is not None:
+        if target != Protocol.RESPONSES or source == target:
+            raise ConversionError("request_context requires translated Responses output")
+        from .response_context import bind_response_context
+
+        transform = bind_response_context(request_context)
     if source == target:
         return body.copy()
     encode_json(body)
@@ -1020,4 +1026,5 @@ def convert_response(body: dict[str, Any], source: Protocol | str, target: Proto
     call_ids = [part.call_id for part in result.parts if part.kind == "tool_call"]
     if any(not value for value in call_ids) or len(call_ids) != len(set(call_ids)):
         raise ConversionError("empty or duplicate response tool call ID")
-    return _encode_result(result, target)
+    output = _encode_result(result, target)
+    return transform(output) if transform is not None else output

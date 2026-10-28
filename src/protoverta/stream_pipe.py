@@ -86,7 +86,7 @@ class StreamTranscoder:
     Calling code must not emit a successful terminal event after an exception.
     """
 
-    def __init__(self, source: Protocol | str, target: Protocol | str, *, messages_usage_policy: str = "strict", max_pending_bytes: int = 8 * 1024 * 1024, response_transform: Callable[[dict], dict] | None = None, public_reasoning: bool = False, tool_name_transform: Callable[[str], str] | None = None, max_stream_bytes=32 * 1024 * 1024, max_stream_items=1024, max_tool_argument_bytes=8 * 1024 * 1024, delta_transform: Callable[[Delta], Delta] | None = None) -> None:
+    def __init__(self, source: Protocol | str, target: Protocol | str, *, messages_usage_policy: str = "strict", max_pending_bytes: int = 8 * 1024 * 1024, response_transform: Callable[[dict], dict] | None = None, public_reasoning: bool = False, tool_name_transform: Callable[[str], str] | None = None, max_stream_bytes=32 * 1024 * 1024, max_stream_items=1024, max_tool_argument_bytes=8 * 1024 * 1024, delta_transform: Callable[[Delta], Delta] | None = None, request_context: dict | None = None) -> None:
         self.source = Protocol(source)
         self.target = Protocol(target)
         if messages_usage_policy not in {"strict", "deferred"}:
@@ -99,7 +99,9 @@ class StreamTranscoder:
         self.order = _MessagesOrder(max_pending_bytes) if cross_messages else None
         self.parser = SSEParser()
         self.decoder = StreamDecoder(self.source, public_reasoning=public_reasoning)
-        self.encoder = StreamEncoder(self.target, response_transform=response_transform, public_reasoning=public_reasoning)
+        if request_context is not None and self.source == self.target:
+            raise ValueError("request_context requires translated Responses output")
+        self.encoder = StreamEncoder(self.target, response_transform=response_transform, public_reasoning=public_reasoning, request_context=request_context)
         self.tool_name_transform = tool_name_transform
         self.delta_transform = delta_transform
         self._terminal = b""

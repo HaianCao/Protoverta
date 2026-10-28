@@ -269,7 +269,8 @@ def test_responses_encoder_event_schema_has_item_identity_and_empty_logprobs():
         assert isinstance(snapshot["created_at"], int)
         assert snapshot["object"] == "response"
         assert snapshot["model"] == "m"
-        assert {"id", "status", "output", "usage", "error", "incomplete_details", "parallel_tool_calls", "text", "tools"} <= snapshot.keys()
+        assert {"id", "status", "output", "usage", "error", "incomplete_details", "text"} <= snapshot.keys()
+        assert not {"parallel_tool_calls", "tools", "tool_choice"} & snapshot.keys()
     assert created["status"] == "in_progress" and created["output"] == []
     assert completed["status"] == "completed" and len(completed["output"]) == 2
     assert completed["usage"] == {

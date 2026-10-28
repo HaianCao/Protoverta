@@ -12,6 +12,7 @@ from .context import ContextAssessment, TokenCount, assess_context
 from .core import ConversionError, Protocol, convert_request, convert_response
 from .discovery import CatalogError, CatalogPolicy, ModelInfo, fetch_catalog
 from .errors import UnsupportedFeatureError
+from .response_context import bind_response_context
 from .stream_encoder import StreamEncoder
 from .stream_pipe import StreamTranscoder
 from .streaming import Delta, StreamDecoder, StreamError, UnsupportedStreamFeatureError
@@ -41,6 +42,7 @@ __all__ = [
     "UnsupportedFeatureError",
     "UnsupportedStreamFeatureError",
     "assess_context",
+    "bind_response_context",
     "convert_request",
     "convert_response",
     "count_input",

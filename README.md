@@ -44,6 +44,10 @@ chat_request = convert_request(messages_request, "messages", "chat")
 
 `ConversionError` indicates an unsupported or invalid JSON conversion. For SSE, `StreamTranscoder` accepts upstream bytes via `feed()` and requires `finish()` at EOF; it raises `StreamError` on invalid or interrupted streams. Protocol names are `chat`, `messages`, and `responses`.
 
+Generated Responses omit unknown tools/choice/parallel policy. Supply the original
+request via `request_context` to preserve known metadata in JSON/SSE; see
+[Responses metadata](docs/compatibility/response-metadata.md) for the contract and strict SDK limits.
+
 `top_p` maps across all six request routes with explicit range/type validation;
 omitted values do not invent a sampling setting. Provider/model support remains
 subject to capability checks.
