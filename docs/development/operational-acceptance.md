@@ -81,7 +81,35 @@ nội dung thực và model dùng đúng result. Kiểm tra cả hai harness v�
 - Kiểm chứng artifact phát hành, CI remote và interactive terminal vẫn cần
   bằng chứng riêng; không tự push/merge/release để hoàn tất checklist này.
 
-## Trạng thái ngày 2026-10-28
+## Kiểm chứng 30 phút — 2026-10-28
+
+Theo yêu cầu người dùng, mốc chạy thực nghiệm của đợt này là **30 phút**; bài hai
+giờ phía trên chỉ là lựa chọn mở rộng, không phải điều kiện bắt buộc để sử dụng.
+
+Chạy trên source `c0e3f6c6f7f8dfb0cfafa3b63dddabe8a487efbe`, không sửa code trong
+lúc đo: `--sustained --seconds 1800 --requests 5000 --concurrency 2 --interval 1
+--measure-resources`. Exit 0, `passed=true`, đủ **1800,261 giây workload**.
+
+- 3318 request; 3016 upstream response mở và đóng, active/lifetime thread còn
+  lại bằng 0. Không có lỗi ngoài dự kiến.
+- 302 client hủy cố ý và 287 stream thiếu kết thúc được nhận diện đúng lỗi;
+  không gọi các ca đó là upstream thành công.
+- Warm RSS giảm 442.368 byte; retained thread -3, handle -2, TCP delta 0.
+  Resource policy đạt; RSS peak quan sát 42.606.592 byte.
+- Đo 1730 mẫu thực tế, bộ đệm chỉ giữ 605 mẫu; terminal vẫn nằm ở giây 1800,680.
+  60 heartbeat, khoảng cách lớn nhất 30,705 giây, không thấy gián đoạn dài.
+
+Bằng chứng trong TEMP: `protoverta-k4-sustained-30min-20261028.json`, cùng
+`-progress.jsonl` và `-provenance.json`. Hash hai script trước/sau giống nhau;
+SHA-256 report `10407550af6fe7423432d689366013181e7b40c66f2fba0d6a8ef58d9ddb1f6c`.
+Chỉ dùng loopback/fixture tổng hợp; không API trả phí, harness thật, cài đặt,
+key/config/session/PATH thật. Test đã kết thúc, không tiếp tục chạy nền.
+
+Mốc soak cục bộ 30 phút đã đạt. Live search vẫn pending theo lựa chọn của người
+dùng; schema, CI remote, artifact và interactive acceptance là các gate riêng.
+Kết quả này không thay thế chúng hay chứng minh không còn mọi lỗi.
+
+## Kết quả trước bài 30 phút — 2026-10-28
 
 Đã bổ sung sustained mode, bảo vệ bộ đệm đo tài nguyên dài hạn và regression.
 Full core 1673 test pass, gồm 14 regression mới; Ruff và whitespace pass.
