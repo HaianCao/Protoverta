@@ -54,3 +54,26 @@ its discovery path/secret ref). Key changes and policy edits invalidate caches
 without storing raw credentials. Metadata is stored separately in `model_info`
 and model selection still accepts manual IDs. A discovery error does not prevent
 manual selection or change the last successful cache.
+
+## Messages version headers
+
+The core discovery API does not infer a protocol from a URL or add an Anthropic
+header globally: the caller supplies the request headers. Each pagination request
+preserves that header snapshot. Both launcher previews explicitly send
+`anthropic-version: 2023-06-01` when the selected provider protocol is Messages,
+independently of bearer versus API-key authentication. Chat and Responses
+discovery do not receive that header. CodexApter also scopes its Messages cache
+identity to the selected version, invalidating older headerless discovery data.
+
+This pin matches the existing Messages inference contract; it is not automatic
+version negotiation. Anthropic's [versioning guide](https://platform.claude.com/docs/en/api/versioning)
+requires an explicit header and documents breaking changes between API versions,
+while the [Models reference](https://platform.claude.com/docs/en/api/models/list)
+currently labels the listing header optional. Do not infer that every provider
+rejects a headerless list request, or silently upgrade the entire protocol to a
+new version from discovery alone. A newer version needs a separate contract and
+compatibility review.
+
+Loopback tests exercise a fixture that requires the selected header/auth on each
+page and preserves an API prefix. They do not certify Anthropic or third-party
+live endpoints, token scopes, or models' inference capabilities.
