@@ -41,8 +41,8 @@ def exercise(source: Path, wheel: Path, root: Path, *, command: str, skip: str, 
     sentinel.write_text("synthetic-settings\n", encoding="utf-8")
     installer = source / "scripts" / "install.ps1"
     uninstaller = source / "scripts" / "uninstall.ps1"
-    executable = local / "Programs" / install_name / "venv" / "Scripts" / f"{command}.exe"
-    python = executable.with_name("python.exe")
+    install_root = local / "Programs" / install_name
+    executable = install_root / "bin" / f"{command}.exe"
     with (source / "pyproject.toml").open("rb") as project_file:
         requirements = tomllib.load(project_file)["project"]["optional-dependencies"]["gateway"]
     expected_version = next(item.split("==", 1)[1] for item in requirements if item.startswith("protoverta=="))
@@ -52,9 +52,22 @@ def exercise(source: Path, wheel: Path, root: Path, *, command: str, skip: str, 
             run_remote(remote_repo, "install", options if index == 0 else [skip, "-NonInteractive", "-NoPathChanges", "-SourceBranch", "integration/protoverta"], env)
         else:
             run(installer, options, env)
+        executable = install_root / "bin" / f"{command}.exe"
+        # Published older installers may still use the legacy venv layout.
+        if remote_repo and not executable.is_file():
+            executable = install_root / "venv" / "Scripts" / f"{command}.exe"
         if not executable.is_file():
             raise RuntimeError(f"{command} executable missing")
-        subprocess.run([str(executable), "--help"], env=env, capture_output=True, check=True, timeout=30)
+        if executable.parent.name == "bin":
+            generation = (install_root / "current.txt").read_text(encoding="ascii").strip()
+            if len(generation) != 32 or any(char not in "0123456789abcdef" for char in generation):
+                raise RuntimeError("invalid environment pointer")
+            python = install_root / "environments" / generation / "Scripts" / "python.exe"
+            launch = [str(executable)]
+        else:
+            python = executable.with_name("python.exe")
+            launch = [str(executable)]
+        subprocess.run([*launch, "--help"], env=env, capture_output=True, check=True, timeout=30)
         subprocess.run([str(python), "-c", "import importlib.metadata,sys; assert importlib.metadata.version('protoverta') == sys.argv[1]", expected_version], env=env, capture_output=True, check=True, timeout=30)
         if sentinel.read_text(encoding="utf-8") != "synthetic-settings\n":
             raise RuntimeError("test configuration changed during install/update")
