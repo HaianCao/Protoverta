@@ -19,6 +19,11 @@ are not saved as a successful catalog. Embedding transports must honor the budge
 attached to the request; arbitrary custom blocking callbacks cannot be forcibly
 interrupted by this synchronous library.
 
+Model IDs, display names and pagination cursors must contain valid Unicode
+scalar values. Escaped lone surrogates fail with `CatalogError` before a model
+is returned or a cursor is reused. Valid supplementary characters (including
+JSON-escaped surrogate pairs) are preserved, without normalization or replacement.
+
 Provider-specific mappings require an explicit, evidence-scoped JSON policy:
 
 ```json

@@ -10,7 +10,7 @@ from urllib.error import HTTPError, URLError
 
 import pytest
 
-from protoverta.discovery import CatalogError, CatalogPolicy, fetch_catalog
+from protoverta.discovery import CatalogError, CatalogPolicy, fetch_catalog, parse_page
 
 
 @pytest.mark.parametrize("wire", [
@@ -123,6 +123,52 @@ def pages(values, captured=None):
         return io.BytesIO(json.dumps(next(iterator)).encode())
 
     return opener
+
+
+@pytest.mark.parametrize("value", [chr(0xD800), chr(0xDFFF), "private-" + chr(0xD800) + "-name"], ids=["high-surrogate", "low-surrogate", "embedded-surrogate"])
+@pytest.mark.parametrize("field,message", [
+    ("id", "model catalog contains an invalid model ID"),
+    ("display_name", "model catalog contains an invalid display name"),
+    ("last_id", "invalid catalog pagination cursor"),
+])
+@pytest.mark.parametrize("from_wire", [False, True], ids=["parsed-object", "escaped-json"])
+def test_catalog_rejects_surrogates_before_return_or_cursor_reuse(value, field, message, from_wire):
+    policy = CatalogPolicy(pagination="after_id")
+    body = {"data": [{"id": "model", "display_name": "Model"}]}
+    if field == "last_id":
+        body.update(has_more=True, last_id=value)
+    else:
+        body["data"][0][field] = value
+    captured = []
+    with pytest.raises(CatalogError) as error:
+        if from_wire:
+            fetch_catalog("https://example.test/v1", {}, policy, upstream_open=pages([body], captured))
+        else:
+            parse_page(body, policy)
+    assert str(error.value) == message
+    assert len(captured) == int(from_wire)  # Invalid cursor never reaches a second request.
+
+
+@pytest.mark.parametrize("escaped", [False, True], ids=["utf8", "escaped-pair"])
+def test_catalog_preserves_valid_unicode_and_supplementary_characters(escaped):
+    identifier = "mô-hình-🚀"
+    name = "Mô hình tiếng Việt 日本語 🚀"
+    captured = []
+    bodies = iter([
+        {"data": [{"id": identifier, "display_name": name}], "has_more": True, "last_id": identifier},
+        {"data": [], "has_more": False},
+    ])
+
+    def opener(request, timeout):
+        captured.append(request.full_url)
+        return io.BytesIO(json.dumps(next(bodies), ensure_ascii=escaped).encode("utf-8"))
+
+    result = fetch_catalog("https://example.test/v1", {}, CatalogPolicy(pagination="after_id"), upstream_open=opener)
+    assert len(result) == 1 and result[0].id == identifier and result[0].display_name == name
+    assert json.dumps(result[0].as_dict(), ensure_ascii=False).encode("utf-8")
+    from urllib.parse import parse_qs, urlsplit
+
+    assert parse_qs(urlsplit(captured[1]).query)["after_id"] == [identifier]
 
 
 def test_catalog_reports_explicit_metadata_but_never_certifies_capabilities():

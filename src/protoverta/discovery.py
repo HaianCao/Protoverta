@@ -110,6 +110,12 @@ def _field(body, path):
     return value if path else None
 
 
+def _surrogate(char):
+    # Escaped lone surrogates survive json.loads but cannot be encoded as UTF-8.
+    # A valid escaped pair is already decoded to one supplementary code point.
+    return 0xD800 <= ord(char) <= 0xDFFF
+
+
 def parse_page(body, policy):
     data = _field(body, policy.collection_field) if policy.collection_field else body
     if not isinstance(data, list):
@@ -119,12 +125,12 @@ def parse_page(body, policy):
         if not isinstance(item, dict):
             raise CatalogError("model catalog entries must be objects")
         identifier = _field(item, policy.id_field)
-        if not isinstance(identifier, str) or not identifier or len(identifier) > 512 or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in identifier):
+        if not isinstance(identifier, str) or not identifier or len(identifier) > 512 or any(c.isspace() or ord(c) < 32 or ord(c) == 127 or _surrogate(c) for c in identifier):
             raise CatalogError("model catalog contains an invalid model ID")
         name = _field(item, policy.name_field)
         if name is None:
             name = identifier
-        if not isinstance(name, str) or not name or len(name) > 512 or any(ord(c) < 32 for c in name):
+        if not isinstance(name, str) or not name or len(name) > 512 or any(ord(c) < 32 or _surrogate(c) for c in name):
             raise CatalogError("model catalog contains an invalid display name")
         numbers = [_field(item, field) for field in (policy.context_field, policy.output_field)]
         if any(value is not None and (type(value) is not int or value <= 0) for value in numbers):
@@ -141,7 +147,7 @@ def parse_page(body, policy):
     if has_more and policy.pagination not in ("after_id", "numbered"):
         raise CatalogError("catalog requires an explicitly configured pagination policy")
     cursor = body.get("last_id") if has_more and policy.pagination == "after_id" else None
-    if has_more and policy.pagination == "after_id" and (not isinstance(cursor, str) or not cursor or len(cursor) > 512 or any(c.isspace() for c in cursor)):
+    if has_more and policy.pagination == "after_id" and (not isinstance(cursor, str) or not cursor or len(cursor) > 512 or any(c.isspace() or _surrogate(c) for c in cursor)):
         raise CatalogError("invalid catalog pagination cursor")
     return result, cursor
 
