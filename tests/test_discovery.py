@@ -1,13 +1,75 @@
 import io
 import json
+import socket
 import threading
 import time
+from http.client import BadStatusLine, IncompleteRead
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from socketserver import BaseRequestHandler, TCPServer
 from urllib.error import HTTPError, URLError
 
 import pytest
 
 from protoverta.discovery import CatalogError, CatalogPolicy, fetch_catalog
+
+
+@pytest.mark.parametrize("wire", [
+    b'HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n20\r\n{"data":[',
+    b'HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nprivate-invalid-size\r\n',
+    b'private-invalid-status\r\n\r\n',
+], ids=["truncated-chunk", "invalid-chunk-size", "invalid-status-line"])
+def test_catalog_real_http_framing_errors_are_safe_and_close_connection(wire):
+    disconnected = threading.Event()
+    requests = []
+
+    class Handler(BaseRequestHandler):
+        def handle(self):
+            self.request.settimeout(2)
+            data = bytearray()
+            while b"\r\n\r\n" not in data:
+                chunk = self.request.recv(4096)
+                if not chunk:
+                    return
+                data.extend(chunk)
+            requests.append(bytes(data))
+            self.request.sendall(wire)
+            # End the malformed response while retaining the read half so that
+            # the test can observe the client's cleanup, rather than our close.
+            self.request.shutdown(socket.SHUT_WR)
+            try:
+                if self.request.recv(1) == b"":
+                    disconnected.set()
+            except ConnectionResetError:
+                disconnected.set()
+
+    with TCPServer(("127.0.0.1", 0), Handler) as server:
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with pytest.raises(CatalogError) as error:
+                fetch_catalog(f"http://127.0.0.1:{server.server_address[1]}/v1", {}, CatalogPolicy(timeout=2))
+            assert str(error.value) == "catalog transport or JSON validation failed"
+            assert disconnected.wait(2)
+            assert len(requests) == 1  # No retry or partial catalog success.
+        finally:
+            server.shutdown()
+            thread.join(timeout=3)
+        assert not thread.is_alive()
+
+
+@pytest.mark.parametrize("failure", [IncompleteRead(b"private-partial-body"), BadStatusLine("private-status")])
+def test_catalog_closes_open_response_on_http_framing_failure(failure):
+    class Response(io.BytesIO):
+        def read(self, size=-1):
+            raise failure
+
+        read1 = read
+
+    response = Response()
+    with pytest.raises(CatalogError) as error:
+        fetch_catalog("https://example.test/v1", {}, upstream_open=lambda request, timeout: response)
+    assert response.closed
+    assert str(error.value) == "catalog transport or JSON validation failed"
 
 
 def test_real_transport_rejects_redirect_and_slow_drip_total_deadline():

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import asdict, dataclass
+from http.client import HTTPException
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import urlencode
@@ -214,7 +215,7 @@ def fetch_catalog(base_url, headers, policy=None, *, upstream_open=None):
     except HTTPError as exc:
         exc.close()
         raise CatalogError(f"catalog upstream HTTP {exc.code}") from None
-    except (OSError, ValueError, RecursionError) as exc:
+    except (OSError, ValueError, RecursionError, HTTPException) as exc:
         if isinstance(exc, CatalogError):
             raise
         raise CatalogError("catalog transport or JSON validation failed") from None
