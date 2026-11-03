@@ -65,7 +65,8 @@ def test_disconnect_during_retry_wait_does_not_reissue_or_refund(tmp_path):
 def test_concurrent_truncated_stream_churn_keeps_isolation_and_closes_resources(tmp_path):
     lock = threading.Lock()
     opened, closed, active = [], [], []
-    baseline = {thread.ident for thread in threading.enumerate() if thread.name == "protoverta-client-lifetime"}
+    monitor_names = {"protoverta-client-lifetime", "protoverta-sse-heartbeat"}
+    baseline = {(thread.name, thread.ident) for thread in threading.enumerate() if thread.name in monitor_names}
 
     class Response(io.BytesIO):
         def close(self):
@@ -102,7 +103,7 @@ def test_concurrent_truncated_stream_churn_keeps_isolation_and_closes_resources(
         with ThreadPoolExecutor(6) as pool:
             list(pool.map(run, range(48)))
     deadline = time.monotonic() + 3
-    while time.monotonic() < deadline and any(thread.name == "protoverta-client-lifetime" and thread.ident not in baseline for thread in threading.enumerate()):
+    while time.monotonic() < deadline and any(thread.name in monitor_names and (thread.name, thread.ident) not in baseline for thread in threading.enumerate()):
         time.sleep(0.01)
     assert len(opened) == len(closed) == 48 and not active
-    assert not any(thread.name == "protoverta-client-lifetime" and thread.ident not in baseline for thread in threading.enumerate())
+    assert not any(thread.name in monitor_names and (thread.name, thread.ident) not in baseline for thread in threading.enumerate())

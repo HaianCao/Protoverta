@@ -52,6 +52,7 @@ from .resources import (
 from .retry import open_with_retry, retry_after
 from .sse import encode_sse
 from .stream_pipe import StreamTranscoder, StreamValidator
+from .stream_writer import StreamHeartbeatWriter
 from .streaming import (
     StreamError,
     UnsupportedReasoningError,
@@ -60,6 +61,8 @@ from .streaming import (
 from .tool_names import ToolNameMap
 from .tool_search import ClientToolSearchMap
 from .transport import DeadlineHTTPHandler, DeadlineHTTPSHandler
+
+STREAM_HEARTBEAT_INTERVAL = 15.0
 
 _PATHS = {
     "/v1/responses/compact": Protocol.RESPONSES,
@@ -318,14 +321,19 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
             headers_sent = False
             initial = bytearray()
 
+            def send_bytes(raw, timeout):
+                self.connection.settimeout(timeout)
+                self.wfile.write(raw)
+                self.wfile.flush()
+
+            keepalive = None if source == target else encode_sse("ping", '{"type":"ping"}') if target == Protocol.MESSAGES else b": protoverta keepalive\n\n"
+            writer = StreamHeartbeatWriter(send_bytes, budget, keepalive, interval=STREAM_HEARTBEAT_INTERVAL)
+
             def write_output(raw, *, final_error=False):
-                try:
-                    self.connection.settimeout(min(config.timeout, 1) if final_error else budget.remaining())
-                    self.wfile.write(raw)
-                    self.wfile.flush()
-                    self._trace.mark_first_payload()
-                except ConnectionError as exc:
-                    raise ClientDisconnected("Local HTTP client disconnected.") from exc
+                writer.write(raw, final_error=final_error)
+                self._trace.mark_first_payload()
+                if not final_error:
+                    writer.start()
 
             def send_headers() -> None:
                 nonlocal headers_sent
@@ -369,6 +377,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                             initial.clear()
                         send_headers()
                         write_output(output)
+                writer.close()  # No keepalive may follow a terminal/error event.
                 tail = pipeline.finish()
                 if initial:
                     tail = bytes(initial) + tail
@@ -382,6 +391,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 details = getattr(decoder, "usage_details", {})
                 self._trace.usage(getattr(decoder, "input_tokens", None), getattr(decoder, "output_tokens", None), details.get("cached_input_tokens"), details.get("cache_creation_input_tokens"))
             except (StreamError, UnicodeError, OSError, HTTPException) as exc:
+                writer.close()
                 if isinstance(exc, ClientDisconnected):
                     self._trace.outcome = "client_disconnected"
                     return
@@ -407,6 +417,8 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                         write_output(encode_sse("error", error), final_error=True)
                 except (ConnectionError, TimeoutError):
                     self._trace.outcome = "client_disconnected"
+            finally:
+                writer.close()
 
         def do_POST(self) -> None:
             protocol = _PATHS.get(urlsplit(self.path).path)

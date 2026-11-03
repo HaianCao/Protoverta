@@ -40,6 +40,7 @@ def run_soak(*, seconds=60, requests=5000, concurrency=4, interval=0.02, measure
         warmup = run_soak(seconds=5, requests=min(requests, 1000), concurrency=concurrency, interval=interval)
     monitor = ResourceMonitor() if measure_resources else None
     baseline = {thread.ident for thread in threading.enumerate() if thread.name == "protoverta-client-lifetime"}
+    heartbeat_baseline = {thread.ident for thread in threading.enumerate() if thread.name == "protoverta-sse-heartbeat"}
     lock = threading.Lock()
     counts = Counter()
     failures = []
@@ -175,18 +176,24 @@ def run_soak(*, seconds=60, requests=5000, concurrency=4, interval=0.02, measure
             for thread in threads:
                 thread.join(timeout=3)
             until = time.monotonic() + 3
-            while time.monotonic() < until and (active or any(thread.name == "protoverta-client-lifetime" and thread.ident not in baseline for thread in threading.enumerate())):
+            while time.monotonic() < until and (active or any(
+                thread.name == "protoverta-client-lifetime" and thread.ident not in baseline
+                or thread.name == "protoverta-sse-heartbeat" and thread.ident not in heartbeat_baseline
+                for thread in threading.enumerate()
+            )):
                 time.sleep(0.01)
     leaked = sum(thread.name == "protoverta-client-lifetime" and thread.ident not in baseline for thread in threading.enumerate())
+    heartbeat_leaked = sum(thread.name == "protoverta-sse-heartbeat" and thread.ident not in heartbeat_baseline for thread in threading.enumerate())
     resources = monitor.finish() if monitor is not None else None
     if resources is not None:
         resources["cold_baseline"] = cold_resources
         resources["baseline_kind"] = "after explicit 5-second same-workload warmup"
-    return {"passed": not failures and active == 0 and opened == closed and leaked == 0 and issued > 0 and (not sustained or duration_reached) and (warmup is None or warmup["passed"]) and (resources is None or resources.get("available") and resources.get("policy_passed")),
+    return {"passed": not failures and active == 0 and opened == closed and leaked == 0 and heartbeat_leaked == 0 and issued > 0 and (not sustained or duration_reached) and (warmup is None or warmup["passed"]) and (resources is None or resources.get("available") and resources.get("policy_passed")),
             "mode": "sustained" if sustained else "bounded", "duration_requested_seconds": seconds,
             "duration_reached": duration_reached, "workload_seconds": round(workload_seconds, 3),
             "seconds": round(time.monotonic() - started, 3), "issued": issued, "opened": opened, "closed": closed,
             "active_after": active, "peak_active": peak, "lifetime_threads_after": leaked,
+            "heartbeat_threads_after": heartbeat_leaked,
             "counts": dict(counts), "failure_types": failures, "local_fixtures_only": True, "resources": resources, "warmup": warmup}
 
 

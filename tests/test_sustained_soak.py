@@ -106,7 +106,7 @@ def test_sustained_run_cannot_pass_when_request_budget_ends_early():
     assert not result["passed"] and not result["duration_reached"]
     assert result["workload_seconds"] < result["duration_requested_seconds"]
     assert result["opened"] == result["closed"]
-    assert result["active_after"] == result["lifetime_threads_after"] == 0
+    assert result["active_after"] == result["lifetime_threads_after"] == result["heartbeat_threads_after"] == 0
 
 
 def test_sustained_loopback_run_reaches_duration_and_reports_progress():

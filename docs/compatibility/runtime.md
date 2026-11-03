@@ -93,6 +93,37 @@ Injected transports must implement bounded reads/cancellation themselves.
 The gateway never kills unrelated processes. Existing stream validation and
 terminal-at-EOF rules remain in force.
 
+## Translated SSE keepalives
+
+After the first supported payload has been delivered, translated streams send
+a transport keepalive after 15 seconds without a downstream write. Messages
+receives `event: ping` with `{"type":"ping"}`; Chat and Responses receive an SSE
+comment (`: protoverta keepalive`). Native streams remain byte-preserving and
+receive no additional keepalive. There is no new configuration switch.
+
+Keepalives contain no model output, usage, sequence number or reasoning state.
+They do not advance the progress deadline, extend the total deadline or trigger
+a retry. Before the first supported payload, the gateway keeps buffering metadata
+so an unsupported first block can still return HTTP 422. Consequently an initial
+silent period is **not** covered by keepalives; the existing I/O, progress and
+total deadlines still apply.
+
+A single serialized writer owns frame writes and socket timeout changes. One
+bounded-lifetime monitor per active translated stream sends keepalives; it never
+reads upstream. EOF/error stops the monitor before terminal/error output, so it
+cannot append a ping after completion. A downstream write failure cancels the
+request's registered default upstream sockets. Heartbeat writes have a maximum
+one-second socket timeout and monitor shutdown waits at most 1.25 seconds.
+Arbitrary injected callbacks must honor their timeout and cancellation contract;
+Python does not forcibly interrupt trusted embedding code.
+
+The client parser checks and remaining scope limits are recorded in
+[the P03 validation report](../development/p03-stream-heartbeat-2026-11-03.md).
+SSE comments are transport-only under the
+[SSE specification](https://html.spec.whatwg.org/multipage/server-sent-events.html).
+Claude's gateway protocol also describes the purpose of streaming pings and
+[terminal message events](https://code.claude.com/docs/en/llm-gateway-protocol).
+
 ## Consumer configuration
 
 Both integration launchers accept an optional gateway_runtime TOML inline table:

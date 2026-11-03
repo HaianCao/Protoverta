@@ -29,9 +29,20 @@ def test_codex_fixture_settings_and_search_policy_reach_client(harness, monkeypa
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(smoke, "run_process", run)
+    # This test supplies a synthetic adapter root, not a real source checkout.
+    # Version-policy loading has its own tests. Bare mode forwards its result;
+    # adapter mode lets the launcher apply the policy itself.
+    def settings(executable, source=None):
+        captured["policy"] = (executable, source)
+        return {"features.multi_agent": False, "model_reasoning_summary": "none", "web_search": "disabled"}
+
+    monkeypatch.setattr(smoke, "codex_settings", settings)
     config = GatewayConfig("chat", "http://127.0.0.1:1234/v1", "fake-upstream-key", "local", client_tool_search="function")
     smoke.run_client("codex", "codex.exe", "http://127.0.0.1:4321", config.upstream_base_url.removesuffix("/v1"), config, {}, str(tmp_path), False, tmp_path if adapter else None, False, Protocol.CHAT, 10, "fixture", codex_config={"model_catalog_json": "fixture-models.json"})
     args = captured["args"]
+    assert captured["policy"] == ("codex.exe", tmp_path if adapter else None)
+    if not adapter:
+        assert "features.multi_agent=false" in args
     assert "features.daemon_auto_start=false" in args
     for setting in ("features.plugins=false", "features.apps=false", "features.remote_plugin=false", "check_for_update_on_startup=false"):
         assert setting in args

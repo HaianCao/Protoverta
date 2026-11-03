@@ -3,6 +3,7 @@
 import io
 import json
 import threading
+import time
 from contextlib import contextmanager
 from http.server import ThreadingHTTPServer
 
@@ -11,6 +12,7 @@ import openai
 import pytest
 from wire_cases import CALLS, MODEL, TEXT, event, fragments, source_wire
 
+from protoverta import server as gateway
 from protoverta.server import GatewayConfig, make_handler
 
 PROTOCOLS = ("chat", "messages", "responses")
@@ -122,6 +124,36 @@ def consume(client, target):
                     reason = choice.finish_reason
     return {"text": "".join(content), "calls": [(value["id"], value["name"], json.loads(value["arguments"])) for value in tools.values()],
             "reason": reason, "usage": usage, "events": events}
+
+
+@pytest.mark.parametrize(("source", "target"), SDK_SCHEMA_ROUTES)
+def test_official_sdk_accepts_post_payload_keepalives_before_verified_eof(monkeypatch, source, target):
+    original_read = Fragmented.read1
+    original_writer = gateway.StreamHeartbeatWriter
+    keepalives = []
+
+    def delayed_eof(self, size):
+        raw = original_read(self, size)
+        if not raw:
+            time.sleep(0.12)  # Finite trusted fixture, no provider/network I/O.
+        return raw
+
+    def writer(send, *args, **kwargs):
+        def record(raw, timeout):
+            if raw == b": protoverta keepalive\n\n" or raw == b'event: ping\ndata: {"type":"ping"}\n\n':
+                keepalives.append(True)
+            send(raw, timeout)
+        return original_writer(record, *args, **kwargs)
+
+    monkeypatch.setattr(Fragmented, "read1", delayed_eof)
+    monkeypatch.setattr(gateway, "StreamHeartbeatWriter", writer)
+    monkeypatch.setattr(gateway, "STREAM_HEARTBEAT_INTERVAL", 0.02)
+    with listener(source) as (origin, calls), client_for(target, origin) as client:
+        result = consume(client, target)
+    assert keepalives
+    assert result["text"] == TEXT and result["calls"] == CALLS
+    assert result["usage"] == (19, 7)
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize(("source", "target"), SDK_SCHEMA_ROUTES)
