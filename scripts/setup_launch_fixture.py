@@ -46,7 +46,9 @@ class SetupLaunchFixture:
         self.calls = []
         self.exit_codes = []
         self.child = self.root / "synthetic_cli.py"
-        self.child.write_text(CHILD, encoding="utf-8")
+        version = "codex-cli 0.166.0" if launcher.__name__.startswith("codex_adapter") else "2.1.308 (Claude Code)"
+        version_query = f"import sys\nif sys.argv[1:] == ['--version']:\n    print({version!r})\n    raise SystemExit(0)\n"
+        self.child.write_text(version_query + CHILD, encoding="utf-8")
 
     def launch(self, *args):
         from protoverta import server

@@ -112,7 +112,10 @@ def run_smoke(
     model: str | None = None,
     upstream_reasoning: str = "provider_default",
     mcp_fixture: bool = False,
+    agent_model_policy: str | None = None,
 ) -> dict:
+    if agent_model_policy is not None and (agent_model_policy not in {"inherit", "selected"} or not (adapter_source or installed_adapter)):
+        raise ValueError("Agent policy fixture requires an adapter and inherit or selected policy")
     if mcp_fixture and (client != "claude" or not tool_loop or not (adapter_source or installed_adapter)):
         raise ValueError("MCP fixture requires Claude, --tool-loop and an adapter")
     executable = shutil.which(client)
@@ -295,6 +298,7 @@ def run_smoke(
                     model,
                     mcp_tool_name="mcp__fixture__fixture_lookup" if mcp_fixture else None,
                     adapter_reasoning_policy="auto" if upstream_reasoning == "auto" else None,
+                    agent_model_policy=agent_model_policy,
                 )
         return {
             "client": client,
@@ -336,7 +340,10 @@ def run_client(
     codex_config: dict | None = None,
     mcp_tool_name: str | None = None,
     adapter_reasoning_policy: str | None = None,
+    agent_model_policy: str | None = None,
 ):
+    if agent_model_policy is not None and (agent_model_policy not in {"inherit", "selected"} or not (adapter_source or installed_adapter)):
+        raise ValueError("Agent policy fixture requires an adapter and inherit or selected policy")
     if client == "codex":
         settings = {
             "model_provider": "protoverta_smoke",
@@ -477,6 +484,10 @@ def run_client(
                 "--",
                 *args[4:],
             ]
+        if agent_model_policy is not None:
+            content = config_path.read_text(encoding="utf-8")
+            content = content.replace("upstream_reasoning = ", f'agent_models = {{ policy = "{agent_model_policy}" }}\nupstream_reasoning = ', 1)
+            config_path.write_text(content, encoding="utf-8")
         if provider_id != "smoke":
             content = config_path.read_text(encoding="utf-8")
             content = content.replace("[providers.smoke]", f"[providers.{provider_id}]").replace('id = "smoke"', f'id = "{provider_id}"')
@@ -551,6 +562,7 @@ def main() -> int:
     parser.add_argument("--client", choices=["codex", "claude"], required=True)
     parser.add_argument("--upstream-reasoning", choices=["auto", "provider_default", "disabled", "openrouter_disabled"], default="provider_default")
     parser.add_argument("--mcp-fixture", action="store_true", help="Claude adapter: execute the fixed read-only MCP tool")
+    parser.add_argument("--agent-model-policy", choices=["inherit", "selected"], help="Exercise an explicit launcher agent-model policy; does not spawn agents")
     parser.add_argument(
         "--upstream", type=Protocol, choices=list(Protocol), required=True
     )
@@ -584,6 +596,7 @@ def main() -> int:
         model=args.model,
         upstream_reasoning=args.upstream_reasoning,
         mcp_fixture=args.mcp_fixture,
+        agent_model_policy=args.agent_model_policy,
     )
     print(json.dumps(result, indent=2))
     return 0 if result["passed"] else 1

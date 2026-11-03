@@ -91,6 +91,7 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
                     page.locator("#providerId" if codex else "#id").fill("fixture")
                     page.locator("#displayName").fill("Fixture <b>Provider</b>")
                     page.locator("#baseUrl").fill("https://example.invalid/v1")
+                    assert page.locator("#agentPolicy").input_value() == "selected"
                     if codex:
                         page.locator("#providerProtocol").select_option("chat_completions")
                         assert page.locator("#upstreamReasoning").input_value() == "auto"
@@ -138,6 +139,21 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
                     assert page.locator("#baseUrl").input_value() == "https://example.invalid/v1"
                     assert page.locator("#authMode").input_value() == "bearer"
                     assert page.locator("#runtime_retry_attempts").input_value() == "2"
+                    page.locator("#agentSettings summary").click()
+                    assert page.locator("#agentPolicy").input_value() == "selected"
+                    page.locator("#agentPolicy").select_option("custom")
+                    page.locator("#agent_default").fill("fixture-worker")
+                    if codex:
+                        page.locator("#agentEffort").select_option("low")
+                    else:
+                        page.locator("#agent_haiku").fill("fixture-fast")
+                    page.locator("#agentPolicy").select_option("inherit")
+                    expect(page.locator("#agentCustom")).to_be_hidden()
+                    page.locator("#agentPolicy").select_option("custom")
+                    assert page.locator("#agent_default").input_value() == "fixture-worker"
+                    if screenshots:
+                        screenshots.mkdir(parents=True, exist_ok=True)
+                        page.screenshot(path=str(screenshots / (package + "-agent-editor.png")), full_page=True)
                     page.locator("#authMode").select_option("api_key")
                     with page.expect_response(lambda response: "/api/provider" in response.url and response.request.method == "POST") as saved:
                         # Same-task assertions cannot race the HTTP response: both
@@ -149,6 +165,7 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
                                 && document.querySelector(codex ? '#runBtn' : '#run').disabled;
                         }""", codex)
                     assert saved.value.ok
+                    expect(page.locator("#agentPolicyHint")).to_contain_text("fixture-worker")
                     page.locator(model).fill("manual-model")
                     page.route("**/api/models**", lambda route: route.abort())
                     page.locator("#refreshBtn" if codex else "#refresh").click()
@@ -189,6 +206,7 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
                     restored = config_module.load(config.path).providers["fixture"]
                     assert restored.auth_mode == "api_key"
                     assert restored.gateway_runtime["retry_attempts"] == 2
+                    assert restored.agent_models == ({"policy": "custom", "default": "fixture-worker", "effort": "low"} if codex else {"policy": "custom", "default": "fixture-worker", "haiku": "fixture-fast"})
                     assert not errors, errors
                     return {"package": package, "passed": True, "launch_stubbed": not launch_fixture, "synthetic_foreground_cli": launch_fixture}
                 finally:

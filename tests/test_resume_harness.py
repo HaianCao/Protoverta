@@ -19,7 +19,8 @@ def harness(monkeypatch):
 
 @pytest.mark.parametrize("client", ["codex", "claude"])
 @pytest.mark.parametrize("persist", [False, True])
-def test_harness_preserves_opt_in_session_and_resume_arguments(harness, monkeypatch, tmp_path, client, persist):
+@pytest.mark.parametrize("agent_policy", [None, "inherit", "selected"])
+def test_harness_preserves_opt_in_session_and_resume_arguments(harness, monkeypatch, tmp_path, client, persist, agent_policy):
     # This test supplies a fake checkout and executable to inspect argv only.
     # Version discovery/source policy loading has its own real-fixture tests.
     monkeypatch.setattr(harness, "codex_settings", lambda *_: {"features.multi_agent": False})
@@ -33,9 +34,11 @@ def test_harness_preserves_opt_in_session_and_resume_arguments(harness, monkeypa
     monkeypatch.setattr(harness, "run_process", run)
     config = GatewayConfig("chat", "http://127.0.0.1:1234/v1", "fake-upstream-key", "local")
     identifier = "00000000-0000-4000-8000-000000000001"
-    harness.run_client(client, client + ".exe", "http://127.0.0.1:4321", "http://127.0.0.1:1234", config, {}, str(tmp_path), False, tmp_path, False, harness.Protocol.CHAT, 10, "test-model", persist_session=persist, resume_id=identifier if persist else None, provider_id="alternate")
+    harness.run_client(client, client + ".exe", "http://127.0.0.1:4321", "http://127.0.0.1:1234", config, {}, str(tmp_path), False, tmp_path, False, harness.Protocol.CHAT, 10, "test-model", persist_session=persist, resume_id=identifier if persist else None, provider_id="alternate", agent_model_policy=agent_policy)
     args = captured["args"]
     raw = tomllib.loads((tmp_path / "adapter.toml").read_text(encoding="utf-8"))
+    provider = raw["providers"]["alternate"] if client == "codex" else raw["providers"][0]
+    assert provider.get("agent_models") == ({"policy": agent_policy} if agent_policy else None)
     assert args[args.index("-p") + 1] == "alternate"
     if client == "codex":
         assert "alternate" in raw["providers"]
