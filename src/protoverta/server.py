@@ -7,6 +7,7 @@ import io
 import json
 import math
 import secrets
+import socket
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -263,6 +264,9 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
         def setup(self):
             super().setup()
             self._budget = RequestBudget(config.timeout, config.total_timeout, config.progress_timeout)
+            register = getattr(self.server, "register_request_budget", None)
+            if register is not None:
+                register(self.connection, self._budget)
             self.rfile.close()
             self.rfile = io.BufferedReader(DeadlineInput(self.connection.makefile("rb", buffering=0), self.connection, self._budget))
 
@@ -744,23 +748,72 @@ class GatewayHTTPServer(ThreadingHTTPServer):
 
     def __init__(self, address, handler):
         self._connections = threading.BoundedSemaphore(handler.connection_limit)
+        self._active_clients = set()
+        self._request_budgets = {}
+        self._clients_changed = threading.Condition()
+        self._closing = False
         super().__init__(address, handler)
 
     def process_request(self, request, client_address):
         if not self._connections.acquire(blocking=False):
             self.shutdown_request(request)
             return
+        with self._clients_changed:
+            closing = self._closing
+            if not closing:
+                self._active_clients.add(request)
+        if closing:
+            self._connections.release()
+            self.shutdown_request(request)
+            return
         try:
             super().process_request(request, client_address)
         except BaseException:
-            self._connections.release()
+            self._client_finished(request)
             raise
+
+    def _client_finished(self, request):
+        self._connections.release()
+        with self._clients_changed:
+            self._active_clients.discard(request)
+            self._request_budgets.pop(request, None)
+            self._clients_changed.notify_all()
+
+    def register_request_budget(self, request, budget):
+        with self._clients_changed:
+            closing = self._closing
+            if not closing:
+                self._request_budgets[request] = budget
+        if closing:
+            budget.cancel()
 
     def process_request_thread(self, request, client_address):
         try:
             super().process_request_thread(request, client_address)
         finally:
-            self._connections.release()
+            self._client_finished(request)
+
+    def server_close(self):
+        with self._clients_changed:
+            self._closing = True
+            clients = tuple(self._active_clients)
+            budgets = tuple(self._request_budgets.values())
+        super().server_close()
+        for budget in budgets:
+            budget.cancel()
+        for client in clients:
+            try:
+                # Budgets were cancelled first; stop only this server's clients.
+                # Handlers still own and close their buffered readers/writers.
+                client.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            finally:
+                client.close()
+        with self._clients_changed:
+            # One shared bound, not a per-client wait multiplied by fan-out.
+            # OS DNS/arbitrary injected transports remain non-preemptible.
+            self._clients_changed.wait_for(lambda: not self._active_clients, timeout=2)
 
 
 def serve(config: GatewayConfig, host: str = "127.0.0.1", port: int = 0, *, observer: Observer | None = None) -> ThreadingHTTPServer:
@@ -776,7 +829,13 @@ def gateway_session(config: GatewayConfig, *, observer: Observer | None = None) 
     """Serve one CLI session on loopback and always release its listener."""
     server = serve(config, observer=observer)
     thread = threading.Thread(target=server.serve_forever, name="protoverta-gateway", daemon=True)
-    thread.start()
+    try:
+        thread.start()
+    except BaseException:
+        if thread.is_alive():
+            server.shutdown()
+        server.server_close()
+        raise
     try:
         yield f"http://127.0.0.1:{server.server_port}"
     finally:

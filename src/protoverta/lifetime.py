@@ -29,7 +29,7 @@ class DisconnectWatch:
                         return
                     # Do not consume pipelined bytes; the HTTP server owns them.
                     self.stop.wait(0.1)
-            except OSError:
+            except (OSError, ValueError):
                 if not self.stop.is_set():
                     self.cancel()
                 return

@@ -3,6 +3,7 @@
 import io
 import json
 import math
+import select
 import socket
 import threading
 import time
@@ -39,7 +40,27 @@ class DeadlineInput(io.RawIOBase):
 
     def readinto(self, buffer):
         limit = self.budget.remaining()
-        self.connection.settimeout(limit)
+        # Do not enter an uninterruptible makefile recv while the peer is
+        # silent. Windows can retain that read after shutdown with I/O refs.
+        # Poll cancellation without resetting the original per-read timeout.
+        read_end = self.budget.clock() + limit
+        while True:
+            remaining = min(self.budget.remaining(), read_end - self.budget.clock())
+            if remaining <= 0:
+                self.budget.on_timeout(limit)
+                raise TimeoutError("Local HTTP client read timed out.")
+            try:
+                readable, _, _ = select.select([self.connection], [], [], min(0.1, remaining))
+            except (OSError, ValueError):
+                raise ClientDisconnected("Local HTTP client disconnected.") from None
+            if readable:
+                break
+        self.budget.remaining()
+        remaining = min(self.budget.remaining(), read_end - self.budget.clock())
+        if remaining <= 0:
+            self.budget.on_timeout(limit)
+            raise TimeoutError("Local HTTP client read timed out.")
+        self.connection.settimeout(remaining)
         try:
             count = self.raw.readinto(buffer)
         except TimeoutError:
@@ -129,6 +150,11 @@ class RequestBudget:
             result = method(size)
         except TimeoutError:
             self.on_timeout(timeout)
+            raise
+        except OSError:
+            # Cancellation can wake a registered Windows socket with an OS
+            # error rather than EOF. Preserve its local cancellation scope.
+            self.remaining()
             raise
         self.remaining()
         return result

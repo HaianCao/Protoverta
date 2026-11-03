@@ -93,6 +93,25 @@ Injected transports must implement bounded reads/cancellation themselves.
 The gateway never kills unrelated processes. Existing stream validation and
 terminal-at-EOF rules remain in force.
 
+Each gateway also owns its accepted client connections and their request budgets.
+Exiting `gateway_session`, including exception/KeyboardInterrupt unwinding, stops
+admission, cancels that server's budgets and closes its accepted sockets. It
+waits up to two seconds in total for handlers to drain, rather than multiplying
+a wait by the number of requests. Closing one session does not close another
+session's clients or budgets. The listener serve loop has its separate shutdown
+poll/join overhead; this is not a two-second end-to-end wall-clock guarantee.
+
+Inbound request-line/header/body reads poll cancellation while waiting for data,
+preserving the original per-read I/O deadline and total/progress limits. This
+avoids retaining silent Windows makefile reads after socket shutdown. Cancellation
+that wakes upstream with an OS error is classified as a local disconnect, rather
+than an invalid upstream stream. Ordinary transport errors are still propagated.
+
+The default HTTP transport is covered by these cancellation checks. Uninterruptible
+OS DNS, a trusted custom transport or callback that ignores cancellation can still
+outlive the bounded drain wait; the gateway does not forcibly kill Python threads
+or unrelated processes. This does not provide detached-agent ownership.
+
 ## Translated SSE keepalives
 
 After the first supported payload has been delivered, translated streams send
