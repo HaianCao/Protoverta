@@ -55,6 +55,9 @@ def fixture_server(scenario):
                 request = Request("http://127.0.0.1" + self.path, data=self.rfile.read(length))
                 request.fixture_connection = self.connection
                 with scenario.open(request, timeout=10) as stream:
+                    if hasattr(stream, "write_to"):
+                        stream.write_to(self)
+                        return
                     wire = stream.read()
                 status = 200
             except ExpectedRejection:
@@ -111,7 +114,7 @@ def calls_wire(protocol, model, calls):
     return io.BytesIO(b"".join(wire))
 
 
-def completed_lifecycle(client, stdout, *, failure=False):
+def completed_lifecycle(client, stdout, *, failure=False, failure_match=expected_rejection):
     if client == "claude":
         try:
             result = json.loads(stdout)
@@ -147,7 +150,7 @@ def completed_lifecycle(client, stdout, *, failure=False):
             for key, state in item["agents_states"].items():
                 if isinstance(state, dict) and state.get("status") == "completed" and isinstance(state.get("message"), str):
                     waited[key] = state.get("message")
-                elif isinstance(state, dict) and state.get("status") == "errored" and expected_rejection(str(state.get("message"))):
+                elif isinstance(state, dict) and state.get("status") == "errored" and failure_match(str(state.get("message"))):
                     failed.add(key)
     if len(assigned) != 2 or len(children) != 2 or children != set(assigned.values()):
         return False
@@ -169,6 +172,12 @@ class Scenario:
         self.root = None
         self.result = None
         self.audit_count = 0
+
+    def expected_failure(self, text):
+        return expected_rejection(text)
+
+    def reject_child(self, request):
+        raise ExpectedRejection
 
     def open(self, request, *, timeout):
         expected_path = {Protocol.CHAT: "/v1/chat/completions", Protocol.RESPONSES: "/v1/responses", Protocol.MESSAGES: "/v1/messages"}[self.protocol]
@@ -204,7 +213,7 @@ class Scenario:
                 try:
                     self.barrier.wait(timeout=5)  # Serial children must fail, never look concurrent.
                     if self.failure and role == "a":
-                        raise ExpectedRejection
+                        return self.reject_child(request)
                     alias = NamespaceMap().alias("mcp__p04", "p04_read_fixture")
                     tool = next(tool for tool in tools if tool.get("name") in {"Read", "p04_read_fixture", alias})
                     args = {"file_path": str(self.root / "fixture.txt")} if self.client == "claude" else {}
@@ -224,17 +233,17 @@ class Scenario:
         if self.client == "codex" and stage <= 2:
             return calls_wire(self.protocol, body["model"], [(spawn, {"message": TASKS[stage - 1] + " Read the local fixture"}, f"spawn_{stage - 1}")])
         returned = json.dumps(records)
-        complete = (expected_rejection(returned) and FINALS[1] in returned) if self.failure else all(marker in returned for marker in FINALS)
+        complete = (self.expected_failure(returned) and FINALS[1] in returned) if self.failure else all(marker in returned for marker in FINALS)
         if complete:
             return single.encode(self.protocol, body["model"], text=DONE)
         if self.client == "codex":
             identifiers = [single.agent_id([records.get(f"spawn_{index}")]) for index in range(2)]
-            pending = [identifier for index, identifier in enumerate(identifiers) if FINALS[index] not in returned and not (self.failure and index == 0 and expected_rejection(returned))]
+            pending = [identifier for index, identifier in enumerate(identifiers) if FINALS[index] not in returned and not (self.failure and index == 0 and self.expected_failure(returned))]
             return calls_wire(self.protocol, body["model"], [(single.find_tool(tools, "wait_agent"), {"targets": pending, "timeout_ms": 10000}, f"wait_{stage}")])
         raise ValueError("Parent did not replay both verified child results")
 
 
-def drive(scenario, adapter_source, *, claude_tools=None, claude_agent_tools=None, claude_depth=None):
+def drive(scenario, adapter_source, *, claude_tools=None, claude_agent_tools=None, claude_depth=None, gateway_limits=None):
     """Run an isolated scenario; acceptance belongs to the calling gate."""
     client, upstream = scenario.client, scenario.protocol
     original_client = smoke_clients.run_client
@@ -244,11 +253,18 @@ def drive(scenario, adapter_source, *, claude_tools=None, claude_agent_tools=Non
 
     def invoke(*args, **kwargs):
         scenario.root = Path(args[6])
+        if getattr(scenario, "disable_claude_retries", False):
+            args[5]["CLAUDE_CODE_MAX_RETRIES"] = "0"
         options = dict(kwargs.get("codex_config") or {})
         options["agents.max_concurrent_threads_per_session"] = 2
         kwargs.update(codex_config=options, prompt="Explicitly delegate two independent read-only tasks to two subagents, wait for both, then summarize.")
+        if getattr(scenario, "capture_trace", False):
+            kwargs["trace_file"] = scenario.root / "fault-trace.json"
         result = original_client(*args, **kwargs)
         scenario.result = result
+        if getattr(scenario, "capture_trace", False):
+            path = scenario.root / "fault-trace.json"
+            scenario.trace_data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
         audit = scenario.root / "mcp-audit.txt"
         scenario.audit_count = len(audit.read_text(encoding="utf-8").splitlines()) if audit.exists() else 0
         return result
@@ -257,7 +273,7 @@ def drive(scenario, adapter_source, *, claude_tools=None, claude_agent_tools=Non
     # single-child scenario and acceptance. No production monkeypatch or flag.
     with patch.object(smoke_clients, "fixture_server", fixture), patch.object(smoke_clients, "run_client", invoke):
         driver = single.run(client, upstream, adapter_source=adapter_source, claude_tools=claude_tools,
-                            claude_agent_tools=claude_agent_tools, claude_depth=claude_depth)
+                            claude_agent_tools=claude_agent_tools, claude_depth=claude_depth, gateway_limits=gateway_limits)
     return driver
 
 

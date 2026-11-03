@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import math
 import os
 import shutil
 import sys
@@ -133,9 +134,12 @@ def encode(protocol, model, *, text=None, tool=None, arguments=None, call_id="p0
     return io.BytesIO(b"".join(wire))
 
 
-def run(client, upstream, *, inspect_only=False, adapter_source=None, claude_tools=None, claude_agent_tools=None, claude_depth=None):
+def run(client, upstream, *, inspect_only=False, adapter_source=None, claude_tools=None, claude_agent_tools=None, claude_depth=None, gateway_limits=None):
     if claude_depth is not None and (type(claude_depth) is not int or not 1 <= claude_depth <= 3):
         raise ValueError("Fixture Claude depth must be an integer from 1 to 3")
+    limits = dict(gateway_limits or {})
+    if set(limits) - {"timeout", "progress_timeout", "total_timeout"} or any(isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value) or value <= 0 for value in limits.values()):
+        raise ValueError("Fixture gateway timeouts must be finite positive numbers")
     executable = shutil.which(client)
     if executable is None:
         raise RuntimeError(f"{client} not on PATH")
@@ -193,6 +197,14 @@ def run(client, upstream, *, inspect_only=False, adapter_source=None, claude_too
                     codex_options.pop(key)
 
         def process(args, **kwargs):
+            if adapter_source is not None and limits:
+                path = root / "adapter.toml"
+                content = path.read_text(encoding="utf-8")
+                marker = 'execution_mode = "gateway"\n'
+                if content.count(marker) != 1:
+                    raise ValueError("Fixture requires exactly one owned gateway provider")
+                inline = "{ " + ", ".join(key + " = " + repr(value) for key, value in sorted(limits.items())) + " }"
+                path.write_text(content.replace(marker, marker + "gateway_limits = " + inline + "\n"), encoding="utf-8")
             if client == "claude":
                 args[args.index("--tools") + 1] = claude_tools or "Agent,Read"
                 args[args.index("--allowedTools") + 1] = claude_tools or "Agent,Read"
@@ -251,7 +263,7 @@ def run(client, upstream, *, inspect_only=False, adapter_source=None, claude_too
             config = GatewayConfig(upstream, upstream_origin + "/v1", "fake-upstream-key", "p04-local-token",
                                    client_profile="codex" if client == "codex" else "claude",
                                    namespace_tools="flatten", messages_usage_policy="deferred" if client == "claude" and upstream != Protocol.MESSAGES else "strict",
-                                   default_max_output_tokens=4096)
+                                   default_max_output_tokens=4096, **limits)
             with gateway_session(config) as origin, patch.object(smoke_clients, "run_process", process):
                 result = smoke_clients.run_client(client, executable, origin, upstream_origin, config, env, directory,
                                                  True, adapter_source, False, upstream, 45, model,
