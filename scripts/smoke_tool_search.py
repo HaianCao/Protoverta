@@ -119,7 +119,10 @@ def run(upstream, adapter_source=None, installed_adapter=False):
         model.update(slug="protoverta-search-fixture", display_name="Local search fixture", supports_search_tool=True, support_verbosity=False, apply_patch_tool_type=None, tool_mode=None, experimental_supported_tools=[])
         catalog_path = root / "models.json"
         catalog_path.write_text(json.dumps({"models": [model]}), encoding="utf-8")
-        options = {"model_catalog_json": str(catalog_path), "mcp_servers.fixture.command": sys.executable, "mcp_servers.fixture.args": [str(Path(__file__).resolve()), "--mcp"], "mcp_servers.fixture.required": True, "features.multi_agent": False, "features.daemon_auto_start": False, "features.apps": False, "features.plugins": False}
+        from harness_policy import codex_settings
+
+        options = {"model_catalog_json": str(catalog_path), "mcp_servers.fixture.command": sys.executable, "mcp_servers.fixture.args": [str(Path(__file__).resolve()), "--mcp"], "mcp_servers.fixture.required": True, "features.daemon_auto_start": False, "features.apps": False, "features.plugins": False}
+        options.update(codex_settings(executable, adapter_source))
         if adapter_source is not None or installed_adapter:
             # Exercise the wrapper's session-scoped integration, not only raw
             # Codex -c options. The catalog belongs only to this fixture model.

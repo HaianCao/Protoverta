@@ -19,6 +19,7 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib.request import Request
 
+from harness_policy import claude_environment, codex_settings
 from probe_process import run_process
 
 from protoverta.core import Protocol, convert_request
@@ -349,7 +350,6 @@ def run_client(
             "model_providers.protoverta_smoke.stream_max_retries": 0,
             "web_search": "disabled",
             "model_reasoning_summary": "none",
-            "features.multi_agent": False,
             # Keep persistent fixture threads from starting a background daemon
             # that can inherit captured pipes beyond the isolated CLI lifetime.
             "features.daemon_auto_start": False,
@@ -358,6 +358,7 @@ def run_client(
             "features.remote_plugin": False,
             "check_for_update_on_startup": False,
         }
+        settings.update(codex_settings(executable, adapter_source))
         settings.update(codex_config or {})
         args = [
             executable,
@@ -381,14 +382,11 @@ def run_client(
         env["ANTHROPIC_BASE_URL"] = origin
         env["ANTHROPIC_AUTH_TOKEN"] = config.inbound_token
         if upstream != Protocol.MESSAGES:
+            env.update(claude_environment([executable], adapter_source))
             env.update(
                 {
                     "MAX_THINKING_TOKENS": "0",
                     "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING": "1",
-                    "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1",
-                    "CLAUDE_CODE_DISABLE_STRUCTURED_OUTPUTS": "1",
-                    "DISABLE_PROMPT_CACHING": "1",
-                    "ENABLE_TOOL_SEARCH": "false",
                 }
             )
         args = [

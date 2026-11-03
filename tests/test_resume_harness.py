@@ -20,6 +20,10 @@ def harness(monkeypatch):
 @pytest.mark.parametrize("client", ["codex", "claude"])
 @pytest.mark.parametrize("persist", [False, True])
 def test_harness_preserves_opt_in_session_and_resume_arguments(harness, monkeypatch, tmp_path, client, persist):
+    # This test supplies a fake checkout and executable to inspect argv only.
+    # Version discovery/source policy loading has its own real-fixture tests.
+    monkeypatch.setattr(harness, "codex_settings", lambda *_: {"features.multi_agent": False})
+    monkeypatch.setattr(harness, "claude_environment", lambda *_: {"ENABLE_TOOL_SEARCH": "false"})
     captured = {}
 
     def run(args, **kwargs):
