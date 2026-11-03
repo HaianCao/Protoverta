@@ -61,6 +61,17 @@ class WindowsProbeJob:
         if not self.kernel.TerminateJobObject(self.handle, 124):
             raise ctypes.WinError(ctypes.get_last_error())
 
+    def process_ids(self):
+        """Exact bounded membership of this job; refuse truncated snapshots."""
+        buffer = ctypes.create_string_buffer(8 + ctypes.sizeof(ctypes.c_size_t) * 128)
+        if not self.kernel.QueryInformationJobObject(self.handle, 3, buffer, len(buffer), None):
+            raise ctypes.WinError(ctypes.get_last_error())
+        assigned = ctypes.c_uint32.from_buffer(buffer, 0).value
+        count = ctypes.c_uint32.from_buffer(buffer, 4).value
+        if assigned != count or count > 128:
+            raise RuntimeError("Probe job membership snapshot was truncated")
+        return {ctypes.c_size_t.from_buffer(buffer, 8 + index * ctypes.sizeof(ctypes.c_size_t)).value for index in range(count)}
+
     def process_images(self):
         """Image basenames of this probe job only; never inspect command lines."""
         from ctypes import wintypes
