@@ -53,6 +53,7 @@ def fixture_server(scenario):
                 if not 0 <= length <= 4 * 1024 * 1024:
                     raise ValueError("Fixture request size limit")
                 request = Request("http://127.0.0.1" + self.path, data=self.rfile.read(length))
+                request.fixture_connection = self.connection
                 with scenario.open(request, timeout=10) as stream:
                     wire = stream.read()
                 status = 200
@@ -64,12 +65,12 @@ def fixture_server(scenario):
                 scenario.errors.append(type(exc).__name__)
                 wire = b'{"error":{"message":"Synthetic fixture rejected an unexpected request"}}'
                 status = 422
-            self.send_response(status)
-            self.send_header("Content-Type", "text/event-stream" if status == 200 else "application/json")
-            self.send_header("Content-Length", str(len(wire)))
-            self.send_header("x-should-retry", "false")
-            self.end_headers()
             try:
+                self.send_response(status)
+                self.send_header("Content-Type", "text/event-stream" if status == 200 else "application/json")
+                self.send_header("Content-Length", str(len(wire)))
+                self.send_header("x-should-retry", "false")
+                self.end_headers()
                 self.wfile.write(wire)
             except OSError:
                 pass
@@ -233,8 +234,9 @@ class Scenario:
         raise ValueError("Parent did not replay both verified child results")
 
 
-def run(client, upstream, adapter_source, *, failure=False):
-    scenario = Scenario(client, upstream, failure)
+def drive(scenario, adapter_source, *, claude_tools=None, claude_agent_tools=None, claude_depth=None):
+    """Run an isolated scenario; acceptance belongs to the calling gate."""
+    client, upstream = scenario.client, scenario.protocol
     original_client = smoke_clients.run_client
 
     def fixture(_single_child_callback):
@@ -254,7 +256,14 @@ def run(client, upstream, adapter_source, *, failure=False):
     # Reuse P04's isolated catalog/config/process ownership; replace only its
     # single-child scenario and acceptance. No production monkeypatch or flag.
     with patch.object(smoke_clients, "fixture_server", fixture), patch.object(smoke_clients, "run_client", invoke):
-        driver = single.run(client, upstream, adapter_source=adapter_source)
+        driver = single.run(client, upstream, adapter_source=adapter_source, claude_tools=claude_tools,
+                            claude_agent_tools=claude_agent_tools, claude_depth=claude_depth)
+    return driver
+
+
+def run(client, upstream, adapter_source, *, failure=False):
+    scenario = Scenario(client, upstream, failure)
+    driver = drive(scenario, adapter_source)
     result = scenario.result
     lifecycle = result is not None and completed_lifecycle(client, result.stdout, failure=failure)
     passed = (result is not None and result.returncode == 0 and DONE in result.stdout and lifecycle

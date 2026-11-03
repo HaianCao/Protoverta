@@ -133,7 +133,9 @@ def encode(protocol, model, *, text=None, tool=None, arguments=None, call_id="p0
     return io.BytesIO(b"".join(wire))
 
 
-def run(client, upstream, *, inspect_only=False, adapter_source=None):
+def run(client, upstream, *, inspect_only=False, adapter_source=None, claude_tools=None, claude_agent_tools=None, claude_depth=None):
+    if claude_depth is not None and (type(claude_depth) is not int or not 1 <= claude_depth <= 3):
+        raise ValueError("Fixture Claude depth must be an integer from 1 to 3")
     executable = shutil.which(client)
     if executable is None:
         raise RuntimeError(f"{client} not on PATH")
@@ -154,6 +156,9 @@ def run(client, upstream, *, inspect_only=False, adapter_source=None):
             path = root / key
             path.mkdir()
             env[key] = str(path)
+        runtime_temp = root / "runtime-temp"
+        runtime_temp.mkdir()
+        env.update(TEMP=str(runtime_temp), TMP=str(runtime_temp))
         env.update(CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1", CLAUDE_CODE_DISABLE_AUTO_MEMORY="1",
                    GIT_ALLOW_PROTOCOL="file", GIT_TERMINAL_PROMPT="0", NO_PROXY="127.0.0.1,localhost",
                    PROTOVERTA_SMOKE_TOKEN="p04-local-token")
@@ -189,10 +194,12 @@ def run(client, upstream, *, inspect_only=False, adapter_source=None):
 
         def process(args, **kwargs):
             if client == "claude":
-                args[args.index("--tools") + 1] = "Agent,Read"
-                args[args.index("--allowedTools") + 1] = "Agent,Read"
-                args += ["--agents", json.dumps({"p04-worker": {"description": "Read the synthetic local fixture", "prompt": "Read only the requested fixture file and return its value.", "tools": ["Read"], "model": "inherit"}})]
+                args[args.index("--tools") + 1] = claude_tools or "Agent,Read"
+                args[args.index("--allowedTools") + 1] = claude_tools or "Agent,Read"
+                args += ["--agents", json.dumps({"p04-worker": {"description": "Read the synthetic local fixture", "prompt": "Read only the requested fixture file and return its value.", "tools": claude_agent_tools or ["Read"], "model": "inherit"}})]
                 kwargs["env"].update(CLAUDE_CODE_SUBAGENT_MODEL=model, CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
+                if claude_depth is not None:
+                    kwargs["env"]["CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH"] = str(claude_depth)
             return original_process(args, **kwargs)
 
         def open_upstream(request, *, timeout):
@@ -213,7 +220,7 @@ def run(client, upstream, *, inspect_only=False, adapter_source=None):
                 if len(observed) > 10:
                     raise ValueError("Fixture exceeded request budget")
             for tool in tools:
-                if any(word in tool.get("name", "").lower() for word in ("spawn", "agent", "wait", "exec_command", "shell_command", "read")):
+                if any(word in tool.get("name", "").lower() for word in ("spawn", "agent", "wait", "exec_command", "shell_command", "read", "task")):
                     schemas[tool["name"]] = {key: tool[key] for key in ("name", "namespace", "parameters") if key in tool}
             if inspect_only:
                 return encode(upstream, body["model"], text=DONE)
