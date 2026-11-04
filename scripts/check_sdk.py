@@ -15,6 +15,7 @@ from test_environment import sanitized_environment
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--installed", action="store_true", help="Test installed core, disabling pytest's source path")
+    parser.add_argument("--allow-candidate-sdk", action="store_true", help="Evaluate candidate SDK versions in a separate evaluation job without replacing the pinned baseline gate")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     requirements = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["optional-dependencies"]["sdk-test"]
@@ -24,7 +25,7 @@ def main():
             actual = importlib.metadata.version(name)
         except importlib.metadata.PackageNotFoundError:
             parser.error("SDK gate requires the pinned sdk-test extra; missing " + name)
-        if actual != expected:
+        if actual != expected and not args.allow_candidate_sdk:
             parser.error("SDK gate requires exact pinned version for " + name)
     env = sanitized_environment()
     if not args.installed:

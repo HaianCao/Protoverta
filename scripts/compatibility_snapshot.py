@@ -12,6 +12,21 @@ from pathlib import Path
 
 from test_environment import sanitized_environment
 
+CLI_VERSION_MATRIX = {
+    "codex": {
+        "accepted_baselines": ["0.163.0", "0.164.0", "0.166.0"],
+        "evaluated_candidates": ["0.166.0"],
+    },
+    "claude": {
+        "accepted_baselines": ["2.1.308"],
+        "evaluated_candidates": ["2.1.308"],
+    },
+}
+PINNED_SDK_BASELINE = {
+    "openai": "3.37.0",
+    "anthropic": "2.3.0",
+}
+
 
 def project_identity(root):
     body = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]
@@ -36,7 +51,10 @@ def snapshot(workspace):
             dependencies[package] = None
     return {"schema_version": 1, "python": platform.python_version(), "os": sys.platform,
             "projects": [project_identity(workspace / name) for name in ("protoverta", "free-codex-cli", "free-claude-cli")],
-            "test_dependencies": dependencies, "provider_certification": False,
+            "test_dependencies": dependencies,
+            "cli_version_matrix": CLI_VERSION_MATRIX,
+            "pinned_sdk_baseline": PINNED_SDK_BASELINE,
+            "provider_certification": False,
             "scope": "Source identity only. Attach named validation results; a snapshot is not a passed test or CLI/provider compatibility claim."}
 
 

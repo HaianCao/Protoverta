@@ -33,7 +33,27 @@ cases fail. The runner is trusted test tooling: a source revision check does not
 prove that an arbitrary operator-supplied bundle was built from that source.
 Keep its hash with the test record. No foreign source/validator is vendored.
 
-## Latest result, 2026-10-28
+## Latest result, 2026-11-04 (P13 Re-audit)
+
+Re-running the unmodified pinned suite (`8907bc3b7c4300ff5c21fd647cfde9929243afa1`)
+in `P13` confirms **0 passed, 12 failed, 0 skipped** (`summary.outcome=FAILED_FULL_SCHEMA`,
+exit code `1`). Reports now also classify every missing or mismatched field by
+provenance (`summary.provenance_classes`):
+
+- `gateway-owned`: `truncation` (10) — plus already satisfied `id`, `object`,
+  `created_at`, `completed_at`, `status`, `store=False`, `background=False`,
+  `previous_response_id=None`, `max_tool_calls=None`, `safety_identifier=None`,
+  `prompt_cache_key=None`.
+- `request-declared`: `parallel_tool_calls` (12), `temperature` (12), `text` (10),
+  `tool_choice` (12), `tools` (10), `top_p` (12) — restored by `response_context.py`
+  when the inbound request explicitly declares them, and never fabricated when
+  omitted by the compliance runner.
+- `upstream-measured`: `service_tier` (12), `usage` (6 on Messages where
+  `reasoning_tokens` is unavailable).
+- `unavailable`: `frequency_penalty` (12), `presence_penalty` (12),
+  `top_logprobs` (12) — outside the portable 3-protocol subset.
+
+## Previous result, 2026-10-28
 
 After the K1 request-policy correction and the K2 nullable metadata fixes, the
 same pinned suite still reports **0 passed, 12 failed, 0 skipped**. The audit

@@ -47,12 +47,26 @@ def fixture(protocol):
     return upstream
 
 
+def classify_missing_field(field):
+    root = field.split(".", 1)[0]
+    if root in {"id", "object", "created_at", "completed_at", "status", "incomplete_details", "store", "background", "previous_response_id", "max_tool_calls", "safety_identifier", "prompt_cache_key", "truncation"}:
+        return "gateway-owned"
+    if root in {"instructions", "max_output_tokens", "tools", "tool_choice", "parallel_tool_calls", "text", "temperature", "top_p"}:
+        return "request-declared"
+    if root in {"usage", "service_tier"}:
+        return "upstream-measured"
+    if root in {"presence_penalty", "frequency_penalty", "top_logprobs"}:
+        return "unavailable"
+    return "unavailable"
+
+
 def summarize(reports):
     counts = Counter(item["status"] for report in reports for item in report["results"])
     total = sum(counts.values())
     passed = len(reports) == 2 and {report["upstream"] for report in reports} == {"chat", "messages"} and total == 2 * len(CASES) and counts["passed"] == total and all(report["exit_code"] == 0 for report in reports)
     fields = Counter(error.split(":", 1)[0] for report in reports for item in report["results"] for error in item["errors"])
     groups = {}
+    provenance_classes = {}
     for field, count in sorted(fields.items()):
         root = field.split(".", 1)[0]
         if root in {"tools", "tool_choice", "parallel_tool_calls", "text", "temperature", "top_p"}:
@@ -64,8 +78,9 @@ def summarize(reports):
         else:
             group = "envelope_or_unclassified"
         groups.setdefault(group, {})[field] = count
+        provenance_classes.setdefault(classify_missing_field(field), {})[field] = count
     return {"outcome": "PASSED_FULL_SCHEMA" if passed else "FAILED_FULL_SCHEMA", "passed": counts["passed"], "failed": counts["failed"],
-            "skipped": counts["skipped"], "total": total, "field_groups": groups}
+            "skipped": counts["skipped"], "total": total, "field_groups": groups, "provenance_classes": provenance_classes}
 
 
 def validate_cases(output):
