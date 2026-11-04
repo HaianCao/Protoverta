@@ -80,6 +80,16 @@ class Result:
     cached_input_tokens: int | None = None
     cache_creation_input_tokens: int | None = None
     reasoning_output_tokens: int | None = None
+    service_tier: str | None = None
+
+
+def _reported_service_tier(value: Any) -> str | None:
+    """Bounded common Chat/Responses observation, never a request default."""
+    if value is None:
+        return None
+    if not isinstance(value, str) or value not in {"auto", "default", "flex", "scale", "priority", "fast"}:
+        raise ConversionError("upstream service_tier is not supported by the portable contract")
+    return value
 
 
 def _decode_usage(usage: dict[str, Any], source: Protocol) -> dict[str, int | None]:
@@ -931,7 +941,7 @@ def _decode_result(body: dict[str, Any], source: Protocol, *, public_reasoning: 
             raise ConversionError(f"unsupported Chat finish_reason: {reason}")
         if reason != "length" and (reason == "tool_calls") != any(p.kind == "tool_call" for p in parts):
             raise ConversionError("Chat tool_calls finish reason does not match output")
-        return Result(_string(body.get("model"), "model"), parts, reason, **_decode_usage(usage, source))
+        return Result(_string(body.get("model"), "model"), parts, reason, service_tier=_reported_service_tier(body.get("service_tier")), **_decode_usage(usage, source))
     if source == Protocol.MESSAGES:
         if body.get("role") not in (None, "assistant"):
             raise ConversionError("Messages response must have assistant role")
@@ -985,7 +995,7 @@ def _decode_result(body: dict[str, Any], source: Protocol, *, public_reasoning: 
         reason = "length"
     else:
         reason = "tool_calls" if any(p.kind == "tool_call" for p in parts) else "stop"
-    return Result(_string(body.get("model"), "model"), parts, reason, **_decode_usage(usage, source))
+    return Result(_string(body.get("model"), "model"), parts, reason, service_tier=_reported_service_tier(body.get("service_tier")), **_decode_usage(usage, source))
 
 
 def _encode_result(result: Result, target: Protocol) -> dict[str, Any]:
@@ -1015,6 +1025,8 @@ def _encode_result(result: Result, target: Protocol) -> dict[str, Any]:
         if calls:
             message["tool_calls"] = [_encode_chat_call(p) for p in calls]
         out: dict[str, Any] = {"id": "chatcmpl-" + secrets.token_hex(12), "created": int(time.time()), "object": "chat.completion", "model": result.model, "choices": [{"index": 0, "message": message, "finish_reason": result.finish_reason}]}
+        if result.service_tier is not None:
+            out["service_tier"] = _reported_service_tier(result.service_tier)
         if result.input_tokens is not None and result.output_tokens is not None:
             out["usage"] = _encode_usage(result, target)
         return out
@@ -1040,6 +1052,8 @@ def _encode_result(result: Result, target: Protocol) -> dict[str, Any]:
     # Request context can restore actual instructions/limits at the gateway;
     # provider sampling defaults and token details must remain unknown.
     out.update(generated_response_metadata())
+    if result.service_tier is not None:
+        out["service_tier"] = _reported_service_tier(result.service_tier)
     out["completed_at"] = int(time.time()) if out["status"] == "completed" else None
     if result.input_tokens is not None and result.output_tokens is not None:
         out["usage"] = _encode_usage(result, target)

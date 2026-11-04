@@ -1,0 +1,175 @@
+{
+  "date": "2026-11-04",
+  "scope": "Reported output tier preservation; synthetic Windows source/wheel validation, not billing/provider/full-schema certification",
+  "prior_commit": "c368f9a416d47b874cac6e1035b93c907daafbfa",
+  "followup_uncommitted": true,
+  "source": {
+    "protoverta": {
+      "name": "protoverta",
+      "version": "0.3.0a8",
+      "head": "c368f9a416d47b874cac6e1035b93c907daafbfa",
+      "dirty": true,
+      "runtime_sha256": "f8b345a60d856b6ab3e5316f120861daf519af52dcb5d8e0df93ef8060715701"
+    },
+    "free-codex-cli": {
+      "name": "codexapter",
+      "version": "0.2.0a2",
+      "head": "e698b097e1686b9e9d6620770379d1cc9c502283",
+      "dirty": false,
+      "runtime_sha256": "0a9725d69b2dd2dccf54d1c8b5288094d285c85e6498b70278531e94ce094ff0"
+    },
+    "free-claude-cli": {
+      "name": "claudapter",
+      "version": "0.2.0a2",
+      "head": "f85e06f245070fd770622789f4dacd1bd0ff7fa1",
+      "dirty": false,
+      "runtime_sha256": "821680bfa6f1bd08819649648c90059fe6f407ca00894562c6eb5f58a2631aef"
+    }
+  },
+  "wheels": [
+    {
+      "file": "protoverta-0.3.0a8-py3-none-any.whl",
+      "sha256": "b005930caf4394a6a2bc8f7de371f17bbc51a967c20e8c1f0cbe0f1a300a36b0",
+      "source_files_matched": 44
+    },
+    {
+      "file": "codexapter-0.2.0a2-py3-none-any.whl",
+      "sha256": "531e3b02e48a161fa91fbbc05ba30741053d8dd57d970306524554ba5a3f2530",
+      "source_files_matched": 27
+    },
+    {
+      "file": "claudapter-0.2.0a2-py3-none-any.whl",
+      "sha256": "fa45ce17b53fae73120da1adc05500659d4d32647e42b801c362beb7b68ba5ba",
+      "source_files_matched": 24
+    }
+  ],
+  "all_imports_verified_site_packages": true,
+  "current_core_suite_passed": 2346,
+  "new_reported_tier_tests": 61,
+  "installed_sdk": {
+    "python": "3.13.9",
+    "platform": "win32",
+    "baseline_sdk": {
+      "openai": "3.37.0",
+      "anthropic": "2.3.0"
+    },
+    "actual_sdk": {
+      "openai": "3.37.0",
+      "anthropic": "2.3.0"
+    },
+    "candidate_mode": false,
+    "sdk_version_drift": false,
+    "installed": true,
+    "outcome": "PASSED",
+    "testcases": 29,
+    "expected_testcases": 29,
+    "provider_requests": 0
+  },
+  "property_tests_passed": 24,
+  "property_examples_each": 50,
+  "scoped_types_passed": true,
+  "clients": [
+    {
+      "client": "codex",
+      "upstream": "chat",
+      "passed": true,
+      "returncode": 0,
+      "rounds": 2,
+      "tool_result_count": 2
+    },
+    {
+      "client": "codex",
+      "upstream": "messages",
+      "passed": true,
+      "returncode": 0,
+      "rounds": 2,
+      "tool_result_count": 2
+    },
+    {
+      "client": "codex",
+      "upstream": "responses",
+      "passed": true,
+      "returncode": 0,
+      "rounds": 2,
+      "tool_result_count": 2
+    },
+    {
+      "client": "claude",
+      "upstream": "chat",
+      "passed": true,
+      "returncode": 0,
+      "rounds": 2,
+      "tool_result_count": 2
+    },
+    {
+      "client": "claude",
+      "upstream": "messages",
+      "passed": true,
+      "returncode": 0,
+      "rounds": 2,
+      "tool_result_count": 2
+    },
+    {
+      "client": "claude",
+      "upstream": "responses",
+      "passed": true,
+      "returncode": 0,
+      "rounds": 2,
+      "tool_result_count": 2
+    }
+  ],
+  "prior_unchanged_launcher_source_suites": {
+    "receipt": "tool-policy-validation-2026-11-04.json",
+    "codex": 400,
+    "codex_subtests": 12,
+    "claude": 432,
+    "rerun_this_followup": false
+  },
+  "audit": {
+    "report": "reported-tier-audit-2026-11-04.json",
+    "summary": {
+      "outcome": "FAILED_FULL_SCHEMA",
+      "passed": 0,
+      "failed": 12,
+      "skipped": 0,
+      "total": 12,
+      "field_groups": {
+        "controls_outside_portable_subset": {
+          "frequency_penalty": 12,
+          "presence_penalty": 12,
+          "top_logprobs": 12
+        },
+        "upstream_measurements_or_provider_facts": {
+          "service_tier": 12,
+          "usage": 6
+        },
+        "request_metadata_or_nullable_tool_fields": {
+          "temperature": 12,
+          "top_p": 12
+        }
+      },
+      "provenance_classes": {
+        "unavailable": {
+          "frequency_penalty": 12,
+          "presence_penalty": 12,
+          "top_logprobs": 12
+        },
+        "upstream-measured": {
+          "service_tier": 12,
+          "usage": 6
+        },
+        "request-declared": {
+          "temperature": 12,
+          "top_p": 12
+        }
+      }
+    },
+    "field_error_occurrences": 78,
+    "full_schema_passed": false
+  },
+  "preview_directory": "C:\\Users\\caoha\\AppData\\Local\\ProtovertaPreviews\\snapshot-20261104-tier-final",
+  "live_provider_requests": 0,
+  "remote_ci_executed": false,
+  "new_soak_executed": false,
+  "pushed": false
+}

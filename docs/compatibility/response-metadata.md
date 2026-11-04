@@ -114,4 +114,9 @@ explicit zero values are retained. Generated Responses metadata reflects the
 actual outgoing values. Without a matching profile or explicit request values,
 sampling remains unknown. See [sampling profiles](sampling-profiles.md).
 
+Upstream-reported `service_tier` is preserved on generated Chat/Responses output
+when present and portable. It is not restored from request context or assumed
+from a provider default. Streams report it at completion rather than claiming
+it in an early created snapshot; see [reported serving tier](service-tier.md).
+
 Reference: [OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling).

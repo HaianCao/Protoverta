@@ -35,6 +35,11 @@ Keep its hash with the test record. No foreign source/validator is vendored.
 
 ## Latest result, 2026-11-04 (effective tool policy)
 
+Follow-up: [reported service-tier preservation](reported-tier-2026-11-04.md)
+retains actual Chat/Responses tier observations. The same pinned baseline was
+rerun unchanged and still has 78 field findings, because it supplies no tier.
+This follow-up is not full-schema acceptance.
+
 The unchanged pinned runner reports **0 passed, 12 failed, 0 skipped**, exit
 code **1**. Field-error occurrences fall from **112 to 78**: `tools`,
 `tool_choice` and `parallel_tool_calls` no longer have findings. These are 34

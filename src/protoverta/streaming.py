@@ -15,6 +15,7 @@ from .core import (
     Protocol,
     _arguments,
     _decode_usage,
+    _reported_service_tier,
     _validate_response_item,
 )
 from .errors import UnsupportedFeatureError
@@ -60,6 +61,7 @@ class Delta:
     cache_creation_input_tokens: int | None = None
     reasoning_output_tokens: int | None = None
     tool_type: str = "function"
+    service_tier: str | None = None
 
 
 def _obj(value: Any, label: str) -> dict[str, Any]:
@@ -160,6 +162,17 @@ class StreamDecoder:
         self.saw_trailing_done = False
         self.raw_usage: dict[str, Any] = {}
         self.usage_details: dict[str, int | None] = {}
+        self.service_tier: str | None = None
+
+    def _tier(self, value: Any) -> None:
+        try:
+            reported = _reported_service_tier(value)
+        except ConversionError as exc:
+            raise StreamError(str(exc)) from exc
+        if reported is not None:
+            if self.service_tier is not None and reported != self.service_tier:
+                raise StreamError("upstream service_tier changed within a Chat stream")
+            self.service_tier = reported
 
     def _usage(self, usage: dict[str, Any]) -> None:
         self.raw_usage.update(usage)
@@ -213,7 +226,7 @@ class StreamDecoder:
         if reason != "length" and (reason == "tool_calls") != self.saw_tool:
             raise StreamError("finish reason disagrees with tool calls")
         self.ended = True
-        return [Delta("finish", reason=reason, input_tokens=self.input_tokens, output_tokens=self.output_tokens, **self.usage_details)]
+        return [Delta("finish", reason=reason, input_tokens=self.input_tokens, output_tokens=self.output_tokens, service_tier=self.service_tier, **self.usage_details)]
 
     def _chat(self, event: SSEEvent) -> list[Delta]:
         if event.data == "[DONE]":
@@ -231,6 +244,7 @@ class StreamDecoder:
         body = _json_event(event, "Chat chunk")
         if body.get("object") != "chat.completion.chunk":
             raise StreamError("invalid Chat chunk object")
+        self._tier(body.get("service_tier"))
         deltas = self._start(body.get("model")) if not self.started else []
         if body.get("model") != self.model:
             raise StreamError("model changed within Chat stream")
@@ -656,6 +670,9 @@ class StreamDecoder:
                 raise StreamError("incomplete Responses item in completed response")
             usage = _obj(response.get("usage") or {}, "Responses usage")
             self._usage(usage)
+            # Created snapshots may still describe a requested processing mode.
+            # Only the terminal response supplies the final reported tier.
+            self._tier(response.get("service_tier"))
             return self._complete(reason)
         raise StreamError(f"unsupported Responses event: {kind}")
 

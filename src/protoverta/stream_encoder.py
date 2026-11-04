@@ -13,7 +13,13 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
-from .core import ConversionError, Protocol, _arguments, _encode_usage
+from .core import (
+    ConversionError,
+    Protocol,
+    _arguments,
+    _encode_usage,
+    _reported_service_tier,
+)
 from .json_wire import encode_json
 from .reasoning import reasoning_item
 from .response_context import generated_response_metadata
@@ -65,6 +71,7 @@ class StreamEncoder:
         self.saw_tool = False
         self.message_output_index: int | None = None
         self.initial_input_tokens: int | None = None
+        self.service_tier: str | None = None
 
     def finish(self) -> None:
         if not self.ended:
@@ -197,6 +204,7 @@ class StreamEncoder:
             "output": self.output.copy() if status != "in_progress" else [],
             **generated_response_metadata(),
             "usage": usage, "user": None, "metadata": {},
+            **({"service_tier": self.service_tier} if self.service_tier is not None else {}),
         }
 
     def _chat_chunk(self, choices: list[dict[str, Any]], usage: dict[str, int] | None = None) -> SSEEvent:
@@ -205,6 +213,8 @@ class StreamEncoder:
         body: dict[str, Any] = {"id": self.id, "object": "chat.completion.chunk", "created": self.created, "model": self.model, "choices": choices}
         if usage is not None:
             body["usage"] = usage
+        if self.service_tier is not None:
+            body["service_tier"] = self.service_tier
         return _event("message", body)
 
     def _start(self, delta: Delta) -> list[SSEEvent]:
@@ -341,6 +351,10 @@ class StreamEncoder:
         ]
 
     def _finish(self, delta: Delta) -> list[SSEEvent]:
+        try:
+            self.service_tier = _reported_service_tier(delta.service_tier)
+        except ConversionError as exc:
+            raise StreamError(str(exc)) from exc
         if self.protocol == Protocol.CHAT:
             events = [self._chat_chunk([{"index": 0, "delta": {}, "finish_reason": delta.reason}])]
             if delta.input_tokens is not None and delta.output_tokens is not None:
