@@ -1,6 +1,7 @@
 # Local Codex client acceptance checks
 
-Checked with Codex CLI **0.164.0** on Windows, using scripted loopback upstreams
+Checked with Codex CLI **0.164.0** and **0.166.0** (plus Claude Code **2.1.308**
+for subagent/tool schema inspection) on Windows, using scripted loopback upstreams
 and disposable client state. No live provider requests or user-session changes.
 This is client/protocol evidence, not model/provider certification.
 

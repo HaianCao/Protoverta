@@ -79,9 +79,36 @@ This is an explicit function-emulation policy, not native provider search or
 a guarantee of native deferred-loading/cache placement. Real-client search
 fixtures are a separate gate from codec tests.
 The [Codex client acceptance checks](client-gates.md) record a passing native
-control and both translated Chat/Messages search→MCP-tool loops on CLI 0.164.0,
-including source and isolated installed launchers. These use synthetic model
-metadata/upstreams and do not certify provider support.
+control and both translated Chat/Messages search→MCP-tool loops on CLI 0.164.0
+and CLI 0.166.0, including source and isolated installed launchers. These use
+synthetic model metadata/upstreams and do not certify provider support.
+
+## Claude `tool_reference` and `DeferredToolPlaceholder` boundary
+
+Claude Code (`2.1.308`) supports deferred tool search when its own tool-search
+feature is enabled, emitting `tool_reference` content blocks inside `tool_result`
+items on `/v1/messages`. Because neither OpenAI Chat Completions nor OpenAI
+Responses defines a cross-protocol wire equivalent for `tool_reference` blocks:
+
+- `claudapter` enforces `ENABLE_TOOL_SEARCH=false` in the child Claude Code
+  process environment so Claude Code sends standard `Agent`,
+  `DeferredToolPlaceholder`, and concrete tool schemas instead of dynamic
+  `tool_reference` blocks.
+- Any raw `tool_reference` block arriving on `/v1/messages` is rejected
+  immediately with `ConversionError("unsupported Messages block: tool_reference")`
+  rather than silently dropped or coerced into plain text.
+
+## Client versus hosted tool classification
+
+`request_features()` and `GatewayCapabilities` distinguish client-executed tools
+from provider-hosted tools:
+
+- Client-executed tools (`type: "function"`, `type: "custom"`, `type: "namespace"`,
+  and `{"type": "tool_search", "execution": "client"}`) are classified under
+  `tools` / `custom_tools`, never `hosted_tools`.
+- Server/hosted tools (`{"type": "tool_search", "execution": "server"}`,
+  `web_search_preview`, and other provider-executed tool types) are classified as
+  `hosted_tools` and fail closed on cross-protocol translation.
 
 ## Sources
 

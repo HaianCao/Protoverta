@@ -161,6 +161,8 @@ def request_features(body: dict, protocol: Protocol | str) -> frozenset[str]:
             if kind == "namespace":
                 nested = tool.get("tools", [])
                 return isinstance(nested, list) and any(isinstance(item, dict) and hosted(item) for item in nested)
+            if kind == "tool_search" and tool.get("execution") == "client":
+                return False
             return kind not in ("function", "custom")
         if any(hosted(tool) for tool in tools):
             features.add("hosted_tools")
