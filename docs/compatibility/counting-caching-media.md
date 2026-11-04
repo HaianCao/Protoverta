@@ -82,6 +82,10 @@ translation requires its own verified contract before changing that launcher fla
 | PDF URL / uploaded file ID | Rejected across protocols | Native forwarding remains provider-owned; gateway never fetches/uploads files |
 | PDF title/context/citations | Rejected across protocols | No silent loss or conversion of citations into plain text |
 | PDF in tool results or generated PDF output | Rejected | Not silently turned into an empty text result or moved to a user role |
+| Structured text-part arrays in tool results | All six request directions | Preserved as structured content blocks in Messages ↔ Responses and joined into tool string content in Chat without changing role |
+| Image-bearing tool results | Messages ↔ Responses | Rejected when Chat is source or target because Chat `role: "tool"` has no portable image block contract and images are never relocated into `role: "user"` |
+| Error tool results (`is_error=true`) | Policy-specific (`client_profile="claude"`) | Rejected in strict mode; prefixed with `[Tool execution error]\n` under `claude` client profile |
+| Resource links in tool results | Rejected across all six directions | Adapter never dereferences or strips MCP/external resource URIs |
 | Audio/video | Rejected across these portable routes | Native compatible endpoint contract remains separate; no invented transcript/audio/image substitution |
 | Hosted web/file search, computer use | Rejected as portable function tools | Native provider tool lifecycle can be forwarded; adapter does not execute hosted tools |
 | Responses compaction | Native `POST /v1/responses/compact` only | Non-streaming native forwarding with normal auth, resource limits and optional capability checks |

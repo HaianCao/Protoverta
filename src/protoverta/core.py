@@ -349,7 +349,18 @@ def _decode_chat(body: dict[str, Any], *, public_reasoning: bool = False) -> Req
             turns.append(Turn(role, parts))
         elif role == "tool":
             _only(item, {"role", "tool_call_id", "content"}, "tool message")
-            turns.append(Turn("user", [Part("tool_result", call_id=_string(item.get("tool_call_id"), "tool_call_id"), text=_string(item.get("content"), "tool content"))]))
+            tool_content = item.get("content")
+            tool_rich = None
+            if isinstance(tool_content, list):
+                tool_parts = _chat_content(tool_content, "tool content")
+                if any(part.kind != "text" for part in tool_parts):
+                    raise ConversionError("Chat tool results support text content only")
+                tool_text = "".join(part.text for part in tool_parts)
+                if tool_parts:
+                    tool_rich = tool_parts
+            else:
+                tool_text = _string(tool_content, "tool content")
+            turns.append(Turn("user", [Part("tool_result", call_id=_string(item.get("tool_call_id"), "tool_call_id"), text=tool_text, result_parts=tool_rich)]))
         else:
             raise ConversionError(f"unsupported Chat role: {role}")
     tools: list[dict[str, Any]] = []
@@ -393,15 +404,19 @@ def _message_parts(content: Any, label: str) -> list[Part]:
             parts.append(Part("tool_call", call_id=_string(block.get("id"), "tool_use.id"), name=_string(block.get("name"), "tool_use.name"), arguments=arguments))
         elif kind == "tool_result":
             _only(block, {"type", "tool_use_id", "content", "is_error"}, label)
-            if block.get("is_error"):
+            if block.get("is_error") not in (None, False):
+                if not isinstance(block.get("is_error"), bool):
+                    raise ConversionError("tool_result.is_error must be a boolean")
                 raise ConversionError("tool_result.is_error cannot be preserved in other protocols")
             result = block.get("content", "")
             rich = None
             if not isinstance(result, str):
                 text_blocks = _message_parts(result, "tool_result.content")
+                if any(part.kind == "document" for part in text_blocks):
+                    raise ConversionError("PDF tool results have no portable equivalent")
                 if any(part.kind not in {"text", "image"} for part in text_blocks):
                     raise ConversionError("tool results support text/image content only")
-                if any(part.kind == "image" for part in text_blocks):
+                if any(part.kind in {"text", "image"} for part in text_blocks):
                     rich = text_blocks
                 result = "".join(part.text for part in text_blocks)
             parts.append(Part("tool_result", call_id=_string(block.get("tool_use_id"), "tool_use_id"), text=result, result_parts=rich))
@@ -521,10 +536,11 @@ def _decode_responses(body: dict[str, Any], *, public_reasoning: bool = False) -
                     output_parts = _response_content(output, "function_call_output.output")
                     if any(part.kind == "document" for part in output_parts):
                         raise ConversionError("PDF tool results have no portable equivalent")
-                    if any(part.kind == "image" for part in output_parts):
-                        turns.append(Turn("user", [Part("tool_result", call_id=_string(item.get("call_id"), "call_id"), result_parts=output_parts, tool_type=tool_type)]))
-                        continue
-                    output = "".join(part.text for part in output_parts)
+                    if any(part.kind not in {"text", "image"} for part in output_parts):
+                        raise ConversionError("tool results support text/image content only")
+                    joined = "".join(part.text for part in output_parts)
+                    turns.append(Turn("user", [Part("tool_result", call_id=_string(item.get("call_id"), "call_id"), text=joined, result_parts=output_parts, tool_type=tool_type)]))
+                    continue
                 turns.append(Turn("user", [Part("tool_result", call_id=_string(item.get("call_id"), "call_id"), text=_string(output, "output"), tool_type=tool_type)]))
             elif kind == "compaction":
                 raise UnsupportedFeatureError("compaction")
@@ -596,7 +612,7 @@ def _check_turns(request: Request, target: Protocol, *, messages_mid_system: boo
                 raise ConversionError("tool calls require the assistant role")
             if part.kind == "tool_result" and turn.role != "user":
                 raise ConversionError("tool results require the user/tool-result role")
-            if part.result_parts is not None and target == Protocol.CHAT:
+            if part.result_parts is not None and target == Protocol.CHAT and any(item.kind == "image" for item in part.result_parts):
                 raise ConversionError("Chat cannot preserve image-bearing tool results without relocating their role")
             if part.kind == "reasoning_text":
                 if target == Protocol.MESSAGES or turn.role != "assistant" or seen_ordinary:
