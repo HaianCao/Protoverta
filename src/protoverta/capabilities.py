@@ -19,6 +19,7 @@ from .errors import ConversionError
 
 FEATURES = frozenset({"text", "streaming", "tools", "custom_tools", "forced_tool_choice", "json_object", "json_schema", "strict_json_schema", "reasoning_effort", "public_reasoning", "images", "mid_conversation_system", "top_p", "stop_sequences", "strict_tools", "image_tool_results"})
 FEATURES = FEATURES | {"documents", "compaction", "prompt_caching", "audio", "video", "hosted_tools"}
+FEATURES = FEATURES | {"temperature"}
 
 POLICY_VALUES = {
     "messages_usage_policy": ("strict", "deferred"),
@@ -150,6 +151,8 @@ def request_features(body: dict, protocol: Protocol | str) -> frozenset[str]:
     if tools is not None and (not isinstance(tools, list) or any(not isinstance(tool, dict) for tool in tools)):
         raise ConversionError("capability preflight requires tools to be an array of objects")
     features = {"text"}
+    if body.get("temperature") is not None:
+        features.add("temperature")
     if body.get("top_p") is not None:
         features.add("top_p")
     if body.get("stream") is True:

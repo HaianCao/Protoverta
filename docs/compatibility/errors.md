@@ -24,6 +24,14 @@ tokens. Raw transport/stream exception text is not exposed. Native error bodies
 remain upstream-owned and are not rewritten. Keep raw diagnostics disabled and
 never use private conversations as fixtures.
 
+Translated tool-policy violations use `tool_policy_violation` and
+`feature=tool_policy`. Before headers they return 502 with
+`x-should-retry: false`; after visible SSE they emit an error without a success
+terminal. The gateway does not replay generation or execute the offending tool.
+Errors use fixed messages without tool names or arguments. Unsatisfiable client
+policies are rejected before upstream I/O with 422. See
+[effective request metadata](response-metadata.md).
+
 Unsupported reasoning before visible content returns HTTP 422 with
 `unsupported_reasoning` and `x-should-retry: false`. Stream errors after content
 produce an SSE error, never a successful terminal event. Socket timeouts map to

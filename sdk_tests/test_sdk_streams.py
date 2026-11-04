@@ -12,6 +12,7 @@ import openai
 import pytest
 from wire_cases import CALLS, MODEL, TEXT, event, fragments, source_wire
 
+from protoverta import convert_request
 from protoverta import server as gateway
 from protoverta.server import GatewayConfig, make_handler
 
@@ -74,9 +75,14 @@ def response_policy():
         for name in sorted({name for _, name, _ in CALLS})]}
 
 
+def portable_tool_policy(target):
+    request = convert_request({"model": MODEL, "input": "synthetic", "max_output_tokens": 32, **response_policy()}, "responses", target)
+    return {key: request[key] for key in ("tools", "tool_choice", "parallel_tool_calls") if key in request}
+
+
 def consume(client, target):
     if target == "messages":
-        with client.messages.stream(model=MODEL, max_tokens=32, messages=[{"role": "user", "content": "synthetic"}]) as stream:
+        with client.messages.stream(model=MODEL, max_tokens=32, messages=[{"role": "user", "content": "synthetic"}], **portable_tool_policy(target)) as stream:
             events = list(stream)
             result = stream.get_final_message()
         return {"text": "".join(block.text for block in result.content if block.type == "text"),
@@ -105,7 +111,7 @@ def consume(client, target):
                 "reason": result.status, "usage": (result.usage.input_tokens, result.usage.output_tokens), "events": events}
     content, tools, reason, usage = [], {}, None, None
     events = []
-    with client.chat.completions.create(model=MODEL, messages=[{"role": "user", "content": "synthetic"}], max_completion_tokens=32, stream=True, stream_options={"include_usage": True}) as stream:
+    with client.chat.completions.create(model=MODEL, messages=[{"role": "user", "content": "synthetic"}], max_completion_tokens=32, stream=True, stream_options={"include_usage": True}, **portable_tool_policy(target)) as stream:
         for chunk in stream:
             events.append(chunk)
             if chunk.usage is not None:
@@ -194,13 +200,13 @@ def test_strict_responses_sdk_rejects_unknown_messages_reasoning_usage(length):
 
 
 @pytest.mark.parametrize("source", ["chat", "messages"])
-def test_strict_responses_sdk_rejects_unknown_request_policy(source):
-    with listener(source) as (origin, calls), client_for("responses", origin) as client:
-        with client.responses.stream(model=MODEL, input="synthetic", max_output_tokens=32) as stream, pytest.raises(openai.APIResponseValidationError) as caught:
-            list(stream)
-        errors = caught.value.__cause__.errors(include_input=False, include_url=False)
-        missing = {error["loc"][2] for error in errors if error["type"] == "missing" and error["loc"][:2] == ("ResponseCreatedEvent", "response")}
-        assert missing == {"parallel_tool_calls", "tools", "tool_choice"}
+def test_strict_responses_sdk_accepts_gateway_owned_default_tool_policy(source):
+    with (listener(source, tools=False) as (origin, calls), client_for("responses", origin) as client,
+          client.responses.stream(model=MODEL, input="synthetic", max_output_tokens=32) as stream):
+        # This tests the created policy snapshot; unknown Messages reasoning
+        # usage is still rejected separately at the terminal event above.
+        created = next(event for event in stream if event.type == "response.created").response
+        assert created.tools == [] and created.tool_choice == "none" and created.parallel_tool_calls is False
     assert len(calls) == 1
 
 

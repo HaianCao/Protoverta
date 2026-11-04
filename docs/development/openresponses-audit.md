@@ -33,7 +33,33 @@ cases fail. The runner is trusted test tooling: a source revision check does not
 prove that an arbitrary operator-supplied bundle was built from that source.
 Keep its hash with the test record. No foreign source/validator is vendored.
 
-## Latest result, 2026-11-04 (snapshot consistency follow-up)
+## Latest result, 2026-11-04 (effective tool policy)
+
+The unchanged pinned runner reports **0 passed, 12 failed, 0 skipped**, exit
+code **1**. Field-error occurrences fall from **112 to 78**: `tools`,
+`tool_choice` and `parallel_tool_calls` no longer have findings. These are 34
+removed field occurrences, not 34 passing cases. The gateway now establishes,
+forwards and checks its effective per-request tool policy, including rejecting
+unauthorized upstream calls before exposing their tool frames.
+
+| Remaining field | Cases with a finding |
+|---|---:|
+| `temperature`, `top_p` | 12 each |
+| `service_tier` | 12 |
+| `usage` (Messages lacks reasoning-token subtotal) | 6 |
+| `frequency_penalty`, `presence_penalty`, `top_logprobs` | 12 each |
+
+Optional evidence-scoped Chat sampling profiles now send configured defaults
+and report the actual outbound values. The baseline official audit deliberately
+has no such profile and still omits unknown sampling values. Enabling a synthetic
+profile in a different test would not establish real provider support or repair
+the remaining serving-tier, usage or control gaps. No schema validator, official
+case, native Responses body or reasoning contract was relaxed.
+
+Evidence: [audit report](tool-policy-audit-2026-11-04.json) and
+[implementation and validation](effective-tool-policy-2026-11-04.md).
+
+## Previous result, 2026-11-04 (snapshot consistency follow-up)
 
 The same unmodified pinned runner still returns **0 passed, 12 failed, 0 skipped**
 and exit code **1**, but the `truncation` and `text` findings are eliminated.

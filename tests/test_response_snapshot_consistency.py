@@ -107,7 +107,8 @@ def test_gateway_snapshot_reports_only_the_output_cap_actually_applied(source, s
         assert snapshot["max_output_tokens"] == expected
         assert snapshot["text"] == body["text"]
         assert snapshot["truncation"] == "disabled"
-        assert not {"tools", "tool_choice", "parallel_tool_calls", "temperature", "top_p", "service_tier"} & snapshot.keys()
+        assert snapshot["tools"] == [] and snapshot["tool_choice"] == "none" and snapshot["parallel_tool_calls"] is False
+        assert not {"temperature", "top_p", "service_tier"} & snapshot.keys()
     assert body == before
 
 

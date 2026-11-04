@@ -71,6 +71,7 @@ class ClientToolSearchMap:
         self.enabled = False
         self._used = False
         self._available = False
+        self._snapshot_tools = []
 
     def prepare(self, body: dict) -> dict:
         if self._used:
@@ -145,6 +146,7 @@ class ClientToolSearchMap:
                 rewritten.append({"type": "function_call_output", "call_id": call_id, "output": json.dumps({"tools": item["tools"]}, ensure_ascii=False)})
         if pending:
             raise ConversionError("unfinished client search history must not be replayed")
+        self._snapshot_tools = copy.deepcopy([*definitions.values(), *searches])
         result["tools"] = list(definitions.values())
         if searches:
             search = searches[0]
@@ -157,6 +159,10 @@ class ClientToolSearchMap:
         if isinstance(inputs, list):
             result["input"] = rewritten
         return result
+
+    def snapshot_tools(self):
+        """Active logical definitions, before namespace/wire aliasing."""
+        return copy.deepcopy(self._snapshot_tools)
 
     def stream_delta(self, delta):
         if self.enabled and delta.kind == "tool_start" and delta.name == _NAME:

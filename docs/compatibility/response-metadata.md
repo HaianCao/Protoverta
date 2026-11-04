@@ -11,8 +11,26 @@ converter does not fill the gap with guessed defaults or null placeholders for
 nonnullable schema fields. Native Responses passthrough remains unchanged.
 
 The gateway restores explicitly supplied fields from the original validated
-Responses request. Omitting a field in that request does not establish an
-upstream default. No global/session policy is inferred from a previous request.
+Responses request. For translated HTTP routes it also owns and enforces an
+effective per-request tool policy: omitted choice becomes `auto` with available
+tools, or `none` without tools; omitted parallel permission is enabled with tools
+and disabled without them. Explicit controls retain precedence. On Messages,
+`none` disallows every call, so absent parallel permission is false in that mode.
+The policy is forwarded in the target protocol where representable. With no
+callable catalog, wire tool flags are omitted and zero calls are enforced locally.
+No global/session policy is inferred from a previous request. Bare converters
+still omit unknown policy; supplying `request_context` alone does not enforce it.
+
+The effective catalog is the catalog actually made available for this generation.
+Snapshots retain logical names/namespaces; client tool search reports loaded
+definitions and its client-search declaration, without inactive deferred tools or
+the internal pseudo-function. Authorization checks use actual upstream aliases
+before client-side name restoration. They run before Messages block serialization.
+Undeclared/wrong forced tools, forbidden calls, multiple calls when parallel calls
+are disabled, and normal completion without a required call fail with
+`tool_policy_violation`. A length-limited generation remains incomplete even if
+it could not emit its required call. No hidden retry, tool execution, or fabricated
+success is added. Native passthrough remains upstream-owned.
 
 JSON and SSE now share the same generated envelope facts: no local input
 truncation (`truncation="disabled"`), synchronous execution (`background=false`),
@@ -85,8 +103,15 @@ enable strict tool execution. Generated SSE also includes the same nullable
 These additions do not establish full OpenResponses conformance; see the
 [independent schema audit](../development/openresponses-audit.md).
 
-The pinned strict SDK gate uses explicit policy in its positive Responses
-fixtures. Separate negative cases verify that omitted policy is rejected at
-`response.created`; that failure is not presented as successful compatibility.
+The pinned strict SDK gate declares the tools its positive fixtures emit and
+also accepts the gateway's enforced default policy at `response.created`.
+Standalone unknown-context rejection and upstream-policy violation tests remain
+separate. Messages reasoning-usage schema gaps remain explicit negative cases.
+
+An opt-in evidence-scoped Chat provider profile can declare `sampling_defaults`.
+Those defaults are sent upstream only when the request does not supply a value;
+explicit zero values are retained. Generated Responses metadata reflects the
+actual outgoing values. Without a matching profile or explicit request values,
+sampling remains unknown. See [sampling profiles](sampling-profiles.md).
 
 Reference: [OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling).

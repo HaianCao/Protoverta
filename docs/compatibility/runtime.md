@@ -7,6 +7,8 @@ an existing release asset with a same-version local validation build.
 ## Provider wire profiles
 
 Use --provider-profiles-file FILE, or GatewayConfig(provider_profiles=...).
+Optional [sampling defaults](sampling-profiles.md) use the same exact Chat
+provider/model profile and preserve explicit request values.
 ProviderProfiles.load() reads a bounded version-1 JSON document:
 
 ```json

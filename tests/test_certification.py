@@ -21,7 +21,8 @@ def test_route_doctor_checks_real_local_gateway_all_protocol_pairs(source, upstr
     def upstream(request, timeout):
         body = convert_request(json.loads(request.data), upstream_protocol, "chat")
         nonce = re.search(r"nonce_[a-f0-9]+", json.dumps(body)).group() if "nonce_" in json.dumps(body) else "unused"
-        if body.get("tool_choice"):
+        forced = isinstance(body.get("tool_choice"), dict)
+        if forced:
             message = {"role": "assistant", "content": None, "tool_calls": [{"id": "call_fixture", "type": "function", "function": {"name": "fixture_nonce", "arguments": "{}"}}]}
             finish = "tool_calls"
         else:
@@ -29,7 +30,7 @@ def test_route_doctor_checks_real_local_gateway_all_protocol_pairs(source, upstr
         if body.get("stream"):
             encoder = StreamEncoder(upstream_protocol)
             deltas = [Delta("start", model="m", input_tokens=1, output_tokens=0)]
-            if body.get("tool_choice"):
+            if forced:
                 deltas += [Delta("tool_start", index=0, call_id="call_fixture", name="fixture_nonce"), Delta("tool_delta", index=0, text="{}"), Delta("tool_end", index=0)]
             else:
                 deltas += [Delta("text", index=0, text=nonce)]

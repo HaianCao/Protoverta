@@ -91,6 +91,11 @@ def connect(origin, target):
         payload.update(messages=[{"role": "user", "content": "hi"}], max_tokens=32)
     else:
         payload.update(messages=[{"role": "user", "content": "hi"}], max_completion_tokens=32)
+    from protoverta import convert_request
+
+    definition = {"model": "fixture", "input": "hi", "max_output_tokens": 32,
+                  "tools": [{"type": "function", "name": "work", "parameters": {"type": "object"}}]}
+    payload["tools"] = convert_request(definition, "responses", target)["tools"]
     path = {"chat": "chat/completions", "messages": "messages", "responses": "responses"}[target]
     connection.request("POST", "/v1/" + path, json.dumps(payload), {"Authorization": "Bearer local", "Content-Type": "application/json"})
     connection.fixture_socket = connection.sock  # HTTP/1.0 transfers ownership to response.fp.

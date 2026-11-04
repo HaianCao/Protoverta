@@ -15,6 +15,7 @@ FailurePhase = Literal["request", "preflight", "admission", "upstream", "respons
 _CONTEXT_CODES = frozenset({"context_length_exceeded", "context_window_exceeded", "max_context_length_exceeded"})
 _POLICY_REFUSAL_FEATURES = frozenset({"refusal", "content_filter"})
 _RECOGNIZED_CODES = frozenset({
+    "tool_policy_violation",
     "unsupported_feature",
     "unsupported_reasoning",
     "policy_refusal",
@@ -29,6 +30,7 @@ _RECOGNIZED_CODES = frozenset({
 })
 _RECOGNIZED_PHASES = frozenset({"request", "preflight", "admission", "upstream", "response", "stream"})
 _RECOGNIZED_FEATURES = frozenset({
+    "tool_policy",
     "refusal",
     "content_filter",
     "stop_sequence",

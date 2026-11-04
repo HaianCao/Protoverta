@@ -128,4 +128,5 @@ def test_gateway_metadata_matches_original_explicit_request_only(source, stream,
                  if stream else [json.loads(encoded)])
     assert snapshots
     for snapshot in snapshots:
-        assert {field: snapshot[field] for field in POLICY_FIELDS if field in snapshot} == metadata
+        expected = metadata or {"tools": [], "tool_choice": "none", "parallel_tool_calls": False}
+        assert {field: snapshot[field] for field in POLICY_FIELDS if field in snapshot} == expected

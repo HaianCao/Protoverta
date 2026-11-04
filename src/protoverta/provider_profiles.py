@@ -29,6 +29,7 @@ class ProviderProfile:
     reasoning_semantics: str | None = None
     prompt_cache_semantics: str | None = None
     parameter_aliases: Mapping[str, Mapping[str, str]] | None = None
+    sampling_defaults: Mapping[str, float] | None = None
 
     def __post_init__(self):
         object.__setattr__(self, "base_url", _prefix(self.base_url))
@@ -42,6 +43,18 @@ class ProviderProfile:
         date.fromisoformat(self.checked_at)
         if not isinstance(self.evidence, str) or not self.evidence.strip():
             raise ValueError("profile requires documentation/probe evidence")
+        if self.sampling_defaults is not None:
+            from .core import _optional_temperature, _optional_top_p
+
+            if not isinstance(self.sampling_defaults, Mapping) or not self.sampling_defaults or set(self.sampling_defaults) - {"temperature", "top_p"}:
+                raise ValueError("sampling defaults require explicit temperature/top_p values")
+            normalized = {}
+            for key, value in self.sampling_defaults.items():
+                checked = (_optional_temperature if key == "temperature" else _optional_top_p)(value)
+                if checked is None:
+                    raise ValueError("a configured sampling default cannot be unknown")
+                normalized[key] = checked
+            object.__setattr__(self, "sampling_defaults", MappingProxyType(normalized))
         if self.chat_token_field not in ("max_tokens", "max_completion_tokens"):
             raise ValueError("unsupported Chat output-token field")
         if self.token_budget_semantics != "completion_total":
@@ -126,6 +139,9 @@ class ProviderProfiles:
         if record is None:
             return body
         result = copy.deepcopy(body)
+        for key, value in (record.sampling_defaults or {}).items():
+            if result.get(key) is None:
+                result[key] = value
         if "max_tokens" in result and "max_completion_tokens" in result:
             raise ConversionError("ambiguous Chat output-token fields")
         source = "max_completion_tokens" if record.chat_token_field == "max_tokens" else "max_tokens"

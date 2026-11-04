@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from protoverta.core import Protocol
+from protoverta.core import Protocol, convert_request
 from protoverta.server import GatewayConfig, gateway_session
 from protoverta.sse import encode_sse
 from protoverta.stream_encoder import StreamEncoder
@@ -20,12 +20,9 @@ from protoverta.streaming import Delta
 
 
 def request_body(target, model):
-    body = {"model": model, "stream": True}
-    if target == Protocol.RESPONSES:
-        body.update(input="synthetic", max_output_tokens=32)
-    else:
-        body.update(messages=[{"role": "user", "content": "synthetic"}], max_tokens=32)
-    return body
+    body = {"model": model, "stream": True, "input": "synthetic", "max_output_tokens": 32,
+            "tools": [{"type": "function", "name": "work", "parameters": {"type": "object"}}]}
+    return convert_request(body, "responses", target)
 
 
 def connect(origin, target, model, token="local"):
