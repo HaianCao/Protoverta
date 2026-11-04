@@ -35,6 +35,13 @@ Keep its hash with the test record. No foreign source/validator is vendored.
 
 ## Latest result, 2026-11-04 (effective tool policy)
 
+Latest local rerun after [generation profiles](generation-profiles-2026-11-04.md):
+the unchanged baseline still fails **12/12** cases with **78** field findings.
+Sampling defaults can now be declared for all three upstream protocols, and an
+exact Responses penalty dialect can be explicitly enabled. The baseline declares
+neither; these additions do not infer its omitted values. Bounded real-provider
+logprob probes [did not certify either tested route](live-logprobs-2026-11-04.md).
+
 Follow-up: [reported service-tier preservation](reported-tier-2026-11-04.md)
 retains actual Chat/Responses tier observations. The same pinned baseline was
 rerun unchanged and still has 78 field findings, because it supplies no tier.

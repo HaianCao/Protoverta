@@ -1,5 +1,10 @@
 # Chạy thử bản mới mà không thay thế bản đang dùng
 
+Đợt kiểm tra local mới nhất: [generation profile](generation-profiles-2026-11-04.md)
+và [cài/cập nhật/gỡ bỏ cô lập](generation-local-acceptance-2026-11-04.md).
+Các bản preview cũ không tự cập nhật khi source thay đổi; muốn thử thay đổi mới,
+hãy build một preview mới theo các bước dưới đây. Chưa push/release trong đợt này.
+
 Hướng dẫn dành cho Windows, dùng PowerShell 5.1 hoặc PowerShell 7. Bạn sẽ build
 ba dự án và cài vào **venv riêng trong thư mục preview**, không cài đè wrapper hiện
 tại, không cần activate venv và không thêm PATH.
