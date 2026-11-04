@@ -2,9 +2,9 @@
 
 Date: 2026-11-04. **P07 COMPLETE within the declared versioned scope.** This
 closes P07a and P07b together. The user requested completion of all remaining
-P07 work without intermediate review stops. P07 changes remain uncommitted;
-P06 was previously committed as core `fd76a42`, Codex `3b0403e`, Claude
-`75dcf21`. No push, merge or release. P08–P14 are not started.
+P07 work without intermediate review stops. P07 was committed as core
+`6891699`, Codex `f37c2fc`, and Claude `f68d661` (following P06 at core
+`fd76a42`, Codex `3b0403e`, Claude `75dcf21`). No push, merge or release.
 
 ## Acceptance map
 

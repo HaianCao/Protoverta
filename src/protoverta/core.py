@@ -405,12 +405,16 @@ def _message_parts(content: Any, label: str) -> list[Part]:
                     rich = text_blocks
                 result = "".join(part.text for part in text_blocks)
             parts.append(Part("tool_result", call_id=_string(block.get("tool_use_id"), "tool_use_id"), text=result, result_parts=rich))
+        elif kind == "compaction":
+            raise UnsupportedFeatureError("compaction")
         else:
             raise ConversionError(f"unsupported Messages block: {kind}")
     return parts
 
 
 def _decode_messages(body: dict[str, Any]) -> Request:
+    if "context_management" in body:
+        raise UnsupportedFeatureError("compaction")
     _only(body, {"model", "system", "messages", "tools", "tool_choice", "max_tokens", "temperature", "top_p", "stream", "output_config", "stop_sequences"}, "Messages request")
     output_config = _object(body.get("output_config", {}), "output_config")
     _only(output_config, {"effort", "format"}, "output_config")
@@ -472,6 +476,8 @@ def _response_content(content: Any, label: str) -> list[Part]:
 
 
 def _decode_responses(body: dict[str, Any], *, public_reasoning: bool = False) -> Request:
+    if "context_management" in body:
+        raise UnsupportedFeatureError("compaction")
     _only(body, {"model", "input", "instructions", "tools", "tool_choice", "max_output_tokens", "temperature", "top_p", "stream", "store", "parallel_tool_calls", "reasoning", "text"}, "Responses request")
     reasoning = _object(body.get("reasoning", {}), "reasoning")
     _only(reasoning, {"effort"}, "reasoning")
@@ -520,6 +526,8 @@ def _decode_responses(body: dict[str, Any], *, public_reasoning: bool = False) -
                         continue
                     output = "".join(part.text for part in output_parts)
                 turns.append(Turn("user", [Part("tool_result", call_id=_string(item.get("call_id"), "call_id"), text=_string(output, "output"), tool_type=tool_type)]))
+            elif kind == "compaction":
+                raise UnsupportedFeatureError("compaction")
             else:
                 raise ConversionError(f"unsupported Responses item: {kind}")
     grouped_turns: list[Turn] = []
@@ -646,6 +654,16 @@ def _check_mid_system_placement(turns: list[Turn]) -> None:
                 pending.discard(part.call_id)
 
 
+def _flush_chat_user_parts(messages: list[dict[str, Any]], role: str, parts: list[Part]) -> None:
+    if parts:
+        if any(p.kind in {"image", "document"} for p in parts):
+            content: Any = [p.image.encode("chat") if p.kind == "image" else p.document.encode("chat") if p.kind == "document" else {"type": "text", "text": p.text} for p in parts]
+        else:
+            content = "".join(p.text for p in parts)
+        messages.append({"role": role, "content": content})
+        parts.clear()
+
+
 def _encode_chat(req: Request) -> dict[str, Any]:
     messages: list[dict[str, Any]] = []
     for turn in req.turns:
@@ -653,9 +671,16 @@ def _encode_chat(req: Request) -> dict[str, Any]:
         calls = [p for p in turn.parts if p.kind == "tool_call"]
         results = [p for p in turn.parts if p.kind == "tool_result"]
         if results:
-            if text or calls:
-                raise ConversionError("mixed user text and tool results cannot be preserved in Chat")
-            messages.extend({"role": "tool", "tool_call_id": p.call_id, "content": p.text} for p in results)
+            if calls or turn.role != "user":
+                raise ConversionError("mixed tool calls and tool results cannot be preserved in Chat")
+            user_parts: list[Part] = []
+            for p in turn.parts:
+                if p.kind in {"text", "image", "document"}:
+                    user_parts.append(p)
+                elif p.kind == "tool_result":
+                    _flush_chat_user_parts(messages, turn.role, user_parts)
+                    messages.append({"role": "tool", "tool_call_id": p.call_id, "content": p.text})
+            _flush_chat_user_parts(messages, turn.role, user_parts)
         else:
             msg: dict[str, Any] = {"role": turn.role, "content": text if text or not calls else None}
             if any(p.kind in {"image", "document"} for p in turn.parts):
@@ -926,6 +951,8 @@ def _decode_result(body: dict[str, Any], source: Protocol, *, public_reasoning: 
             if item.get("status") not in (None, "completed"):
                 raise ConversionError("Responses custom tool call is incomplete")
             parts.append(Part("tool_call", call_id=_string(item.get("call_id"), "call_id"), name=_string(item.get("name"), "name"), arguments=_string(item.get("input"), "input"), tool_type="custom"))
+        elif item.get("type") == "compaction":
+            raise UnsupportedFeatureError("compaction")
         else:
             raise ConversionError(f"unsupported Responses output item: {item.get('type')}")
     usage = _object(body.get("usage") or {}, "usage")

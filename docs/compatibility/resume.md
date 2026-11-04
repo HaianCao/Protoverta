@@ -1,5 +1,35 @@
 # Session replay compatibility
 
+## Follow-up on 2026-11-04 (P08 Compaction and Resume)
+
+Multi-turn harness-driven text compaction with completed read-only tool calls was
+verified across all six CLI routes (`codex` 0.166.0 and `claude` 2.1.308 each to
+`chat`, `messages`, and `responses`) using `scripts/smoke_compaction_resume.py`:
+
+- Codex triggers a plain-text summarization turn (`CONTEXT CHECKPOINT COMPACTION`)
+  when reported `input_tokens` exceeds `model_auto_compact_token_limit`, then
+  replays the summary in the next turn.
+- Claude Code triggers reactive plain-text summarization (`CRITICAL: Respond with
+  TEXT ONLY...`) when reported `input_tokens` exceeds the effective autocompact
+  threshold, then strips `<analysis>`/`<summary>` tags and replays the summary
+  continuation prompt alongside the retained tail tool exchange. Chat encoding
+  now preserves ordered `[tool_result, user_text]` parts in a single user turn
+  by emitting `{"role": "tool"}` followed by `{"role": "user"}` in exact order,
+  matching Responses.
+- In all cases, the client harness performs its own text summarization; the
+  gateway never summarizes history on the client's behalf or rewrites session
+  files.
+- Cross-protocol opaque compaction items (`type: "compaction"`,
+  `context_management`, `compact_20260112`) are rejected with
+  `UnsupportedFeatureError("compaction")` /
+  `UnsupportedStreamFeatureError("compaction")` and actionable guidance. Native
+  `POST /v1/responses/compact` remains restricted to native Responses upstreams.
+- Closed Codex child resume (`multi_agent_v1.resume_agent`) remains blocked when
+  `codex_model_safe_resume=True` (`UnsupportedFeatureError("codex_closed_resume")`)
+  so a closed child configured with custom model B cannot silently reopen on
+  parent model A. See
+  [the P08 report](../development/p08-context-compaction-resume-2026-11-04.md).
+
 ## Follow-up on 2026-10-26
 
 Codex CLI 0.164.0 and Claude Code 2.1.308 were retested with temporary sessions

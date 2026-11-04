@@ -377,6 +377,8 @@ class StreamDecoder:
             block_type = block.get("type")
             if block_type in ("thinking", "redacted_thinking"):
                 raise UnsupportedReasoningError()
+            if block_type == "compaction":
+                raise UnsupportedStreamFeatureError("compaction")
             if block_type == "text":
                 _only(block, {"type", "text", "citations"}, "Messages text block")
                 if block.get("citations") not in (None, []):
@@ -476,6 +478,8 @@ class StreamDecoder:
             item = _obj(body.get("item"), "output item")
             _response_item(item)
             item_type = item.get("type")
+            if item_type == "compaction":
+                raise UnsupportedStreamFeatureError("compaction")
             item_id = _str(item.get("id"), "output item ID")
             if item_type == "reasoning" and not self.public_reasoning:
                 raise UnsupportedReasoningError()

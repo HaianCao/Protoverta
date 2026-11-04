@@ -18,7 +18,12 @@ explicit output reserve and a model-specific `context_window_tokens` in the exac
 upstream capability record. Catalog metadata alone does not supply that evidence.
 
 Headers distinguish `within-estimate`, `over-estimate`, `within-exact`,
-`over-exact`, and `unknown`, plus count kind and known numerical components.
+`over-exact`, and `unknown`, plus count kind (`X-Protoverta-Context-Count-Kind`),
+high-level count category (`X-Protoverta-Context-Count-Category`: `exact`,
+`estimate`, or `unavailable`), and known numerical components. Setup/selection
+status (`selection_status` and launcher `model_status`) also surfaces
+`count_category` (`exact`, `estimate`, or `unavailable`) and exact-record
+`context_window_tokens` alongside route evidence.
 Rejected preflight requests return 422; neither request history nor output budget
 is rewritten, and no tokenizer download or remote count endpoint is called.
 These checks do not reserve provider tokens, enforce TPM or predict billing.

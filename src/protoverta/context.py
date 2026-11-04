@@ -31,8 +31,11 @@ class ContextAssessment:
     count_kind: str = "utf8-json-byte-estimate"
 
     def headers(self):
+        kind = "unavailable" if self.input_tokens is None else "operator-exact" if self.exact else self.count_kind
+        category = "unavailable" if self.input_tokens is None else "exact" if self.exact else "estimate"
         values = {"X-Protoverta-Context-Verdict": self.verdict,
-                  "X-Protoverta-Context-Count-Kind": "unavailable" if self.input_tokens is None else "operator-exact" if self.exact else self.count_kind}
+                  "X-Protoverta-Context-Count-Kind": kind,
+                  "X-Protoverta-Context-Count-Category": category}
         for name, value in (("Input", self.input_tokens), ("Output-Reserve", self.reserved_output_tokens), ("Limit", self.context_window_tokens)):
             if value is not None:
                 values["X-Protoverta-Context-" + name] = str(value)

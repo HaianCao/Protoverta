@@ -9,8 +9,10 @@ Authenticated loopback endpoints:
 
 `token_count_mode` defaults to `off` (422 when requested). `estimate` explicitly
 returns the complete JSON byte heuristic with `X-Protoverta-Count-Kind:
-utf8-json-byte-estimate`; media without a counter rejects. An SDK may ignore this
-header, so operators must not enable estimates expecting native-exact semantics.
+utf8-json-byte-estimate` and `X-Protoverta-Count-Category: estimate`; media
+without a counter rejects. An SDK may ignore these headers, so operators must
+not enable estimates expecting native-exact semantics. Exact counts (`native` or
+`operator-exact`) emit `X-Protoverta-Count-Category: exact`.
 
 `native` calls only the configured Messages `/messages/count_tokens` or Responses
 `/responses/input_tokens` endpoint, preserving the exact API prefix and auth style.

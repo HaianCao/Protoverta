@@ -567,7 +567,10 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                                 shared_admission.release(count_lease)
                             except AdmissionStorageError:
                                 pass
-                    self._context_headers = {"X-Protoverta-Count-Kind": provenance}
+                    self._context_headers = {
+                        "X-Protoverta-Count-Kind": provenance,
+                        "X-Protoverta-Count-Category": "exact" if provenance in ("provider-native", "operator-exact") else "estimate",
+                    }
                     result = {"input_tokens": count}
                     if protocol == Protocol.RESPONSES:
                         result["object"] = "response.input_tokens"
@@ -576,6 +579,8 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 streaming = payload.get("stream", False)
                 compact = target_url.path == "/v1/responses/compact"
                 if compact and (config.upstream_protocol != Protocol.RESPONSES or streaming or target_url.query):
+                    if config.upstream_protocol != Protocol.RESPONSES:
+                        raise UnsupportedFeatureError("compaction")
                     raise ConversionError("compaction requires a native non-streaming Responses upstream; opaque state cannot be translated")
                 if not isinstance(streaming, bool):
                     raise ConversionError("stream must be a boolean")
