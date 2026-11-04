@@ -44,7 +44,7 @@ def main():
         if not cases or any(case.find("skipped") is not None for case in cases):
             print("SDK conformance may not be empty or skip tests.", file=sys.stderr)
             return 1
-    print("Independent SDK gate PASS (installed=" + str(args.installed) + "): five positive routes with explicit Responses request policy; six-route truncation checks; unknown-policy and Messages -> Responses unknown-usage schema rejections verified. See docs/development/conformance.md.")
+    print("Independent SDK gate PASS (installed=" + str(args.installed) + "): inference routes/truncation/usage policies and strict model-list parsing/pagination verified. See docs/development/conformance.md.")
     return 0
 
 

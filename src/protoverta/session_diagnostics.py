@@ -151,7 +151,7 @@ def latest_diagnostics(directory):
                         continue
                     if not isinstance(value["request_id"], str) or not re.fullmatch(r"[a-f0-9]{32}", value["request_id"]):
                         continue
-                    if value["protocol"] not in ("chat", "messages", "responses", "unknown") or value["upstream_protocol"] not in ("chat", "messages", "responses", "unknown"):
+                    if value["protocol"] not in ("chat", "messages", "responses", "models", "unknown") or value["upstream_protocol"] not in ("chat", "messages", "responses", "unknown"):
                         continue
                     from typing import get_args
 

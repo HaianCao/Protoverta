@@ -1,5 +1,22 @@
 # Bounded catalog discovery
 
+## Session catalogs
+
+Upstream discovery and the gateway's session catalog are separate. A launcher
+may provide an immutable, upstream-bound `ModelSnapshot`; authenticated
+`GET /v1/models` then reads it without making a provider request. The default
+normalized format preserves exact IDs/names with unknown capability status.
+Explicit vendor projections reject missing required facts rather than inventing
+them. Messages listing honors the selected API version; strict OpenAI listing
+requires reported creation time/owner. See the
+[session catalog contract and native picker acceptance](../development/p07-catalogs-and-picker-2026-11-04.md).
+
+Current launcher snapshots contain selected/auxiliary IDs only. Fresh,
+identity-checked cache data may enrich names, without adding every discovered
+model or copying its metadata into a certified capability registry.
+
+## Upstream discovery
+
 `fetch_catalog(base_url, headers, CatalogPolicy(...))` discovers model IDs and
 reported names. Returned `ModelInfo` also supports explicitly mapped context and
 output limits and input modalities. Every entry has `capability_status="unknown"`.

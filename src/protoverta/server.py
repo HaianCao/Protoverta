@@ -37,6 +37,7 @@ from .errors import UnsupportedFeatureError
 from .failures import gateway_failure
 from .json_wire import decode_json, encode_json
 from .lifetime import DisconnectWatch
+from .model_snapshot import ModelMetadataUnavailable, ModelSnapshot
 from .namespaces import NamespaceMap
 from .observability import Observer, RequestTrace
 from .profiles import prepare_claude_request, prepare_codex_request
@@ -118,8 +119,11 @@ class GatewayConfig:
     openrouter_provider: str | None = None
     shared_token_limit: int | None = None
     codex_model_safe_resume: bool = False
+    model_snapshot: ModelSnapshot | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
+        if self.model_snapshot is not None and (not isinstance(self.model_snapshot, ModelSnapshot) or not self.model_snapshot.matches(self.upstream_base_url, self.upstream_protocol)):
+            raise ValueError("model snapshot must match this gateway's exact upstream prefix and protocol")
         if type(self.codex_model_safe_resume) is not bool:
             raise ValueError("codex_model_safe_resume must be a boolean")
         if type(self.require_current_evidence) is not bool or self.evidence_max_age_days is not None and (type(self.evidence_max_age_days) is not int or self.evidence_max_age_days < 0):
@@ -432,6 +436,51 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                     self._trace.outcome = "client_disconnected"
             finally:
                 writer.close()
+
+        def do_GET(self) -> None:
+            self._trace = RequestTrace("models", config.upstream_protocol.value)
+            self._context_headers = {}
+            list_protocol = Protocol.MESSAGES if self.headers.get("anthropic-version") else Protocol.CHAT
+            acquired = False
+            try:
+                try:
+                    target = urlsplit(self.path)
+                except ValueError:
+                    self._error(400, "invalid catalog request target", list_protocol)
+                    return
+                if target.path != "/v1/models":
+                    self._error(404, "unsupported endpoint", list_protocol)
+                    return
+                tokens = self.headers.get_all("Authorization", [])
+                api_keys = self.headers.get_all("x-api-key", [])
+                bearer = tokens[0][7:] if len(tokens) == 1 and tokens[0].startswith("Bearer ") else None
+                supplied = bearer if tokens else api_keys[0] if len(api_keys) == 1 else None
+                if len(tokens) > 1 or len(api_keys) > 1 or tokens and api_keys or supplied is None or not supplied.isascii() or not secrets.compare_digest(supplied, config.inbound_token):
+                    self._error(401, "unauthorized", list_protocol)
+                    return
+                acquired = admission.acquire(blocking=False)
+                if not acquired:
+                    self._error(503, "Local gateway request capacity reached.", list_protocol, headers={"Retry-After": "1"})
+                    self._trace.outcome = "capacity"
+                    return
+                if config.model_snapshot is None:
+                    self._error(404, "No session model snapshot configured.", list_protocol)
+                    return
+                try:
+                    payload = config.model_snapshot.page(target.query, default_format="messages" if self.headers.get("anthropic-version") else "normalized", messages_api_version=self.headers.get("anthropic-version", "2023-06-01"))
+                except ModelMetadataUnavailable as exc:
+                    self._error(422, str(exc), list_protocol, code="unsupported_feature", headers={"x-should-retry": "false"})
+                    return
+                except ValueError as exc:
+                    self._error(400, str(exc), list_protocol)
+                    return
+                self._json(200, payload)
+            except (ConnectionError, TimeoutError):
+                self._trace.outcome = "client_disconnected"
+            finally:
+                if acquired:
+                    admission.release()
+                self._trace.emit(observer)
 
         def do_POST(self) -> None:
             protocol = _PATHS.get(urlsplit(self.path).path)

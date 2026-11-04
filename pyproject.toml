@@ -22,6 +22,7 @@ sdk-test = ["openai==3.37.0", "anthropic==2.3.0"]
 fuzz-test = ["hypothesis==6.170.9"]
 soak-test = ["psutil==7.2.2"]
 browser-test = ["playwright==1.64.1"]
+harness-test = ["pywinpty==3.1.2; sys_platform == 'win32'"]
 coverage-test = ["coverage==7.17.0"]
 
 [tool.hatch.build.targets.wheel]

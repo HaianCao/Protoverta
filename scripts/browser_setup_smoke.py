@@ -9,6 +9,7 @@ import os
 import queue
 import tempfile
 import threading
+import time
 from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
@@ -49,7 +50,15 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
 
         stack.enter_context(patch.object(web, "ThreadingHTTPServer", side_effect=server))
         stack.enter_context(patch.object(web.webbrowser, "open", side_effect=urls.put))
-        stack.enter_context(patch.object(web, "fetch_models", return_value=["model-" + str(i) for i in range(20)] if codex else [{"id": "model-" + str(i), "display_name": "Model " + str(i)} for i in range(20)]))
+        def fetch(config, provider, **options):
+            names = [{"id": "constructor" if i == 0 else "model-" + str(i), "display_name": "Nineteen <em> model" if i == 19 else "Model " + str(i)} for i in range(20)]
+            models = [item["id"] for item in names] if codex else names
+            identity = web._identity(provider, config, token=options["token"]) if codex else web._identity(config, provider, token=options["token"])
+            entry = {"identity": identity, "models": models, "model_info": names[1:], "fetched_at" if codex else "saved_at": time.time()}
+            if options.get("cache_sink"):
+                options["cache_sink"](entry)
+            return models
+        stack.enter_context(patch.object(web, "fetch_models", side_effect=fetch))
         stack.enter_context(patch.object(web, "preflight"))
         foreground = None
         if launch_fixture:
@@ -130,6 +139,26 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
                     expect(page.locator(".model-option")).to_have_count(20)
                     page.locator(model).fill("model-19")
                     expect(page.locator(".model-option")).to_have_count(1)
+                    page.locator(model).fill("Nineteen")
+                    expect(page.locator(".model-option")).to_have_count(1)
+                    assert page.locator(".model-option em").count() == 0
+                    page.locator(".model-option").click()
+                    assert page.locator(model).input_value() == "model-19"
+                    expect(page.locator("#modelStatus")).to_contain_text("Unverified")
+                    with page.expect_response(lambda response: "/api/default" in response.url):
+                        page.get_by_role("button", name="Save as default", exact=True).click()
+                    # Reopen the authenticated setup URL; the app deliberately
+                    # removes the bootstrap token from browser history.
+                    page.goto(url)
+                    expect(page.locator(select + " option")).to_have_text("Fixture <b>Provider</b>")
+                    expect(page.locator(model)).to_have_value("model-19")
+                    page.route("**/api/models**", lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps({"models": [], "stale": False})))
+                    page.goto(url)
+                    page.locator(model).fill("")
+                    expect(page.locator(".empty")).to_contain_text("No model catalog")
+                    page.locator(model).fill("manual-empty-catalog")
+                    expect(page.locator("#runBtn" if codex else "#run")).to_be_enabled()
+                    page.unroute("**/api/models**")
                     page.locator("#editBtn" if codex else "#edit").click()
                     page.locator("#displayName").focus()
                     page.keyboard.press("Escape")
@@ -204,6 +233,8 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
                         assert foreground.exit_codes == [7]
                         assert (root / "child-finished").is_file()
                     restored = config_module.load(config.path).providers["fixture"]
+                    saved_config = config_module.load(config.path)
+                    assert (saved_config.defaults.model if codex else saved_config.default_model) == "model-19", "Run must not overwrite an explicitly saved default"
                     assert restored.auth_mode == "api_key"
                     assert restored.gateway_runtime["retry_attempts"] == 2
                     assert restored.agent_models == ({"policy": "custom", "default": "fixture-worker", "effort": "low"} if codex else {"policy": "custom", "default": "fixture-worker", "haiku": "fixture-fast"})
