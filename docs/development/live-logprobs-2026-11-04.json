@@ -1,0 +1,98 @@
+{
+  "date": "2026-11-04",
+  "scope": "Approved free models; actual Chat endpoint only, gateway Responses conversion and local reverse conversion; no provider Responses endpoint certification",
+  "max_requests": 4,
+  "max_output_tokens_per_request": 64,
+  "retries": 0,
+  "strict_reasoning": true,
+  "runtime_wheel": "855f23815c4579fa5cbae7248f82d5bba30c787ea906ee3b6eac7ceffd78fa6b",
+  "results": [
+    {
+      "provider": "openrouter",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "upstream": "chat",
+      "streaming": false,
+      "passed": false,
+      "requests": 1,
+      "outcome": "http_failure",
+      "http_status": 502,
+      "code": "invalid_response",
+      "phase": "response",
+      "upstream_requests": 1
+    },
+    {
+      "provider": "openrouter",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "streaming": true,
+      "passed": false,
+      "upstream_requests": 0,
+      "outcome": "not_run_after_failed_json"
+    },
+    {
+      "provider": "nvidia-nim",
+      "model": "z-ai/glm-5.3-flash",
+      "upstream": "chat",
+      "streaming": false,
+      "passed": false,
+      "requests": 1,
+      "outcome": "http_failure",
+      "http_status": 502,
+      "code": "invalid_response",
+      "phase": "response",
+      "upstream_requests": 1
+    },
+    {
+      "provider": "nvidia-nim",
+      "model": "z-ai/glm-5.3-flash",
+      "streaming": true,
+      "passed": false,
+      "upstream_requests": 0,
+      "outcome": "not_run_after_failed_json"
+    },
+    {
+      "provider": "openrouter",
+      "diagnostic": true,
+      "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "upstream": "chat",
+      "streaming": false,
+      "passed": false,
+      "requests": 1,
+      "outcome": "http_failure",
+      "upstream_shape": {
+        "has_text": true,
+        "has_logprob_records": false,
+        "logprob_records": 0,
+        "has_reasoning": false,
+        "finish_reason": "stop"
+      },
+      "http_status": 502,
+      "code": "invalid_response",
+      "phase": "response",
+      "upstream_requests": 1
+    },
+    {
+      "provider": "nvidia-nim",
+      "diagnostic": true,
+      "model": "z-ai/glm-5.3-flash",
+      "upstream": "chat",
+      "streaming": false,
+      "passed": false,
+      "requests": 1,
+      "outcome": "http_failure",
+      "upstream_shape": {
+        "has_text": false,
+        "has_logprob_records": true,
+        "logprob_records": 64,
+        "has_reasoning": true,
+        "finish_reason": "length",
+        "missing_byte_records": 0
+      },
+      "http_status": 502,
+      "code": "invalid_response",
+      "phase": "response",
+      "upstream_requests": 1
+    }
+  ],
+  "all_selected_passed": false,
+  "actual_upstream_requests": 4
+}
