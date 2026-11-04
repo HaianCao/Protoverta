@@ -32,6 +32,15 @@ recorded portable levels are accepted; other levels and conflicting existing
 vendor fields reject. Profiles do not decode vendor reasoning output, fabricate
 signatures, remove refusals, or authorize arbitrary request postprocessors.
 
+Optional `parameter_aliases` (`{"<tool_name>": {"<source_param>": "<target_param>"}}`)
+can be configured on a `ProviderProfile` when a specific provider/model endpoint
+rejects non-portable parameter keys. The mapping must be injective with disjoint
+source and target parameter sets. It rewrites only top-level `properties` and
+`required` entries in the matching tool definition plus top-level keys in the
+matching tool's JSON object arguments across request history, completed JSON
+responses, and translated SSE tool calls, without modifying arbitrary text,
+descriptions, tool outputs, boolean schemas (`false`), or `additionalProperties`.
+
 Catalog policies separately support `collection_field` (null means root list),
 `id_field`, bounded `query_params` pairs, and `pagination: "numbered"` in addition
 to `none`/`after_id`. Numbered pagination uses `page_param`, `first_page` (0/1),

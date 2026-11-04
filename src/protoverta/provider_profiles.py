@@ -28,6 +28,7 @@ class ProviderProfile:
     reasoning_values: Mapping | None = None
     reasoning_semantics: str | None = None
     prompt_cache_semantics: str | None = None
+    parameter_aliases: Mapping[str, Mapping[str, str]] | None = None
 
     def __post_init__(self):
         object.__setattr__(self, "base_url", _prefix(self.base_url))
@@ -59,6 +60,24 @@ class ProviderProfile:
             raise ValueError("reasoning profile fields must be configured together")
         if self.prompt_cache_semantics not in (None, "anthropic_ephemeral_system_end"):
             raise ValueError("unsupported cache contract")
+        if self.parameter_aliases is not None:
+            if not isinstance(self.parameter_aliases, Mapping) or not self.parameter_aliases:
+                raise ValueError("parameter_aliases must be a non-empty mapping of tool names to parameter maps")
+            frozen_aliases = {}
+            for tool_name, param_map in self.parameter_aliases.items():
+                if not isinstance(tool_name, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", tool_name):
+                    raise ValueError("parameter_aliases tool name must be a valid portable function name")
+                if not isinstance(param_map, Mapping) or not param_map:
+                    raise ValueError("parameter_aliases entry must be a non-empty parameter mapping")
+                for src_param, dst_param in param_map.items():
+                    if not isinstance(src_param, str) or not src_param or not isinstance(dst_param, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", dst_param) or src_param == dst_param:
+                        raise ValueError("parameter_aliases requires distinct non-empty source and portable target parameter names")
+                if len(set(param_map.values())) != len(param_map):
+                    raise ValueError("parameter_aliases mapping must be injective")
+                if set(param_map.keys()) & set(param_map.values()):
+                    raise ValueError("parameter_aliases source and target parameter names must be disjoint")
+                frozen_aliases[tool_name] = MappingProxyType(dict(sorted(param_map.items())))
+            object.__setattr__(self, "parameter_aliases", MappingProxyType(dict(sorted(frozen_aliases.items()))))
 
 
 class ProviderProfiles:
@@ -73,10 +92,15 @@ class ProviderProfiles:
             self._records[key] = record
 
     def fingerprint(self):
+        def _plain(val):
+            if isinstance(val, Mapping):
+                return {k: _plain(v) for k, v in val.items()}
+            return val
+
         values = []
         for key in sorted(self._records):
             record = self._records[key]
-            values.append({field.name: dict(getattr(record, field.name)) if isinstance(getattr(record, field.name), Mapping) else getattr(record, field.name) for field in fields(record)})
+            values.append({field.name: _plain(getattr(record, field.name)) for field in fields(record)})
         return hashlib.sha256(json.dumps(values, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
     def supports_prompt_cache(self, base_url, protocol, model):
@@ -123,4 +147,140 @@ class ProviderProfiles:
             if path[-1] in target:
                 raise ConversionError("conflicting vendor reasoning field")
             target[path[-1]] = record.reasoning_values[effort]
+        if record.parameter_aliases is not None:
+            _apply_parameter_aliases_request(result, record.parameter_aliases)
         return result
+
+    def restore(self, base_url, protocol, model, body):
+        if not isinstance(model, str):
+            return body
+        record = self._records.get((_prefix(base_url), Protocol(protocol), model))
+        if record is None or record.parameter_aliases is None:
+            return body
+        result = copy.deepcopy(body)
+        _restore_parameter_aliases_response(result, record.parameter_aliases)
+        return result
+
+    def stream_delta_restorer(self, base_url, protocol, model):
+        if not isinstance(model, str):
+            return None
+        record = self._records.get((_prefix(base_url), Protocol(protocol), model))
+        if record is None or record.parameter_aliases is None:
+            return None
+        reverse_aliases = {tool: {dst: src for src, dst in param_map.items()} for tool, param_map in record.parameter_aliases.items()}
+        return _StreamParameterAliasRestorer(reverse_aliases).feed
+
+
+class _StreamParameterAliasRestorer:
+    def __init__(self, reverse_aliases: Mapping[str, Mapping[str, str]]) -> None:
+        self.reverse_aliases = reverse_aliases
+        self._active: dict[int, tuple[str, list[str]]] = {}
+
+    def feed(self, delta):
+        from dataclasses import replace
+
+        from .streaming import Delta, StreamError
+
+        if delta.kind == "tool_start" and delta.tool_type == "function" and delta.name in self.reverse_aliases:
+            self._active[delta.index] = (delta.name, [])
+            return [delta]
+        if delta.kind == "tool_delta" and delta.index in self._active:
+            self._active[delta.index][1].append(delta.text)
+            return []
+        if delta.kind == "tool_end" and delta.index in self._active:
+            name, chunks = self._active.pop(delta.index)
+            raw_args = "".join(chunks)
+            try:
+                remapped = _remap_json_arguments(raw_args, self.reverse_aliases[name], direction="stream")
+            except ConversionError as exc:
+                raise StreamError(str(exc)) from exc
+            return [Delta("tool_delta", index=delta.index, text=remapped), replace(delta)]
+        return [delta]
+
+
+def _remap_json_arguments(raw_args, mapping: Mapping[str, str], *, direction: str) -> str:
+    if not isinstance(raw_args, str):
+        raise ConversionError("tool call arguments must be a JSON string")
+    try:
+        parsed = json.loads(raw_args)
+    except ValueError as exc:
+        raise ConversionError(f"invalid JSON in {direction} tool call arguments") from exc
+    if not isinstance(parsed, dict):
+        raise ConversionError("tool call arguments must decode to a JSON object")
+    out = {}
+    for key, val in parsed.items():
+        if key in mapping:
+            target_key = mapping[key]
+            if target_key in parsed or target_key in out:
+                raise ConversionError(f"conflicting parameter alias {target_key!r} in {direction} tool call arguments")
+            out[target_key] = val
+        elif key in set(mapping.values()):
+            raise ConversionError(f"collision with reserved parameter alias {key!r} in {direction} tool call arguments")
+        else:
+            out[key] = val
+    return json.dumps(out, ensure_ascii=False, separators=(",", ":"))
+
+
+def _apply_parameter_aliases_request(body: dict, aliases: Mapping[str, Mapping[str, str]]) -> None:
+    for tool in body.get("tools", []) if isinstance(body.get("tools"), list) else []:
+        if not isinstance(tool, dict) or tool.get("type") != "function" or not isinstance(tool.get("function"), dict):
+            continue
+        fn = tool["function"]
+        name = fn.get("name")
+        if name not in aliases:
+            continue
+        param_map = aliases[name]
+        params = fn.get("parameters")
+        if isinstance(params, dict):
+            props = params.get("properties")
+            if isinstance(props, dict):
+                new_props = {}
+                for k, v in props.items():
+                    if k in param_map:
+                        dst = param_map[k]
+                        if dst in props or dst in new_props:
+                            raise ConversionError(f"conflicting parameter alias {dst!r} in tool schema {name!r}")
+                        new_props[dst] = v
+                    elif k in set(param_map.values()):
+                        raise ConversionError(f"collision with reserved parameter alias {k!r} in tool schema {name!r}")
+                    else:
+                        new_props[k] = v
+                params["properties"] = new_props
+            req = params.get("required")
+            if isinstance(req, list):
+                new_req = []
+                for item in req:
+                    if item in param_map:
+                        new_req.append(param_map[item])
+                    elif item in set(param_map.values()):
+                        raise ConversionError(f"collision with reserved parameter alias {item!r} in required list for {name!r}")
+                    else:
+                        new_req.append(item)
+                if len(set(new_req)) != len(new_req):
+                    raise ConversionError(f"duplicate required parameter after aliasing in {name!r}")
+                params["required"] = new_req
+    for msg in body.get("messages", []) if isinstance(body.get("messages"), list) else []:
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            continue
+        for call in msg.get("tool_calls", []) if isinstance(msg.get("tool_calls"), list) else []:
+            if not isinstance(call, dict) or call.get("type") != "function" or not isinstance(call.get("function"), dict):
+                continue
+            fn = call["function"]
+            name = fn.get("name")
+            if name in aliases and "arguments" in fn:
+                fn["arguments"] = _remap_json_arguments(fn["arguments"], aliases[name], direction="request")
+
+
+def _restore_parameter_aliases_response(body: dict, aliases: Mapping[str, Mapping[str, str]]) -> None:
+    reverse_aliases = {tool: {dst: src for src, dst in param_map.items()} for tool, param_map in aliases.items()}
+    for choice in body.get("choices", []) if isinstance(body.get("choices"), list) else []:
+        if not isinstance(choice, dict) or not isinstance(choice.get("message"), dict):
+            continue
+        msg = choice["message"]
+        for call in msg.get("tool_calls", []) if isinstance(msg.get("tool_calls"), list) else []:
+            if not isinstance(call, dict) or call.get("type") != "function" or not isinstance(call.get("function"), dict):
+                continue
+            fn = call["function"]
+            name = fn.get("name")
+            if name in reverse_aliases and "arguments" in fn:
+                fn["arguments"] = _remap_json_arguments(fn["arguments"], reverse_aliases[name], direction="response")

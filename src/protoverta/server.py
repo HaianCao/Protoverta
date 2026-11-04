@@ -752,7 +752,19 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                     budget.remaining()
                     if streaming:
                         transform = restore_response if protocol == Protocol.RESPONSES and protocol != config.upstream_protocol else None
-                        self._stream(response, config.upstream_protocol, protocol, transform, tool_name_map.decode if tool_name_map is not None else None, budget, search_map.stream_delta if search_map is not None else None)
+                        profile_delta = config.provider_profiles.stream_delta_restorer(config.upstream_base_url, config.upstream_protocol, outbound.get("model")) if config.provider_profiles is not None and protocol != config.upstream_protocol else None
+                        search_delta = search_map.stream_delta if search_map is not None else None
+                        if profile_delta is not None and search_delta is not None:
+                            def combined_delta(d):
+                                out_deltas = []
+                                for item in profile_delta(d):
+                                    res = search_delta(item)
+                                    out_deltas.extend([res] if not isinstance(res, list) else res)
+                                return out_deltas
+                            delta_fn = combined_delta
+                        else:
+                            delta_fn = profile_delta or search_delta
+                        self._stream(response, config.upstream_protocol, protocol, transform, tool_name_map.decode if tool_name_map is not None else None, budget, delta_fn)
                         return
                     raw = bytearray()
                     while len(raw) <= config.max_body_bytes:
@@ -770,6 +782,8 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                         self._trace.usage(usage["input_tokens"], usage["output_tokens"], usage["cached_input_tokens"], usage["cache_creation_input_tokens"])
                     except (ValueError, TypeError, AttributeError):
                         pass  # Diagnostics must never reject a native response.
+                    if config.provider_profiles is not None:
+                        result = config.provider_profiles.restore(config.upstream_base_url, config.upstream_protocol, outbound.get("model"), result)
                     if protocol != config.upstream_protocol:
                         result = convert_response(result, config.upstream_protocol, protocol, public_reasoning=config.public_reasoning)
                         result = restore_response(result)

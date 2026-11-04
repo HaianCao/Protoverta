@@ -134,17 +134,21 @@ class StreamTranscoder:
                 for delta in self.order.feed(decoded) if self.order else [decoded]:
                     if self.delta_transform is not None:
                         try:
-                            delta = self.delta_transform(delta)
+                            transformed = self.delta_transform(delta)
                         except ConversionError as exc:
                             raise StreamError(str(exc)) from exc
-                    for encoded in self.encoder.feed(delta):
-                        if delta.kind in {"tool_start", "reasoning_text"} or delta.kind == "text" and bool(delta.text) or encoded.event == "response.output_item.added" and delta.kind == "tool_end":
-                            self.has_payload = True
-                        wire = encode_sse(encoded.event, encoded.data, id=encoded.id)
-                        if delta.kind == "finish":
-                            self._terminal += wire
-                        else:
-                            output.extend(wire)
+                        deltas = [transformed] if isinstance(transformed, Delta) else list(transformed)
+                    else:
+                        deltas = [delta]
+                    for item in deltas:
+                        for encoded in self.encoder.feed(item):
+                            if item.kind in {"tool_start", "reasoning_text"} or item.kind == "text" and bool(item.text) or encoded.event == "response.output_item.added" and item.kind == "tool_end":
+                                self.has_payload = True
+                            wire = encode_sse(encoded.event, encoded.data, id=encoded.id)
+                            if item.kind == "finish":
+                                self._terminal += wire
+                            else:
+                                output.extend(wire)
         return bytes(output)
 
     def finish(self) -> bytes:
