@@ -16,13 +16,15 @@ from test_environment import sanitized_environment
 
 
 def command(args, cwd, *, env=None):
-    subprocess.run([str(arg) for arg in args], cwd=cwd, env=sanitized_environment() if env is None else env, check=True)
+    subprocess.run([str(arg) for arg in args], cwd=cwd, env=sanitized_environment() if env is None else env, check=True, timeout=900)
 
 
 def validate(core, codex, claude, output):
     projects = [core.resolve(), codex.resolve(), claude.resolve()]
     if any(output.iterdir()):
         raise ValueError("Use an empty output directory for reproducible package validation.")
+    reports = output / "reports"
+    reports.mkdir()
     version = tomllib.loads((projects[0] / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
     command([sys.executable, projects[0] / "scripts/check_types.py"], projects[0])
     wheels = []
@@ -37,10 +39,14 @@ def validate(core, codex, claude, output):
         env = sanitized_environment()
         env["PYTHONPATH"] = os.pathsep.join((str(project / "src"), str(projects[0] / "src"), str(projects[0] / "scripts")))
         guard = ["-p", "gateway_test_guard"] if project != projects[0] else []
-        command([sys.executable, "-B", "-m", "pytest", *guard, "-p", "no:cacheprovider", "-o", "addopts=", "--tb=short", "--show-capture=no", "-q"], project, env=env)
+        command([sys.executable, "-B", "-m", "pytest", *guard, "-p", "no:cacheprovider", "-o", "addopts=", "--tb=short", "--show-capture=no", "-q", "--junitxml", reports / ("source-" + project.name + ".xml")], project, env=env)
+        if project != projects[0]:
+            command([sys.executable, projects[0] / "scripts/check_test_report.py", reports / ("source-" + project.name + ".xml")], project, env=env)
         lint_paths = ["src", "tests", "scripts"]
         if (project / "sdk_tests").is_dir():
             lint_paths.append("sdk_tests")
+        if (project / "fuzz_tests").is_dir():
+            lint_paths.append("fuzz_tests")
         command([sys.executable, "-m", "ruff", "check", *lint_paths], project)
         destination = output / "dist" / project.name
         command([sys.executable, "-m", "build", "--no-isolation", "--outdir", destination], project)
@@ -56,8 +62,13 @@ def validate(core, codex, claude, output):
     command([python, "-m", "pip", "install", "--disable-pip-version-check", "--no-deps", *wheels], output)
     sdk_requirements = tomllib.loads((projects[0] / "pyproject.toml").read_text(encoding="utf-8"))["project"]["optional-dependencies"]["sdk-test"]
     command([python, "-m", "pip", "install", "--disable-pip-version-check", "pytest>=8", *sdk_requirements], output)
+    command([python, "-m", "pip", "check"], output)
     script = """
+import importlib,sys
 from pathlib import Path
+for name in ('protoverta','codex_adapter','claudapter'):
+    origin=Path(importlib.import_module(name).__file__).resolve()
+    assert origin.is_relative_to(Path(sys.prefix).resolve()) and 'site-packages' in origin.parts, str(origin)
 from unittest.mock import patch
 from protoverta.server import GatewayConfig
 from codex_adapter.config import Config, Provider
@@ -84,8 +95,10 @@ print('Three isolated wheels: runtime API compatibility PASS')
     for project in projects:
         # Override Claude's source-pythonpath so wheel tests cannot silently
         # import checkout code instead of the installed artifacts.
-        command([python, "-B", "-m", "pytest", "-p", "gateway_test_guard", "-p", "no:cacheprovider", "-o", "pythonpath=", "-o", "addopts=", "--tb=short", "--show-capture=no", "-q", project / "tests"], output, env=clean)
-    command([python, projects[0] / "scripts/check_sdk.py", "--installed"], output, env=clean)
+        command([python, "-B", "-m", "pytest", "-p", "gateway_test_guard", "-p", "no:cacheprovider", "-o", "pythonpath=", "-o", "addopts=", "--tb=short", "--show-capture=no", "-q", project / "tests", "--junitxml", reports / ("installed-" + project.name + ".xml")], output, env=clean)
+        if project != projects[0]:
+            command([python, projects[0] / "scripts/check_test_report.py", reports / ("installed-" + project.name + ".xml")], output, env=clean)
+    command([python, projects[0] / "scripts/check_sdk.py", "--installed", "--report-dir", reports / "sdk"], output, env=clean)
     return {"passed": True, "output": str(output), "local_validation_only": True}
 
 

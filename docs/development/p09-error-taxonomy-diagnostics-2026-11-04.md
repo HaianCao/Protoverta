@@ -48,5 +48,5 @@ Acceptance evidence:
 Remaining limits / pending gates:
 - Cross-protocol pause_turn continuation and cross-protocol refusal translation remain intentionally rejected under strict semantics.
 User review: Autonomous execution per user instruction
-Commit(s): core 22b020d; Codex e757fd3; Claude 1d727fa. The param correction above is a later uncommitted change; see the P14 report.
+Commit(s): core 22b020d; Codex e757fd3; Claude 1d727fa. The later param correction was committed in decee93; see the P14 report.
 ```

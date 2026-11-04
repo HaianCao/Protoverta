@@ -1,7 +1,7 @@
 # P14 — Packaging và nghiệm thu cục bộ
 
-Ngày: 04/11/2026. **COMPLETE trong phạm vi nghiệm thu cục bộ bên dưới; chưa
-commit, push hay phát hành.** P14 không chứng nhận toàn bộ chuẩn API, mọi model,
+Ngày: 04/11/2026. **COMPLETE trong phạm vi nghiệm thu cục bộ bên dưới; đã commit
+`decee93`, chưa push hay phát hành.** P14 không chứng nhận toàn bộ chuẩn API, mọi model,
 mọi phiên bản harness, hoặc một lần chạy CI remote.
 
 ## Đối chiếu tiến độ

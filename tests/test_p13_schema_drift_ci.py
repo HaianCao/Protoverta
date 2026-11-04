@@ -126,7 +126,7 @@ def test_p13_sdk_candidate_evaluation_mode_preserves_pinned_baseline_gate(monkey
 
     def fake_run(command, *, cwd, env, check):
         Path(command[command.index("--junitxml") + 1]).write_text(
-            '<testsuites><testsuite><testcase name="candidate_ok"/></testsuite></testsuites>',
+            '<testsuites><testsuite>' + ''.join(f'<testcase name="candidate_{i}"/>' for i in range(29)) + '</testsuite></testsuites>',
             encoding="utf-8",
         )
         return SimpleNamespace(returncode=0)
@@ -135,9 +135,17 @@ def test_p13_sdk_candidate_evaluation_mode_preserves_pinned_baseline_gate(monkey
     assert sdk_gate.main() == 0
 
 
-def test_p13_cli_matrix_and_keyless_snapshot_exclude_user_sessions(monkeypatch):
+def test_p13_cli_matrix_and_keyless_snapshot_exclude_user_sessions(monkeypatch, tmp_path):
     snap_mod = load_script(monkeypatch, "compatibility_snapshot")
-    data = snap_mod.snapshot(Path(__file__).resolve().parents[2])
+    # Standalone core CI has no sibling launcher checkouts. Use a synthetic
+    # three-project fixture rather than depending on the developer workspace.
+    for name in ("protoverta", "free-codex-cli", "free-claude-cli"):
+        project = tmp_path / name
+        (project / "src").mkdir(parents=True)
+        (project / "pyproject.toml").write_text(f'[project]\nname="{name}"\nversion="0.0.0"\n', encoding="utf-8")
+        (project / "src/fixture.py").write_text("SYNTHETIC = True\n", encoding="utf-8")
+    monkeypatch.setattr(snap_mod.subprocess, "check_output", lambda command, **options: "0" * 40 if command[-2:] == ["rev-parse", "HEAD"] else "")
+    data = snap_mod.snapshot(tmp_path)
     assert data["provider_certification"] is False
     assert "cli_version_matrix" in data
     assert "0.164.0" in data["cli_version_matrix"]["codex"]["accepted_baselines"]

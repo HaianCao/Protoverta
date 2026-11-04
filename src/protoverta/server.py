@@ -642,9 +642,22 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                         payload = tool_name_map.prepare(payload, protocol)
                     if config.client_profile == "codex" and protocol == Protocol.RESPONSES:
                         payload = prepare_codex_request(payload, config.upstream_protocol, default_max_output_tokens=config.default_max_output_tokens, messages_mid_system=mid_system)
+                        # Report the output cap actually introduced by this
+                        # gateway profile, without inventing a provider default.
+                        if response_request.get("max_output_tokens") is None and payload.get("max_output_tokens") is not None:
+                            response_request["max_output_tokens"] = payload["max_output_tokens"]
                     elif config.client_profile == "claude" and protocol == Protocol.MESSAGES:
                         payload = prepare_claude_request(payload)
                     outbound = convert_request(payload, protocol, config.upstream_protocol, messages_mid_system=mid_system, public_reasoning=config.public_reasoning)
+                    if protocol == Protocol.RESPONSES:
+                        from .formats import decode_output_format
+
+                        # Unlike a bare response converter, the gateway has the
+                        # actual outbound request. No structured-output setting
+                        # means its requested mode is unconstrained text. This
+                        # says nothing about provider sampling or serving tier.
+                        if decode_output_format(outbound, config.upstream_protocol) is None:
+                            response_request["text"] = {"format": {"type": "text"}}
                     if config.prompt_caching == "ephemeral":
                         outbound = cache_checkpoint.restore(outbound)
                 if not compact:

@@ -14,6 +14,27 @@ The gateway restores explicitly supplied fields from the original validated
 Responses request. Omitting a field in that request does not establish an
 upstream default. No global/session policy is inferred from a previous request.
 
+JSON and SSE now share the same generated envelope facts: no local input
+truncation (`truncation="disabled"`), synchronous execution (`background=false`),
+no persistence (`store=false`) or opaque previous-response link. The standalone
+encoder does not infer sampling, tool policy or output format from generated
+content. Unknown `temperature`/`top_p` are omitted in SSE as in JSON; unknown
+reasoning configuration is null, not a fabricated signature or effort.
+
+The HTTP gateway also has the actual converted outbound request. When that
+request has no structured-output constraint, it reports
+`text={"format":{"type":"text"}}`, meaning unconstrained text. This describes
+the requested gateway mode, not an inferred provider default or a guarantee
+that arbitrary model output satisfies JSON Schema. Explicit structured formats
+remain preserved. A bare converter without request provenance cannot make
+that inference and leaves `text` absent.
+
+When the Codex profile really inserts its configured output cap for a Messages
+upstream, both JSON and SSE snapshots report that applied cap. A configured cap
+that was not applied on a Chat route is not reported as effective. Explicit
+caller limits retain precedence. Native Responses JSON/SSE is not rewritten by
+any of these generated-snapshot policies.
+
 Standalone callers can supply the same original request:
 
 ```python

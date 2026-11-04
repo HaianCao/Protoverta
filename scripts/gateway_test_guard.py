@@ -16,5 +16,14 @@ def pytest_sessionstart(session):
 
 
 def pytest_runtest_logreport(report):
-    if report.skipped and report.nodeid.split("::", 1)[0].replace("\\", "/").rsplit("/", 1)[-1] in {"test_gateway_limits.py", "test_gateway_runtime.py", "test_auth_mode.py"}:
+    if not report.skipped:
+        return
+    reason = report.longrepr[-1] if isinstance(report.longrepr, tuple) else str(report.longrepr)
+    gateway_file = report.nodeid.split("::", 1)[0].replace("\\", "/").rsplit("/", 1)[-1] in {"test_gateway_limits.py", "test_gateway_runtime.py", "test_auth_mode.py"}
+    if gateway_file or "protoverta" in str(reason).lower():
         pytest.exit("Integration gateway tests must not skip: " + report.nodeid, returncode=1)
+
+
+def pytest_collectreport(report):
+    # importorskip at module scope never produces a runtest report.
+    pytest_runtest_logreport(report)

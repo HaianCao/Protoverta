@@ -18,7 +18,7 @@ on:
         required: true
         default: '300'
         type: choice
-        options: ['300', '7200']
+        options: ['300', '1800']
 
 permissions:
   contents: read
@@ -26,8 +26,17 @@ permissions:
 jobs:
   integration:
     runs-on: windows-latest
-    timeout-minutes: ${{ inputs.soak_seconds == '7200' && 210 || 75 }}
+    timeout-minutes: 110
     steps:
+      - name: Require immutable consumer commit IDs
+        shell: pwsh
+        env:
+          CODEX_REF: ${{ inputs.codex_ref }}
+          CLAUDE_REF: ${{ inputs.claude_ref }}
+        run: |
+          foreach ($ref in @($env:CODEX_REF, $env:CLAUDE_REF)) {
+            if ($ref -cnotmatch '^[0-9a-fA-F]{40}$') { throw 'Consumer refs must be full immutable commit SHAs' }
+          }
       - uses: actions/checkout@v4
         with:
           path: protoverta
@@ -71,17 +80,17 @@ jobs:
           if ($LASTEXITCODE) { throw 'Property/resource dependencies failed' }
           & .\validation\installed\Scripts\python.exe protoverta/scripts/check_fuzz.py --installed
           if ($LASTEXITCODE) { throw 'Installed property gate failed' }
-      - name: Browser E2E against installed frontend assets (CLI launch stubbed)
+      - name: Browser E2E against installed assets and synthetic foreground CLI
         shell: pwsh
         run: |
-          & .\validation\installed\Scripts\python.exe protoverta/scripts/browser_setup_smoke.py --source free-codex-cli --package codex_adapter --installed --screenshots validation/screenshots
+          & .\validation\installed\Scripts\python.exe protoverta/scripts/browser_setup_smoke.py --source free-codex-cli --package codex_adapter --installed --launch-fixture --screenshots validation/screenshots
           if ($LASTEXITCODE) { throw 'Codex browser E2E failed' }
-          & .\validation\installed\Scripts\python.exe protoverta/scripts/browser_setup_smoke.py --source free-claude-cli --package claudapter --installed --screenshots validation/screenshots
+          & .\validation\installed\Scripts\python.exe protoverta/scripts/browser_setup_smoke.py --source free-claude-cli --package claudapter --installed --launch-fixture --screenshots validation/screenshots
           if ($LASTEXITCODE) { throw 'Claude browser E2E failed' }
       - name: Install pinned official CLIs on the disposable runner
         shell: pwsh
         run: |
-          npm install --global @openai/codex@0.164.0 @anthropic-ai/claude-code@2.1.308
+          npm install --global @openai/codex@0.166.0 @anthropic-ai/claude-code@2.1.308
           if ($LASTEXITCODE) { throw 'CLI fixture dependencies failed to install' }
           codex --version
           claude --version
@@ -90,10 +99,12 @@ jobs:
         working-directory: protoverta
         run: |
           $python = '..\validation\installed\Scripts\python.exe'
-          & $python scripts/smoke_clients.py --client codex --upstream chat --tool-loop --installed-adapter
-          if ($LASTEXITCODE) { throw 'Codex tool loop failed' }
-          & $python scripts/smoke_clients.py --client claude --upstream chat --tool-loop --installed-adapter
-          if ($LASTEXITCODE) { throw 'Claude tool loop failed' }
+          foreach ($client in @('codex', 'claude')) {
+            foreach ($protocol in @('chat', 'messages', 'responses')) {
+              & $python scripts/smoke_clients.py --client $client --upstream $protocol --tool-loop --installed-adapter
+              if ($LASTEXITCODE) { throw "CLI tool loop failed: $client / $protocol" }
+            }
+          }
           foreach ($protocol in @('responses', 'chat', 'messages')) {
             & $python scripts/smoke_tool_search.py --upstream $protocol --installed-adapter
             if ($LASTEXITCODE) { throw "Codex search gate failed: $protocol" }
@@ -110,10 +121,10 @@ jobs:
           SOAK_SECONDS: ${{ inputs.soak_seconds }}
         run: |
           $duration = [int]$env:SOAK_SECONDS
-          if ($duration -notin @(300, 7200)) { throw 'Unsupported soak duration' }
+          if ($duration -notin @(300, 1800)) { throw 'Unsupported soak duration' }
           $workers = 4
           $interval = '0.2'
-          if ($duration -eq 7200) { $workers = 2; $interval = '1' }
+          if ($duration -eq 1800) { $workers = 2; $interval = '1' }
           & .\validation\installed\Scripts\python.exe protoverta/scripts/compatibility_snapshot.py --output validation/compatibility-snapshot.json
           if ($LASTEXITCODE) { throw 'Source identity snapshot failed' }
           & .\validation\installed\Scripts\python.exe protoverta/scripts/soak_local.py --sustained --seconds $duration --requests 15000 --concurrency $workers --interval $interval --installed --measure-resources --report validation/soak.json
@@ -140,3 +151,4 @@ jobs:
             validation/compatibility-snapshot.json
             validation/soak.json
             validation/screenshots
+            validation/reports

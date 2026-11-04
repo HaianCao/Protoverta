@@ -10,6 +10,21 @@ CONTEXT_FIELDS = ("instructions", "max_output_tokens", "tools", "tool_choice",
                   "parallel_tool_calls", "text", "temperature", "top_p")
 
 
+def generated_response_metadata() -> dict:
+    """Facts for a new synchronous, stateless Responses envelope.
+
+    JSON and SSE use the same contract. No implicit sampling, output format,
+    tool policy, serving tier or token measurement is inferred from the output.
+    Request context may supply validated, explicitly known settings afterward.
+    """
+    return {
+        "instructions": None, "max_output_tokens": None, "max_tool_calls": None,
+        "previous_response_id": None, "reasoning": None, "store": False,
+        "background": False, "safety_identifier": None, "prompt_cache_key": None,
+        "truncation": "disabled",
+    }
+
+
 def bind_response_context(request: dict) -> Callable[[dict], dict]:
     """Freeze portable Responses request metadata; never infer omitted policy.
 

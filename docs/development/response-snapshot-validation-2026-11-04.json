@@ -1,0 +1,182 @@
+{
+  "date": "2026-11-04",
+  "scope": "Responses metadata; local Windows source/wheel and scripted upstream evidence, not real provider/full-schema certification",
+  "source": {
+    "protoverta": {
+      "name": "protoverta",
+      "version": "0.3.0a8",
+      "head": "decee933af1e3a9d047e7f1f3125aba4ebfd543f",
+      "dirty": true,
+      "runtime_sha256": "164a9c516d90cb6a792f46ada2d5de4ae0e35d8a0a5d722671d2c638f6dfb0b1"
+    },
+    "free-codex-cli": {
+      "name": "codexapter",
+      "version": "0.2.0a2",
+      "head": "e757fd30051b1d9bc751ccf1018ac2556431df7e",
+      "dirty": true,
+      "runtime_sha256": "0a9725d69b2dd2dccf54d1c8b5288094d285c85e6498b70278531e94ce094ff0"
+    },
+    "free-claude-cli": {
+      "name": "claudapter",
+      "version": "0.2.0a2",
+      "head": "1d727faa8be90651ebab0ce26b306a31b3131682",
+      "dirty": true,
+      "runtime_sha256": "821680bfa6f1bd08819649648c90059fe6f407ca00894562c6eb5f58a2631aef"
+    }
+  },
+  "wheels": [
+    {
+      "file": "protoverta-0.3.0a8-py3-none-any.whl",
+      "sha256": "1506eafd6f4237807ec50303cd8ec6d8e0f42ab8d76db03037e0f98d25ab6c59",
+      "source_files_matched": 43
+    },
+    {
+      "file": "codexapter-0.2.0a2-py3-none-any.whl",
+      "sha256": "531e3b02e48a161fa91fbbc05ba30741053d8dd57d970306524554ba5a3f2530",
+      "source_files_matched": 27
+    },
+    {
+      "file": "claudapter-0.2.0a2-py3-none-any.whl",
+      "sha256": "fa45ce17b53fae73120da1adc05500659d4d32647e42b801c362beb7b68ba5ba",
+      "source_files_matched": 24
+    }
+  ],
+  "all_imports_verified_site_packages": true,
+  "source_suites": {
+    "protoverta": 2208,
+    "free-codex-cli": 400,
+    "free-claude-cli": 432
+  },
+  "codex_subtests_passed": 12,
+  "focused_regressions_passed": 135,
+  "installed_sdk": {
+    "python": "3.13.9",
+    "platform": "win32",
+    "baseline_sdk": {
+      "openai": "3.37.0",
+      "anthropic": "2.3.0"
+    },
+    "actual_sdk": {
+      "openai": "3.37.0",
+      "anthropic": "2.3.0"
+    },
+    "candidate_mode": false,
+    "sdk_version_drift": false,
+    "installed": true,
+    "outcome": "PASSED",
+    "testcases": 29,
+    "expected_testcases": 29,
+    "provider_requests": 0
+  },
+  "property_tests_passed": 24,
+  "property_examples_each": 50,
+  "scoped_types_passed": true,
+  "clients": [
+    {
+      "client": "claude",
+      "upstream": "chat",
+      "passed": true,
+      "returncode": 0,
+      "rounds": 2,
+      "tool_result_count": 2
+    },
+    {
+      "client": "claude",
+      "upstream": "messages",
+      "passed": true,
+      "returncode": 0,
+      "rounds": 2,
+      "tool_result_count": 2
+    },
+    {
+      "client": "claude",
+      "upstream": "responses",
+      "passed": true,
+      "returncode": 0,
+      "rounds": 2,
+      "tool_result_count": 2
+    },
+    {
+      "client": "codex",
+      "upstream": "chat",
+      "passed": true,
+      "returncode": 0,
+      "rounds": 2,
+      "tool_result_count": 2
+    },
+    {
+      "client": "codex",
+      "upstream": "messages",
+      "passed": true,
+      "returncode": 0,
+      "rounds": 2,
+      "tool_result_count": 2
+    },
+    {
+      "client": "codex",
+      "upstream": "responses",
+      "passed": true,
+      "returncode": 0,
+      "rounds": 2,
+      "tool_result_count": 2
+    }
+  ],
+  "versions": {
+    "codex": "codex-cli 0.166.0",
+    "claude": "2.1.308 (Claude Code)",
+    "node": "v24.13.1"
+  },
+  "schema_audit": {
+    "revision": "8907bc3b7c4300ff5c21fd647cfde9929243afa1",
+    "runner_sha256": "c825257dc3b45165e31e3b02c8e52b2188e91f1de0e7af72f613cfa4a1e80e4c",
+    "summary": {
+      "outcome": "FAILED_FULL_SCHEMA",
+      "passed": 0,
+      "failed": 12,
+      "skipped": 0,
+      "total": 12,
+      "field_groups": {
+        "controls_outside_portable_subset": {
+          "frequency_penalty": 12,
+          "presence_penalty": 12,
+          "top_logprobs": 12
+        },
+        "request_metadata_or_nullable_tool_fields": {
+          "parallel_tool_calls": 12,
+          "temperature": 12,
+          "tool_choice": 12,
+          "tools": 10,
+          "top_p": 12
+        },
+        "upstream_measurements_or_provider_facts": {
+          "service_tier": 12,
+          "usage": 6
+        }
+      },
+      "provenance_classes": {
+        "unavailable": {
+          "frequency_penalty": 12,
+          "presence_penalty": 12,
+          "top_logprobs": 12
+        },
+        "request-declared": {
+          "parallel_tool_calls": 12,
+          "temperature": 12,
+          "tool_choice": 12,
+          "tools": 10,
+          "top_p": 12
+        },
+        "upstream-measured": {
+          "service_tier": 12,
+          "usage": 6
+        }
+      }
+    },
+    "previous_field_error_occurrences": 132,
+    "current_field_error_occurrences": 112,
+    "full_schema_passed": false
+  },
+  "live_provider_requests": 0,
+  "remote_ci_executed": false,
+  "new_soak_executed": false
+}

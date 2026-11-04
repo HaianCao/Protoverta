@@ -1,0 +1,60 @@
+name: SDK candidate evaluation
+
+# Independent, keyless evaluation. Never replaces the pinned CI/release gate.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '31 5 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  candidate-sdk:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install baseline test dependencies and build current wheel
+        id: prepare
+        shell: bash
+        run: |
+          python -m pip install -e ".[test,sdk-test]"
+          python -m pip wheel --no-deps . --wheel-dir dist
+      - name: Install built wheel instead of editable core
+        id: wheel
+        shell: bash
+        run: python -m pip install --force-reinstall --no-deps dist/*.whl
+      - name: Evaluate latest stable SDK releases independently of the baseline
+        id: upgrade
+        run: python -m pip install --upgrade --retries 1 --timeout 30 openai anthropic
+      - name: Check dependency consistency
+        id: dependencies
+        run: python -m pip check
+      - name: Run candidate conformance and record actual versions
+        id: conformance
+        run: python scripts/check_sdk.py --installed --allow-candidate-sdk --report-dir sdk-candidate-report
+      - name: Preserve stage outcomes even when SDK installation fails
+        if: always()
+        env:
+          PREPARE_OUTCOME: ${{ steps.prepare.outcome }}
+          WHEEL_OUTCOME: ${{ steps.wheel.outcome }}
+          UPGRADE_OUTCOME: ${{ steps.upgrade.outcome }}
+          DEPENDENCIES_OUTCOME: ${{ steps.dependencies.outcome }}
+          CONFORMANCE_OUTCOME: ${{ steps.conformance.outcome }}
+        run: python -c "import json,os; from pathlib import Path; p=Path('sdk-candidate-report'); p.mkdir(exist_ok=True); (p/'workflow-stages.json').write_text(json.dumps({k:os.environ[k] for k in ('PREPARE_OUTCOME','WHEEL_OUTCOME','UPGRADE_OUTCOME','DEPENDENCIES_OUTCOME','CONFORMANCE_OUTCOME')},indent=2),encoding='utf-8')"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sdk-candidate-${{ runner.os }}
+          path: sdk-candidate-report
+          if-no-files-found: warn

@@ -33,7 +33,41 @@ cases fail. The runner is trusted test tooling: a source revision check does not
 prove that an arbitrary operator-supplied bundle was built from that source.
 Keep its hash with the test record. No foreign source/validator is vendored.
 
-## Latest result, 2026-11-04 (P13 Re-audit)
+## Latest result, 2026-11-04 (snapshot consistency follow-up)
+
+The same unmodified pinned runner still returns **0 passed, 12 failed, 0 skipped**
+and exit code **1**, but the `truncation` and `text` findings are eliminated.
+Field-error occurrences across the twelve selected cases fall from **132 to
+112**; this is not twenty passing test cases or full-schema acceptance.
+
+JSON/SSE share truthful generated envelope facts. The HTTP gateway reports its
+unstructured text mode from the actual converted outbound request and preserves
+explicit structured formats. It also reports an output cap actually introduced
+by its Codex profile. No upstream sampling defaults, serving tier, reasoning
+subtotal, penalty or logprob setting was fabricated.
+
+Remaining findings:
+
+| Field | Cases with a finding |
+|---|---:|
+| `tools` | 10 |
+| `tool_choice`, `parallel_tool_calls` | 12 each |
+| `temperature`, `top_p` | 12 each |
+| `service_tier` | 12 |
+| `usage` (Messages lacks reasoning-token subtotal) | 6 |
+| `frequency_penalty`, `presence_penalty`, `top_logprobs` | 12 each |
+
+Unknown sampling now remains absent consistently in JSON and SSE. Earlier SSE
+findings saying "Expected number, received null" therefore become "Required";
+they are still failures, not repaired values. The standalone encoder has no
+request provenance and no longer advertises an assumed text format; the gateway
+can supply this fact because it holds the actual outbound request.
+
+Evidence: [actual pinned-runner report](response-snapshot-audit-2026-11-04.json),
+[changes, source/wheel identity and validation](response-snapshot-fixes-2026-11-04.md).
+No official validator, fixture expectations or selected cases were patched.
+
+## Previous result, 2026-11-04 (P13 Re-audit)
 
 Re-running the unmodified pinned suite (`8907bc3b7c4300ff5c21fd647cfde9929243afa1`)
 in `P13` confirms **0 passed, 12 failed, 0 skipped** (`summary.outcome=FAILED_FULL_SCHEMA`,

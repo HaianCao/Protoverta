@@ -2,6 +2,15 @@
 
 ## Latest local acceptance — 2026-11-04
 
+Latest runtime follow-up: [Responses snapshot consistency](response-snapshot-fixes-2026-11-04.md),
+with its own final source/wheel hashes and fresh SDK/CLI/full-suite results.
+It removes `truncation`/`text` audit findings; full OpenResponses schema still
+fails. The CI/P14 records below remain distinct historical checkpoints.
+
+The subsequent [CI job review](ci-jobs-review-2026-11-04.md) adds candidate
+evaluation, installed-wheel and artifact gates, fixes standalone-core test
+isolation, and records local validation separately from pending remote jobs.
+
 See [P14 source/wheel acceptance](p14-packaging-acceptance-2026-11-04.md): core
 0.3.0a8 at `52b201c` plus the uncommitted Responses SSE parameter correction;
 consumers 0.2.0a2 at `e757fd3` / `1d727fa`. It records runtime/wheel hashes,

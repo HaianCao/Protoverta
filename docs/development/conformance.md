@@ -112,3 +112,20 @@ Never send real session payloads as fixtures.
 References: [OpenAI Python SDK](https://developers.openai.com/api/reference/python),
 [OpenAI cache accounting](https://developers.openai.com/api/docs/guides/prompt-caching),
 [Anthropic streaming helpers](https://github.com/anthropics/anthropic-sdk-python/blob/main/helpers.md).
+
+## Persistent evidence and SDK candidates
+
+`check_sdk.py --installed --report-dir NEW_DIRECTORY` requires all 29 mandatory
+cases and retains `report.xml` plus `sdk-evidence.json`. The directory must be
+new: an older success artifact must not survive and impersonate this run. Missing
+or mismatched baseline dependencies retain a FAILED version record; an upstream
+test failure never becomes PASS through report parsing.
+
+The separate `SDK candidate evaluation` workflow upgrades stable SDKs on a
+disposable runner and invokes `--allow-candidate-sdk`. The regular CI and release
+gate keep their exact SDK pins. Candidate artifacts record actual/baseline
+versions, `sdk_version_drift`, verdict and workflow stage outcomes. A pass with
+no drift is baseline evidence, not certification of a newer version. Dependency
+installation failures remain failures, not semantic incompatibility verdicts.
+See [the CI job review](ci-jobs-review-2026-11-04.md) for local evidence and
+remote/candidate gates still pending.

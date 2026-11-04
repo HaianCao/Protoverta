@@ -26,6 +26,7 @@ from .formats import (
 from .images import Image, decode_image
 from .json_wire import decode_json, encode_json
 from .reasoning import reasoning_item, response_reasoning
+from .response_context import generated_response_metadata
 
 
 class Protocol(StrEnum):
@@ -1038,10 +1039,8 @@ def _encode_result(result: Result, target: Protocol) -> dict[str, Any]:
     # Facts about this newly generated, non-persisted Responses envelope.
     # Request context can restore actual instructions/limits at the gateway;
     # provider sampling defaults and token details must remain unknown.
-    out.update(completed_at=int(time.time()) if out["status"] == "completed" else None,
-               previous_response_id=None, instructions=None, max_output_tokens=None,
-               max_tool_calls=None, reasoning=None, store=False, background=False,
-               safety_identifier=None, prompt_cache_key=None)
+    out.update(generated_response_metadata())
+    out["completed_at"] = int(time.time()) if out["status"] == "completed" else None
     if result.input_tokens is not None and result.output_tokens is not None:
         out["usage"] = _encode_usage(result, target)
     return out

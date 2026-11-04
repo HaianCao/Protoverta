@@ -18,9 +18,9 @@ Chạy từ checkout Protoverta, trong venv kiểm chứng riêng đã cài extr
 python scripts/soak_local.py --sustained --seconds 120 --requests 1000 --concurrency 2 --interval 1 --measure-resources --report quick-soak.json
 if ($LASTEXITCODE -ne 0) { throw 'Soak nhanh chưa đạt; đọc report' }
 
-# Gate hai giờ, chạy khi máy có thể hoạt động liên tục trong khoảng này.
-python scripts/soak_local.py --sustained --seconds 7200 --requests 15000 --concurrency 2 --interval 1 --measure-resources --report two-hour-soak.json
-if ($LASTEXITCODE -ne 0) { throw 'Soak hai giờ chưa đạt; đọc report' }
+# Gate 30 phút, theo thời lượng người dùng đã chọn.
+python scripts/soak_local.py --sustained --seconds 1800 --requests 5000 --concurrency 2 --interval 1 --measure-resources --report thirty-minute-soak.json
+if ($LASTEXITCODE -ne 0) { throw 'Soak 30 phút chưa đạt; đọc report' }
 ```
 
 Không đặt `--installed` nếu muốn đo source checkout hiện tại. Nếu dùng flag này,
@@ -48,11 +48,11 @@ route, provider thật, hosted search hay native CLI. Report tài nguyên giữ 
 605 mẫu gần nhất; baseline đầu, warm baseline, terminal và peak toàn kỳ vẫn được
 giữ riêng. `sample_count` là tổng số mẫu, không phải số mẫu còn trong bộ đệm.
 
-Workflow thủ công `Ecosystem integration` có input `soak_seconds=300` hoặc `7200`.
+Workflow thủ công `Ecosystem integration` có input `soak_seconds=300` hoặc `1800`.
 Budget request và nhịp gọi được chọn để không kết thúc sớm do hết lượt. Workflow
 chỉ dùng loopback fixtures; cần các commit đã có trên GitHub trước khi dispatch.
 Thời gian job được tăng để bao cả source/wheel suites và soak đã chọn. Việc thêm
-cấu hình này **không** có nghĩa đã dispatch hay chạy CI remote/hai giờ.
+cấu hình này **không** có nghĩa đã dispatch hay chạy CI remote/30 phút mới.
 
 ## Search/fetch Internet thật — pending
 
@@ -83,8 +83,9 @@ nội dung thực và model dùng đúng result. Kiểm tra cả hai harness v�
 
 ## Kiểm chứng 30 phút — 2026-10-28
 
-Theo yêu cầu người dùng, mốc chạy thực nghiệm của đợt này là **30 phút**; bài hai
-giờ phía trên chỉ là lựa chọn mở rộng, không phải điều kiện bắt buộc để sử dụng.
+Theo yêu cầu người dùng, mốc chạy thực nghiệm của đợt này là **30 phút**.
+Workflow hiện không còn lựa chọn hai giờ; bằng chứng ngày 28/10 bên dưới là
+lịch sử, không phải một lần đo mới sau thay đổi CI ngày 04/11.
 
 Chạy trên source `c0e3f6c6f7f8dfb0cfafa3b63dddabe8a487efbe`, không sửa code trong
 lúc đo: `--sustained --seconds 1800 --requests 5000 --concurrency 2 --interval 1

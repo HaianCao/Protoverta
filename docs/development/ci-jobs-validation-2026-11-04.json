@@ -1,0 +1,68 @@
+{
+  "date": "2026-11-04",
+  "baseline_commit": "decee93",
+  "remote_ci_executed": false,
+  "production_runtime_changed": false,
+  "local_python": "3.13.9",
+  "core_standalone": {
+    "testcases": 2164,
+    "skipped": 0,
+    "failed": 0,
+    "completed": 2164
+  },
+  "direct_only": {
+    "free-codex-cli": {
+      "testcases": 400,
+      "skipped": 38,
+      "failed": 0,
+      "completed": 362
+    },
+    "free-claude-cli": {
+      "testcases": 432,
+      "skipped": 43,
+      "failed": 0,
+      "completed": 389
+    }
+  },
+  "gateway_regression": {
+    "free-codex-cli": {
+      "testcases": 39,
+      "skipped": 0,
+      "failed": 0,
+      "completed": 39
+    },
+    "free-claude-cli": {
+      "testcases": 76,
+      "skipped": 0,
+      "failed": 0,
+      "completed": 76
+    }
+  },
+  "sdk": {
+    "python": "3.13.9",
+    "platform": "win32",
+    "baseline_sdk": {
+      "openai": "3.37.0",
+      "anthropic": "2.3.0"
+    },
+    "actual_sdk": {
+      "openai": "3.37.0",
+      "anthropic": "2.3.0"
+    },
+    "candidate_mode": false,
+    "sdk_version_drift": false,
+    "installed": true,
+    "outcome": "PASSED",
+    "testcases": 29,
+    "expected_testcases": 29,
+    "provider_requests": 0
+  },
+  "actionlint": "1.7.12; all three workflow sets pass; shellcheck/pyflakes disabled locally",
+  "candidate_upgrade": {
+    "outcome": "ENVIRONMENT_FAILURE",
+    "timeout_seconds": 90,
+    "newer_sdk_certified": false
+  },
+  "powershell5_parse_scripts": 6,
+  "powershell7_parse": "pending: pwsh unavailable locally"
+}

@@ -252,7 +252,7 @@ def test_transcoder_rejects_chat_to_messages_before_emitting_bytes():
         StreamTranscoder("chat", "messages")
 
 
-def test_responses_encoder_event_schema_has_item_identity_and_empty_logprobs():
+def test_responses_encoder_envelope_has_item_identity_and_only_known_metadata():
     encoder = StreamEncoder("responses")
     deltas = [
         Delta("start", model="m"),
@@ -269,8 +269,10 @@ def test_responses_encoder_event_schema_has_item_identity_and_empty_logprobs():
         assert isinstance(snapshot["created_at"], int)
         assert snapshot["object"] == "response"
         assert snapshot["model"] == "m"
-        assert {"id", "status", "output", "usage", "error", "incomplete_details", "text"} <= snapshot.keys()
-        assert not {"parallel_tool_calls", "tools", "tool_choice"} & snapshot.keys()
+        assert {"id", "status", "output", "usage", "error", "incomplete_details", "truncation"} <= snapshot.keys()
+        # The standalone encoder has no request from which to learn format or
+        # sampling settings; the HTTP gateway binds its actual request facts.
+        assert not {"parallel_tool_calls", "tools", "tool_choice", "text", "temperature", "top_p"} & snapshot.keys()
     assert created["status"] == "in_progress" and created["output"] == []
     assert completed["status"] == "completed" and len(completed["output"]) == 2
     assert completed["usage"] == {

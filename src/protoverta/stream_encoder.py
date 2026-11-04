@@ -16,6 +16,7 @@ from typing import Any
 from .core import ConversionError, Protocol, _arguments, _encode_usage
 from .json_wire import encode_json
 from .reasoning import reasoning_item
+from .response_context import generated_response_metadata
 from .sse import SSEEvent
 from .streaming import Delta, StreamError, UnsupportedReasoningError
 
@@ -192,14 +193,10 @@ class StreamEncoder:
             "id": self.id, "object": "response", "access_programs": None,
             "created_at": self.created, "completed_at": int(time.time()) if status == "completed" else None,
             "status": status, "error": None, "incomplete_details": incomplete_details,
-            "instructions": None, "max_output_tokens": None, "model": self.model,
-            "max_tool_calls": None, "safety_identifier": None, "prompt_cache_key": None,
+            "model": self.model,
             "output": self.output.copy() if status != "in_progress" else [],
-            "previous_response_id": None,
-            "reasoning": {"effort": None, "summary": None}, "store": False,
-            "temperature": None, "text": {"format": {"type": "text"}},
-            "top_p": None,
-            "truncation": "disabled", "usage": usage, "user": None, "metadata": {},
+            **generated_response_metadata(),
+            "usage": usage, "user": None, "metadata": {},
         }
 
     def _chat_chunk(self, choices: list[dict[str, Any]], usage: dict[str, int] | None = None) -> SSEEvent:
