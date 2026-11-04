@@ -6,7 +6,8 @@ generation-control contract for every model or all three protocols.
 | Explicit input | Target | Behavior |
 |---|---|---|
 | OpenResponses `frequency_penalty` / `presence_penalty` | Chat | Forward the exact finite value in `[-2, 2]`, including zero |
-| Chat penalties | Responses or Messages | Reject; no equivalent target control is enabled |
+| Chat penalties | Responses | Reject by default; forward only under an explicit matching Responses penalty contract |
+| Chat penalties | Messages | Reject; no equivalent target control is enabled |
 | OpenResponses penalties | Messages | Reject, including zero; do not emulate by changing instructions |
 | Chat `logprobs=false` or `top_logprobs=0` | Responses | Send `top_logprobs=0` |
 | Responses `top_logprobs=0` | Chat | Send `logprobs=false`; omit top-k because no probabilities are requested |
@@ -19,8 +20,12 @@ generation-control contract for every model or all three protocols.
 OpenResponses penalties are an incoming gateway dialect extension from its
 pinned creation schema. Accepting them does not mean the OpenAI Responses API
 or an arbitrary Responses provider accepts them as outgoing controls. Protoverta
-therefore enables penalty forwarding only when the target is Chat. Provider/model
-support remains separate; capability evidence can reject an explicitly
+therefore enables penalty forwarding by default only when the target is Chat.
+An exact operator-declared [generation profile](generation-profiles.md) can
+enable a Responses provider dialect with equivalent penalty semantics. This is
+not a declaration about the standard OpenAI Responses API. Bare conversion APIs
+require `responses_penalties=True` and a Responses target for that opt-in.
+Provider/model support remains separate; capability evidence can reject an explicitly
 unsupported control, and verified-route policy still requires matching evidence.
 
 Types/ranges are checked before sending. Booleans are not numeric penalties or

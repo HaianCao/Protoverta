@@ -899,9 +899,13 @@ def _encode_responses(req: Request) -> dict[str, Any]:
 _ENCODERS = {Protocol.CHAT: _encode_chat, Protocol.MESSAGES: _encode_messages, Protocol.RESPONSES: _encode_responses}
 
 
-def convert_request(body: dict[str, Any], source: Protocol | str, target: Protocol | str, *, messages_mid_system: bool = False, public_reasoning: bool = False, text_logprobs: bool = False) -> dict[str, Any]:
+def convert_request(body: dict[str, Any], source: Protocol | str, target: Protocol | str, *, messages_mid_system: bool = False, public_reasoning: bool = False, text_logprobs: bool = False, responses_penalties: bool = False) -> dict[str, Any]:
     """Convert JSON input, including stream requests; reject unsupported semantics."""
     source, target = Protocol(source), Protocol(target)
+    if type(responses_penalties) is not bool:
+        raise TypeError("responses_penalties must be a boolean")
+    if responses_penalties and target != Protocol.RESPONSES:
+        raise ConversionError("Responses penalty contract requires a Responses target")
     if type(text_logprobs) is not bool:
         raise TypeError("text_logprobs must be a boolean")
     if text_logprobs and Protocol.MESSAGES in (source, target):
@@ -916,7 +920,7 @@ def convert_request(body: dict[str, Any], source: Protocol | str, target: Protoc
     request = _DECODERS[source](_object(body, "request"), **options)
     request.frequency_penalty = _optional_penalty(body.get("frequency_penalty"), "frequency_penalty")
     request.presence_penalty = _optional_penalty(body.get("presence_penalty"), "presence_penalty")
-    if target != Protocol.CHAT and any(value is not None for value in (request.frequency_penalty, request.presence_penalty)):
+    if target != Protocol.CHAT and not responses_penalties and any(value is not None for value in (request.frequency_penalty, request.presence_penalty)):
         raise ConversionError("penalties require a Chat target; no equivalent target control is enabled")
     if source != Protocol.MESSAGES:
         from .logprobs import requested
@@ -950,6 +954,11 @@ def convert_request(body: dict[str, Any], source: Protocol | str, target: Protoc
     request.output_format = decode_output_format(body, source)
     _check_turns(request, target, messages_mid_system=messages_mid_system)
     output = _ENCODERS[target](request)
+    if responses_penalties:
+        for key in ("frequency_penalty", "presence_penalty"):
+            value = getattr(request, key)
+            if value is not None:
+                output[key] = value
     if target == Protocol.RESPONSES and request.top_logprobs == 0:
         output["top_logprobs"] = 0
     if target == Protocol.RESPONSES and request.logprobs:

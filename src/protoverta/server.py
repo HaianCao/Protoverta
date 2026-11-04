@@ -670,7 +670,8 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                             response_request["tool_choice"] = effective_choice
                         if response_request.get("parallel_tool_calls") is None:
                             response_request["parallel_tool_calls"] = effective_parallel
-                    outbound = convert_request(payload, protocol, config.upstream_protocol, messages_mid_system=mid_system, public_reasoning=config.public_reasoning, text_logprobs=text_logprobs)
+                    penalty_contract = config.provider_profiles is not None and config.provider_profiles.supports_responses_penalties(config.upstream_base_url, config.upstream_protocol, payload.get("model"))
+                    outbound = convert_request(payload, protocol, config.upstream_protocol, messages_mid_system=mid_system, public_reasoning=config.public_reasoning, text_logprobs=text_logprobs, responses_penalties=penalty_contract)
                     if protocol == Protocol.RESPONSES:
                         from .formats import decode_output_format
 

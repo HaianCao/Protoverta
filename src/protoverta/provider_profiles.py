@@ -93,11 +93,55 @@ class ProviderProfile:
             object.__setattr__(self, "parameter_aliases", MappingProxyType(dict(sorted(frozen_aliases.items()))))
 
 
+@dataclass(frozen=True)
+class GenerationProfile:
+    """Explicit generation contracts, independent of Chat token-field quirks."""
+
+    base_url: str
+    protocol: str
+    model: str
+    checked_at: str
+    evidence: str
+    sampling_defaults: Mapping[str, float] | None = None
+    responses_penalties: bool = False
+
+    def __post_init__(self):
+        object.__setattr__(self, "base_url", _prefix(self.base_url))
+        object.__setattr__(self, "protocol", Protocol(self.protocol))
+        if not isinstance(self.model, str) or not self.model or any(c.isspace() for c in self.model):
+            raise ValueError("profile model must be an exact model ID")
+        if not isinstance(self.checked_at, str):
+            raise TypeError("profile checked_at must be an ISO date")
+        date.fromisoformat(self.checked_at)
+        if not isinstance(self.evidence, str) or not self.evidence.strip():
+            raise ValueError("profile requires documentation/probe evidence")
+        if type(self.responses_penalties) is not bool:
+            raise ValueError("responses_penalties must be a boolean")
+        if self.responses_penalties and self.protocol != Protocol.RESPONSES:
+            raise ValueError("Responses penalty contract requires a Responses upstream")
+        if self.sampling_defaults is None and not self.responses_penalties:
+            raise ValueError("generation profile requires an explicit contract")
+        if self.sampling_defaults is not None:
+            from .core import _optional_temperature, _optional_top_p
+
+            if not isinstance(self.sampling_defaults, Mapping) or not self.sampling_defaults or set(self.sampling_defaults) - {"temperature", "top_p"}:
+                raise ValueError("sampling defaults require explicit temperature/top_p values")
+            normalized = {}
+            for key, value in self.sampling_defaults.items():
+                checked = (_optional_temperature if key == "temperature" else _optional_top_p)(value)
+                if checked is None:
+                    raise ValueError("a configured sampling default cannot be unknown")
+                if self.protocol == Protocol.MESSAGES and key == "temperature" and checked > 1:
+                    raise ValueError("Messages temperature must be between 0 and 1")
+                normalized[key] = checked
+            object.__setattr__(self, "sampling_defaults", MappingProxyType(normalized))
+
+
 class ProviderProfiles:
     def __init__(self, records=()):
         self._records = {}
         for record in records:
-            if not isinstance(record, ProviderProfile):
+            if not isinstance(record, ProviderProfile | GenerationProfile):
                 raise TypeError("provider profiles require typed records")
             key = record.base_url, record.protocol, record.model
             if key in self._records:
@@ -113,12 +157,21 @@ class ProviderProfiles:
         values = []
         for key in sorted(self._records):
             record = self._records[key]
-            values.append({field.name: _plain(getattr(record, field.name)) for field in fields(record)})
+            value = {field.name: _plain(getattr(record, field.name)) for field in fields(record)}
+            if isinstance(record, GenerationProfile):
+                value["kind"] = "generation"
+            values.append(value)
         return hashlib.sha256(json.dumps(values, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
     def supports_prompt_cache(self, base_url, protocol, model):
         record = self._records.get((_prefix(base_url), Protocol(protocol), model))
-        return record is not None and record.prompt_cache_semantics == "anthropic_ephemeral_system_end"
+        return record is not None and getattr(record, "prompt_cache_semantics", None) == "anthropic_ephemeral_system_end"
+
+    def supports_responses_penalties(self, base_url, protocol, model):
+        if not isinstance(model, str):
+            return False
+        record = self._records.get((_prefix(base_url), Protocol(protocol), model))
+        return isinstance(record, GenerationProfile) and record.responses_penalties
 
     @classmethod
     def load(cls, path):
@@ -129,7 +182,18 @@ class ProviderProfiles:
         body = json.loads(raw)
         if not isinstance(body, dict) or set(body) != {"schema_version", "profiles"} or type(body["schema_version"]) is not int or body["schema_version"] != 1 or not isinstance(body["profiles"], list):
             raise ValueError("invalid provider profile document")
-        return cls(tuple(ProviderProfile(**item) for item in body["profiles"]))
+        records = []
+        for item in body["profiles"]:
+            if not isinstance(item, dict):
+                raise TypeError("profile must be an object")
+            if "kind" not in item:
+                records.append(ProviderProfile(**item))
+            else:
+                item = dict(item)
+                if item.pop("kind") != "generation":
+                    raise ValueError("unknown provider profile kind")
+                records.append(GenerationProfile(**item))
+        return cls(tuple(records))
 
     def apply(self, base_url, protocol, body):
         model = body.get("model")
@@ -142,6 +206,8 @@ class ProviderProfiles:
         for key, value in (record.sampling_defaults or {}).items():
             if result.get(key) is None:
                 result[key] = value
+        if isinstance(record, GenerationProfile):
+            return result
         if "max_tokens" in result and "max_completion_tokens" in result:
             raise ConversionError("ambiguous Chat output-token fields")
         source = "max_completion_tokens" if record.chat_token_field == "max_tokens" else "max_tokens"
@@ -171,7 +237,7 @@ class ProviderProfiles:
         if not isinstance(model, str):
             return body
         record = self._records.get((_prefix(base_url), Protocol(protocol), model))
-        if record is None or record.parameter_aliases is None:
+        if record is None or getattr(record, "parameter_aliases", None) is None:
             return body
         result = copy.deepcopy(body)
         _restore_parameter_aliases_response(result, record.parameter_aliases)
@@ -181,7 +247,7 @@ class ProviderProfiles:
         if not isinstance(model, str):
             return None
         record = self._records.get((_prefix(base_url), Protocol(protocol), model))
-        if record is None or record.parameter_aliases is None:
+        if record is None or getattr(record, "parameter_aliases", None) is None:
             return None
         reverse_aliases = {tool: {dst: src for src, dst in param_map.items()} for tool, param_map in record.parameter_aliases.items()}
         return _StreamParameterAliasRestorer(reverse_aliases).feed

@@ -40,8 +40,10 @@ rejecting the applied control prevents upstream I/O. A provider rejection is not
 silently retried with the setting removed, a different model, or a lower value.
 An evidence string is an operator assertion, not automatic certification.
 
-Profiles currently support Chat upstreams only. Explicit portable sampling
-controls remain usable on other supported routes, but no defaults are inferred
-for Messages or Responses. A profile applied to native Chat forwarding is still
-an explicit operator-selected request change; native Responses is untouched.
+For sampling contracts independent of Chat token-field quirks, use a
+[`kind: generation` record](generation-profiles.md). This supports Chat,
+Messages and Responses upstreams. Messages temperature is restricted to `[0, 1]`.
+No defaults are inferred for any protocol. An explicitly configured sampling
+profile can modify native forwarding requests too; native response passthrough
+remains unchanged. Existing Chat records retain their token-budget contract.
 Sampling defaults alone do not establish full OpenResponses conformance.
