@@ -62,6 +62,7 @@ class Delta:
     reasoning_output_tokens: int | None = None
     tool_type: str = "function"
     service_tier: str | None = None
+    logprobs: list[dict] | None = None
 
 
 def _obj(value: Any, label: str) -> dict[str, Any]:
@@ -134,7 +135,7 @@ class StreamDecoder:
     at EOF; it raises unless the protocol's terminal marker was seen.
     """
 
-    def __init__(self, protocol: Protocol | str, *, public_reasoning: bool = False) -> None:
+    def __init__(self, protocol: Protocol | str, *, public_reasoning: bool = False, text_logprobs: bool = False, max_top_logprobs=None) -> None:
         self.protocol = Protocol(protocol)
         if not isinstance(public_reasoning, bool):
             raise TypeError("public_reasoning must be a boolean")
@@ -163,6 +164,21 @@ class StreamDecoder:
         self.raw_usage: dict[str, Any] = {}
         self.usage_details: dict[str, int | None] = {}
         self.service_tier: str | None = None
+        if type(text_logprobs) is not bool or text_logprobs and self.protocol == Protocol.MESSAGES:
+            raise ValueError("text_logprobs requires a Chat/Responses stream")
+        self.text_logprobs = text_logprobs
+        self.max_top_logprobs = max_top_logprobs
+        self.probability_text = ""
+        self.probabilities: list[dict] = []
+        self.item_probabilities: dict[int, list] = {}
+
+    def _probabilities(self, value, *, chat=False):
+        from .logprobs import chat_records, records
+
+        try:
+            return chat_records(value, self.max_top_logprobs) if chat else records(value, self.max_top_logprobs)
+        except ConversionError as exc:
+            raise StreamError(str(exc)) from exc
 
     def _tier(self, value: Any) -> None:
         try:
@@ -214,6 +230,12 @@ class StreamDecoder:
             raise StreamError("empty or duplicate stream tool call ID")
 
     def _complete(self, reason: str) -> list[Delta]:
+        from .logprobs import align
+
+        try:
+            align(self.probabilities, self.probability_text, required=self.text_logprobs)
+        except ConversionError as exc:
+            raise StreamError(str(exc)) from exc
         if not self.started or self.ended:
             raise StreamError("invalid stream completion")
         if self.blocks:
@@ -258,6 +280,7 @@ class StreamDecoder:
             self._usage(usage)
             return deltas
         choice = _obj(choices[0], "Chat choice")
+        probabilities = self._probabilities(choice.get("logprobs"), chat=True) if self.text_logprobs else None
         if _index(choice.get("index"), "Chat choice index") != 0:
             raise StreamError("unsupported Chat choice index")
         if self.reason is not None:
@@ -273,7 +296,7 @@ class StreamDecoder:
                 self._usage(body["usage"])
                 return deltas
             raise StreamError("Chat choice arrived after finish_reason")
-        if choice.get("index") != 0 or choice.get("logprobs"):
+        if choice.get("index") != 0 or choice.get("logprobs") and not self.text_logprobs:
             raise StreamError("unsupported Chat choice index or logprobs")
         delta = _obj(choice.get("delta"), "Chat delta")
         for field, value in delta.items():
@@ -304,10 +327,14 @@ class StreamDecoder:
         if delta.get("audio") or delta.get("function_call"):
             raise StreamError("unsupported Chat delta field")
         content = delta.get("content")
-        if content is not None and not (self.public_reasoning and content == ""):
+        if content is not None and not (self.public_reasoning and content == "" and not probabilities) or probabilities:
             if content:
                 self.reasoning_closed = True
-            deltas.append(Delta("text", text=_str(content, "Chat content")))
+            value = _str(content if content is not None else "", "Chat content")
+            if self.text_logprobs:
+                self.probability_text += value
+                self.probabilities.extend(probabilities or [])
+            deltas.append(Delta("text", text=value, logprobs=probabilities))
         calls = delta.get("tool_calls")
         if calls is not None and not isinstance(calls, list):
             raise StreamError("Chat tool_calls must be an array or null")
@@ -544,16 +571,22 @@ class StreamDecoder:
             if part.get("type") != "output_text" or part.get("text") != "" or part.get("annotations") != [] or part.get("logprobs") != []:
                 raise StreamError("unsupported Responses content part metadata")
             self.text_parts[index] = "open"
+            self.item_probabilities[index] = []
             return []
         if kind == "response.output_text.delta":
             index = _index(body.get("output_index"), "output_index")
             if self.items.get(index, (None,))[0] != "text" or self.text_parts.get(index) != "open":
                 raise StreamError("Responses text delta without a message item")
-            if body.get("item_id") != self.items[index][1] or body.get("content_index") != 0 or body.get("logprobs") != []:
+            if body.get("item_id") != self.items[index][1] or body.get("content_index") != 0 or not self.text_logprobs and body.get("logprobs") != []:
                 raise StreamError("unsupported Responses text delta metadata")
             value = _str(body.get("delta"), "text delta")
+            probabilities = self._probabilities(body.get("logprobs")) if self.text_logprobs else []
             self.text_items[index] += value
-            return [Delta("text", index=index, item_id=self.items[index][1], text=value)]
+            self.item_probabilities[index].extend(probabilities)
+            if self.text_logprobs:
+                self.probabilities.extend(probabilities)
+                self.probability_text += value
+            return [Delta("text", index=index, item_id=self.items[index][1], text=value, logprobs=probabilities or None)]
         if kind in ("response.function_call_arguments.delta", "response.custom_tool_call_input.delta"):
             index = _index(body.get("output_index"), "output_index")
             if self.items.get(index, (None,))[0] != "tool":
@@ -572,8 +605,14 @@ class StreamDecoder:
             index = _index(body.get("output_index"), "output_index")
             if self.items.get(index, (None,))[0] != "text" or self.text_parts.get(index) != "open" or body.get("text") != self.text_items[index]:
                 raise StreamError("Responses completed text differs from deltas")
-            if body.get("item_id") != self.items[index][1] or body.get("content_index") != 0 or body.get("logprobs") != []:
+            if body.get("item_id") != self.items[index][1] or body.get("content_index") != 0 or self._probabilities(body.get("logprobs")) != self.item_probabilities[index]:
                 raise StreamError("unsupported Responses completed text metadata")
+            from .logprobs import align
+
+            try:
+                align(self.item_probabilities[index], self.text_items[index], required=self.text_logprobs)
+            except ConversionError as exc:
+                raise StreamError(str(exc)) from exc
             self.text_parts[index] = "text_done"
             return []
         if kind in ("response.function_call_arguments.done", "response.custom_tool_call_input.done"):
@@ -596,7 +635,7 @@ class StreamDecoder:
             if body.get("item_id") != self.items[index][1] or body.get("content_index") != 0:
                 raise StreamError("Responses completed content part has wrong identity")
             part = _obj(body.get("part"), "Responses completed content part")
-            if part.get("type") != "output_text" or part.get("text") != self.text_items[index] or part.get("annotations") != [] or part.get("logprobs") != []:
+            if part.get("type") != "output_text" or part.get("text") != self.text_items[index] or part.get("annotations") != [] or self._probabilities(part.get("logprobs")) != self.item_probabilities[index]:
                 raise StreamError("unsupported Responses completed content metadata")
             self.text_parts[index] = "closed"
             return []
@@ -641,7 +680,7 @@ class StreamDecoder:
             if not isinstance(content, list) or len(content) != 1:
                 raise StreamError("unsupported Responses completed message content")
             part = _obj(content[0], "Responses completed message content")
-            if part.get("type") != "output_text" or part.get("text") != self.text_items[index] or part.get("annotations") != [] or part.get("logprobs") != []:
+            if part.get("type") != "output_text" or part.get("text") != self.text_items[index] or part.get("annotations") != [] or self._probabilities(part.get("logprobs")) != self.item_probabilities[index]:
                 raise StreamError("Responses completed message content differs from deltas")
             self.completed_items[index] = item
             return []
@@ -655,6 +694,10 @@ class StreamDecoder:
             if not isinstance(output, list) or len(output) != len(self.completed_items):
                 raise StreamError("Responses final output differs from streamed items")
             for index, item in enumerate(output):
+                if isinstance(item, dict) and item.get("type") == "message" and isinstance(item.get("content"), list):
+                    for part in item["content"]:
+                        if isinstance(part, dict) and part.get("type") == "output_text":
+                            self._probabilities(part.get("logprobs"))
                 if item != self.completed_items.get(index):
                     raise StreamError("Responses final output differs from streamed items")
             status = response.get("status")

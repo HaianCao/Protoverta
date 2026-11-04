@@ -40,6 +40,20 @@ retains actual Chat/Responses tier observations. The same pinned baseline was
 rerun unchanged and still has 78 field findings, because it supplies no tier.
 This follow-up is not full-schema acceptance.
 
+The [generation-control follow-up](generation-controls-2026-11-04.md) additionally
+accepts explicit penalties for a Chat target and explicitly disabled logprobs.
+The baseline omits these controls, so their findings still remain. The report's
+coarse `controls_outside_portable_subset`/`unavailable` labels describe missing
+baseline facts and the absence of an all-protocol mapping, not a claim that
+every explicit route is unsupported. Consult the
+[current route matrix](../compatibility/generation-controls.md) for those limits.
+
+Explicit positive [text logprobs](../compatibility/text-logprobs.md) now also
+map between Chat and Responses, including JSON/SSE and token-byte validation.
+The unchanged baseline still omits those controls and reports the same 78
+findings. This feature does not synthesize a default top-k or missing provider
+measurements for the audit.
+
 The unchanged pinned runner reports **0 passed, 12 failed, 0 skipped**, exit
 code **1**. Field-error occurrences fall from **112 to 78**: `tools`,
 `tool_choice` and `parallel_tool_calls` no longer have findings. These are 34

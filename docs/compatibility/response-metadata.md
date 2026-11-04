@@ -79,7 +79,10 @@ and JSON validity are checked; this does not replace full request validation,
 verify that a response belongs to that request, or prove the upstream obeyed
 every requested setting. The supported projection contains `instructions`,
 `max_output_tokens`, `tools`, `tool_choice`, `parallel_tool_calls`, `text`,
-`temperature` and `top_p`. Unsupported request fields are not projected.
+`temperature`, `top_p`, `frequency_penalty`, `presence_penalty` and validated
+`top_logprobs`. Enabled probabilities use the [text-logprob contract](text-logprobs.md).
+Unsupported request fields are not projected. Penalty forwarding
+is limited to a Chat target; see [generation controls](generation-controls.md).
 
 The stream constructor freezes the projection before consuming bytes. Mutating
 the caller's request later cannot change created/completed snapshots. For an

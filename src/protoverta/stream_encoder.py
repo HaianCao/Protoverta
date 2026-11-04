@@ -38,7 +38,7 @@ def _event(kind: str, body: dict[str, Any]) -> SSEEvent:
 class StreamEncoder:
     """Convert ordered canonical deltas to one target protocol's SSE events."""
 
-    def __init__(self, protocol: Protocol | str, *, response_transform: Callable[[dict], dict] | None = None, public_reasoning: bool = False, request_context: dict | None = None) -> None:
+    def __init__(self, protocol: Protocol | str, *, response_transform: Callable[[dict], dict] | None = None, public_reasoning: bool = False, request_context: dict | None = None, text_logprobs: bool = False) -> None:
         self.protocol = Protocol(protocol)
         if not isinstance(public_reasoning, bool):
             raise TypeError("public_reasoning must be a boolean")
@@ -72,12 +72,19 @@ class StreamEncoder:
         self.message_output_index: int | None = None
         self.initial_input_tokens: int | None = None
         self.service_tier: str | None = None
+        if type(text_logprobs) is not bool or text_logprobs and self.protocol == Protocol.MESSAGES:
+            raise ValueError("text_logprobs requires a Chat/Responses stream")
+        self.text_logprobs = text_logprobs
+        self.probabilities: list[dict] = []
+        self.probability_text = ""
 
     def finish(self) -> None:
         if not self.ended:
             raise StreamError("encoder ended before a finish delta")
 
     def feed(self, delta: Delta) -> list[SSEEvent]:
+        if delta.logprobs and (not self.text_logprobs or delta.kind != "text"):
+            raise StreamError("token logprobs require enabled text output")
         if self.ended:
             raise StreamError("delta after stream completion")
         if delta.kind == "start":
@@ -95,7 +102,7 @@ class StreamEncoder:
             raise StreamError("delta before stream start")
         if delta.kind == "reasoning_text":
             return self._reasoning(delta)
-        if self.public_reasoning and delta.kind == "text" and delta.text == "":
+        if self.public_reasoning and delta.kind == "text" and delta.text == "" and not delta.logprobs:
             return []
         if delta.kind in {"text", "tool_start", "finish"}:
             self.reasoning_closed = True
@@ -116,7 +123,7 @@ class StreamEncoder:
             if delta.text is None:
                 raise StreamError("text delta has no text")
             if self.saw_tool and self.protocol in {Protocol.CHAT, Protocol.RESPONSES}:
-                if delta.text == "":
+                if delta.text == "" and not delta.logprobs:
                     return []  # An empty delta carries no post-tool content.
                 raise StreamError("text after a tool call cannot be preserved in this target response")
             return self._text(delta)
@@ -209,7 +216,7 @@ class StreamEncoder:
 
     def _chat_chunk(self, choices: list[dict[str, Any]], usage: dict[str, int] | None = None) -> SSEEvent:
         for choice in choices:
-            choice["logprobs"] = None
+            choice.setdefault("logprobs", None)
         body: dict[str, Any] = {"id": self.id, "object": "chat.completion.chunk", "created": self.created, "model": self.model, "choices": choices}
         if usage is not None:
             body["usage"] = usage
@@ -229,8 +236,20 @@ class StreamEncoder:
         return [self._response_event("response.created", response=self._response_snapshot("in_progress"))]
 
     def _text(self, delta: Delta) -> list[SSEEvent]:
+        from .logprobs import records
+
+        try:
+            probabilities = records(delta.logprobs) if delta.logprobs is not None else []
+        except ConversionError as exc:
+            raise StreamError(str(exc)) from exc
+        if self.text_logprobs:
+            self.probability_text += delta.text
+            self.probabilities.extend(probabilities)
         if self.protocol == Protocol.CHAT:
-            return [self._chat_chunk([{"index": 0, "delta": {"content": delta.text}, "finish_reason": None}])]
+            choice = {"index": 0, "delta": {"content": delta.text}, "finish_reason": None}
+            if probabilities:
+                choice["logprobs"] = {"content": probabilities, "refusal": None}
+            return [self._chat_chunk([choice])]
         if self.protocol == Protocol.MESSAGES:
             if self.open_blocks:
                 raise StreamError("Messages cannot interleave text within an open tool block")
@@ -253,7 +272,7 @@ class StreamEncoder:
                 self._response_event("response.content_part.added", item_id=item_id, output_index=self.text_index, content_index=0, part={"type": "output_text", "text": "", "annotations": [], "logprobs": []}),
             ])
         self.text += delta.text
-        events.append(self._response_event("response.output_text.delta", item_id=self.output[self.message_output_index]["id"], output_index=self.text_index, content_index=0, delta=delta.text, logprobs=[]))
+        events.append(self._response_event("response.output_text.delta", item_id=self.output[self.message_output_index]["id"], output_index=self.text_index, content_index=0, delta=delta.text, logprobs=probabilities))
         return events
 
     def _close_text(self, *, status: str = "completed") -> list[SSEEvent]:
@@ -267,11 +286,11 @@ class StreamEncoder:
             item = self.output[self.message_output_index] if self.message_output_index is not None else None
             if item is None:
                 raise StreamError("missing response message item")
-            part = {"type": "output_text", "text": self.text, "annotations": [], "logprobs": []}
+            part = {"type": "output_text", "text": self.text, "annotations": [], "logprobs": self.probabilities.copy()}
             item.update(status=status, content=[part])
             self.text = ""
             return [
-                self._response_event("response.output_text.done", item_id=item["id"], output_index=index, content_index=0, text=part["text"], logprobs=[]),
+                self._response_event("response.output_text.done", item_id=item["id"], output_index=index, content_index=0, text=part["text"], logprobs=part["logprobs"]),
                 self._response_event("response.content_part.done", item_id=item["id"], output_index=index, content_index=0, part=part),
                 self._response_event("response.output_item.done", output_index=index, item=item.copy()),
             ]
@@ -351,7 +370,10 @@ class StreamEncoder:
         ]
 
     def _finish(self, delta: Delta) -> list[SSEEvent]:
+        from .logprobs import align
+
         try:
+            align(self.probabilities, self.probability_text, required=self.text_logprobs)
             self.service_tier = _reported_service_tier(delta.service_tier)
         except ConversionError as exc:
             raise StreamError(str(exc)) from exc

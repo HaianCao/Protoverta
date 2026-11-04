@@ -334,14 +334,14 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
             self.wfile.write(raw)
             self._trace.mark_first_payload()
 
-        def _stream(self, response, source: Protocol, target: Protocol, response_transform=None, tool_name_transform=None, budget=None, delta_transform=None, tool_policy=None) -> None:
+        def _stream(self, response, source: Protocol, target: Protocol, response_transform=None, tool_name_transform=None, budget=None, delta_transform=None, tool_policy=None, text_logprobs=False, max_top_logprobs=None) -> None:
             native_guard = None
             if config.codex_model_safe_resume and source == target == Protocol.RESPONSES:
                 from .harness_controls import guard_codex_closed_resume
 
                 native_guard = lambda event: guard_codex_closed_resume(json.loads(event.data), streaming=True)
             limits = {"max_stream_bytes": config.max_stream_bytes, "max_stream_items": config.max_stream_items, "max_tool_argument_bytes": config.max_tool_argument_bytes}
-            pipeline = StreamTranscoder(source, target, messages_usage_policy=config.messages_usage_policy, max_pending_bytes=config.max_body_bytes, response_transform=response_transform, public_reasoning=config.public_reasoning, tool_name_transform=tool_name_transform, delta_transform=delta_transform, tool_policy=tool_policy, **limits) if source != target else StreamValidator(source, event_guard=native_guard, **limits)
+            pipeline = StreamTranscoder(source, target, messages_usage_policy=config.messages_usage_policy, max_pending_bytes=config.max_body_bytes, response_transform=response_transform, public_reasoning=config.public_reasoning, tool_name_transform=tool_name_transform, delta_transform=delta_transform, tool_policy=tool_policy, text_logprobs=text_logprobs, max_top_logprobs=max_top_logprobs, **limits) if source != target else StreamValidator(source, event_guard=native_guard, **limits)
             budget = budget or RequestBudget(config.timeout, config.total_timeout, config.progress_timeout)
             headers_sent = False
             initial = bytearray()
@@ -625,6 +625,9 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 if target_url.query and protocol != config.upstream_protocol and not claude_beta:
                     raise ConversionError("query parameters cannot be translated between protocols")
                 tool_policy = None
+                from .logprobs import requested
+
+                text_logprobs = requested(payload, protocol)
                 if protocol == config.upstream_protocol:
                     outbound = payload
                     namespace_map = None
@@ -667,7 +670,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                             response_request["tool_choice"] = effective_choice
                         if response_request.get("parallel_tool_calls") is None:
                             response_request["parallel_tool_calls"] = effective_parallel
-                    outbound = convert_request(payload, protocol, config.upstream_protocol, messages_mid_system=mid_system, public_reasoning=config.public_reasoning)
+                    outbound = convert_request(payload, protocol, config.upstream_protocol, messages_mid_system=mid_system, public_reasoning=config.public_reasoning, text_logprobs=text_logprobs)
                     if protocol == Protocol.RESPONSES:
                         from .formats import decode_output_format
 
@@ -692,7 +695,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                         outbound.pop("tool_choice", None)
                         outbound.pop("parallel_tool_calls", None)
                     if protocol == Protocol.RESPONSES:
-                        for key in ("temperature", "top_p"):
+                        for key in ("temperature", "top_p", "top_logprobs"):
                             if outbound.get(key) is not None:
                                 response_request[key] = outbound[key]
                 self._trace.models(response_request.get("model"), outbound.get("model"), model_identity_salt)
@@ -807,7 +810,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                             delta_fn = combined_delta
                         else:
                             delta_fn = profile_delta or search_delta
-                        self._stream(response, config.upstream_protocol, protocol, transform, tool_name_map.decode if tool_name_map is not None else None, budget, delta_fn, tool_policy=tool_policy)
+                        self._stream(response, config.upstream_protocol, protocol, transform, tool_name_map.decode if tool_name_map is not None else None, budget, delta_fn, tool_policy=tool_policy, text_logprobs=text_logprobs, max_top_logprobs=outbound.get("top_logprobs") if text_logprobs else None)
                         return
                     raw = bytearray()
                     while len(raw) <= config.max_body_bytes:
@@ -828,7 +831,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                     if config.provider_profiles is not None:
                         result = config.provider_profiles.restore(config.upstream_base_url, config.upstream_protocol, outbound.get("model"), result)
                     if protocol != config.upstream_protocol:
-                        result = convert_response(result, config.upstream_protocol, protocol, public_reasoning=config.public_reasoning)
+                        result = convert_response(result, config.upstream_protocol, protocol, public_reasoning=config.public_reasoning, text_logprobs=text_logprobs, max_top_logprobs=outbound.get("top_logprobs") if text_logprobs else None)
                         tool_policy.check_result(result, protocol)
                         result = restore_response(result)
                     elif config.codex_model_safe_resume and protocol == Protocol.RESPONSES:

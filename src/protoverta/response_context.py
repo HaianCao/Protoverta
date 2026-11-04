@@ -7,7 +7,8 @@ from collections.abc import Callable
 
 POLICY_FIELDS = ("parallel_tool_calls", "tools", "tool_choice")
 CONTEXT_FIELDS = ("instructions", "max_output_tokens", "tools", "tool_choice",
-                  "parallel_tool_calls", "text", "temperature", "top_p")
+                  "parallel_tool_calls", "text", "temperature", "top_p",
+                  "frequency_penalty", "presence_penalty", "top_logprobs")
 
 
 def generated_response_metadata() -> dict:
@@ -33,8 +34,10 @@ def bind_response_context(request: dict) -> Callable[[dict], dict]:
     """
     from .core import (
         Protocol,
+        _disabled_logprobs,
         _object,
         _optional_list,
+        _optional_penalty,
         _optional_positive_int,
         _optional_temperature,
         _optional_top_p,
@@ -56,6 +59,9 @@ def bind_response_context(request: dict) -> Callable[[dict], dict]:
     _optional_positive_int(request.get("max_output_tokens"), "request_context.max_output_tokens")
     _optional_temperature(request.get("temperature"))
     _optional_top_p(request.get("top_p"))
+    _optional_penalty(request.get("frequency_penalty"), "frequency_penalty")
+    _optional_penalty(request.get("presence_penalty"), "presence_penalty")
+    _disabled_logprobs(request, Protocol.RESPONSES, allow_enabled=True)
     if request.get("text") is not None:
         decode_output_format(request, Protocol.RESPONSES)
     frozen = copy.deepcopy({name: request[name] for name in CONTEXT_FIELDS if name in request})

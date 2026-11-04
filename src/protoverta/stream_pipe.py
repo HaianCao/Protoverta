@@ -86,7 +86,7 @@ class StreamTranscoder:
     Calling code must not emit a successful terminal event after an exception.
     """
 
-    def __init__(self, source: Protocol | str, target: Protocol | str, *, messages_usage_policy: str = "strict", max_pending_bytes: int = 8 * 1024 * 1024, response_transform: Callable[[dict], dict] | None = None, public_reasoning: bool = False, tool_name_transform: Callable[[str], str] | None = None, max_stream_bytes=32 * 1024 * 1024, max_stream_items=1024, max_tool_argument_bytes=8 * 1024 * 1024, delta_transform: Callable[[Delta], Delta] | None = None, request_context: dict | None = None, tool_policy=None) -> None:
+    def __init__(self, source: Protocol | str, target: Protocol | str, *, messages_usage_policy: str = "strict", max_pending_bytes: int = 8 * 1024 * 1024, response_transform: Callable[[dict], dict] | None = None, public_reasoning: bool = False, tool_name_transform: Callable[[str], str] | None = None, max_stream_bytes=32 * 1024 * 1024, max_stream_items=1024, max_tool_argument_bytes=8 * 1024 * 1024, delta_transform: Callable[[Delta], Delta] | None = None, request_context: dict | None = None, tool_policy=None, text_logprobs: bool = False, max_top_logprobs=None) -> None:
         self.source = Protocol(source)
         self.target = Protocol(target)
         if messages_usage_policy not in {"strict", "deferred"}:
@@ -98,10 +98,11 @@ class StreamTranscoder:
             raise StreamError("incremental Messages output needs input_tokens at stream start; this source reports usage later")
         self.order = _MessagesOrder(max_pending_bytes) if cross_messages else None
         self.parser = SSEParser()
-        self.decoder = StreamDecoder(self.source, public_reasoning=public_reasoning)
+        limit = max_top_logprobs if max_top_logprobs is not None else (request_context or {}).get("top_logprobs")
+        self.decoder = StreamDecoder(self.source, public_reasoning=public_reasoning, text_logprobs=text_logprobs, max_top_logprobs=limit)
         if request_context is not None and self.source == self.target:
             raise ValueError("request_context requires translated Responses output")
-        self.encoder = StreamEncoder(self.target, response_transform=response_transform, public_reasoning=public_reasoning, request_context=request_context)
+        self.encoder = StreamEncoder(self.target, response_transform=response_transform, public_reasoning=public_reasoning, request_context=request_context, text_logprobs=text_logprobs)
         self.tool_name_transform = tool_name_transform
         self.delta_transform = delta_transform
         self.tool_policy = tool_policy

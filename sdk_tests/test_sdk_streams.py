@@ -15,6 +15,7 @@ from wire_cases import CALLS, MODEL, TEXT, event, fragments, source_wire
 from protoverta import convert_request
 from protoverta import server as gateway
 from protoverta.server import GatewayConfig, make_handler
+from protoverta.sse import SSEParser, encode_sse
 
 PROTOCOLS = ("chat", "messages", "responses")
 ROUTES = [(source, target) for source in PROTOCOLS for target in PROTOCOLS if source != target]
@@ -78,6 +79,74 @@ def response_policy():
 def portable_tool_policy(target):
     request = convert_request({"model": MODEL, "input": "synthetic", "max_output_tokens": 32, **response_policy()}, "responses", target)
     return {key: request[key] for key in ("tools", "tool_choice", "parallel_tool_calls") if key in request}
+
+
+def probability_wire(source):
+    """Handwritten token observations layered onto the independent wire fixture."""
+    output, probabilities = [], []
+    for frame in SSEParser().feed(source_wire(source, tools=False)):
+        if frame.data == "[DONE]":
+            output.append(encode_sse(frame.event, frame.data))
+            continue
+        body = json.loads(frame.data)
+        if source == "chat":
+            for choice in body.get("choices", []):
+                text = choice.get("delta", {}).get("content")
+                if text:
+                    value = {"token": text, "bytes": list(text.encode()), "logprob": -0.25, "top_logprobs": [{"token": "x", "bytes": [120], "logprob": -1.5}]}
+                    probabilities.append(value)
+                    choice["logprobs"] = {"content": [value], "refusal": None}
+        else:
+            kind = body["type"]
+            if kind == "response.output_text.delta" and body["delta"]:
+                value = {"token": body["delta"], "bytes": list(body["delta"].encode()), "logprob": -0.25, "top_logprobs": [{"token": "x", "bytes": [120], "logprob": -1.5}]}
+                probabilities.append(value)
+                body["logprobs"] = [value]
+            elif kind == "response.output_text.done":
+                body["logprobs"] = probabilities.copy()
+            elif kind == "response.content_part.done":
+                body["part"]["logprobs"] = probabilities.copy()
+            elif kind == "response.output_item.done":
+                body["item"]["content"][0]["logprobs"] = probabilities.copy()
+            elif kind == "response.completed":
+                body["response"]["output"][0]["content"][0]["logprobs"] = probabilities.copy()
+        output.append(encode_sse(frame.event, json.dumps(body)))
+    return b"".join(output), probabilities
+
+
+def verify_probability_sdk(source, target):
+    raw, expected = probability_wire(source)
+    with listener(source, wire=raw) as (origin, calls), client_for(target, origin) as client:
+        if target == "responses":
+            with client.responses.stream(model=MODEL, input="synthetic", max_output_tokens=32,
+                                         include=["message.output_text.logprobs"], top_logprobs=2, **response_policy()) as stream:
+                list(stream)
+                observed = stream.get_final_response().output[0].content[0].logprobs
+        else:
+            chunks = list(client.chat.completions.create(model=MODEL, messages=[{"role": "user", "content": "synthetic"}],
+                                                        stream=True, stream_options={"include_usage": True}, logprobs=True, top_logprobs=2))
+            observed = [token for chunk in chunks for choice in chunk.choices for token in (choice.logprobs.content if choice.logprobs else [])]
+    assert [(p.token, p.bytes, p.logprob, [(c.token, c.bytes, c.logprob) for c in p.top_logprobs]) for p in observed] == [
+        (p["token"], p["bytes"], p["logprob"], [(c["token"], c["bytes"], c["logprob"]) for c in p["top_logprobs"]]) for p in expected]
+    assert len(calls) == 1 and calls[0]["top_logprobs"] == 2
+    if source == "chat":
+        completed = {"model": MODEL, "choices": [{"index": 0, "message": {"role": "assistant", "content": TEXT},
+                      "finish_reason": "stop", "logprobs": {"content": expected, "refusal": None}}],
+                     "usage": {"prompt_tokens": 19, "completion_tokens": 7,
+                               "prompt_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
+                               "completion_tokens_details": {"reasoning_tokens": 0}}}
+    else:
+        completed = next(json.loads(e.data)["response"] for e in SSEParser().feed(raw) if e.event == "response.completed")
+    with listener(source, wire=json.dumps(completed).encode()) as (origin, calls), client_for(target, origin) as client:
+        if target == "responses":
+            result = client.responses.create(model=MODEL, input="synthetic", max_output_tokens=32,
+                                             include=["message.output_text.logprobs"], top_logprobs=2, **response_policy())
+            observed = result.output[0].content[0].logprobs
+        else:
+            result = client.chat.completions.create(model=MODEL, messages=[{"role": "user", "content": "synthetic"}], logprobs=True, top_logprobs=2)
+            observed = result.choices[0].logprobs.content
+    assert [(p.token, p.bytes, p.logprob) for p in observed] == [(p["token"], p["bytes"], p["logprob"]) for p in expected]
+    assert len(calls) == 1
 
 
 def consume(client, target):
@@ -170,6 +239,8 @@ def test_sdk_accumulates_text_and_tools_without_losing_opening_arguments(source,
     assert result["usage"] == (19, 7)
     assert result["reason"] == {"chat": "tool_calls", "messages": "tool_use", "responses": "completed"}[target]
     assert len(calls) == 1
+    if (source, target) in {("chat", "responses"), ("responses", "chat")}:
+        verify_probability_sdk(source, target)
     if target == "responses":
         for item in result["events"]:
             if item.type.startswith(("response.content_part.", "response.output_text.")):

@@ -111,8 +111,10 @@ def prepare_codex_request(body: dict, target: Protocol, *, default_max_output_to
             raise ConversionError("Codex prompt_cache_key must be a string")
         result.pop("prompt_cache_key")
     include = result.pop("include", [])
-    if not isinstance(include, list) or any(value != "reasoning.encrypted_content" for value in include):
+    if not isinstance(include, list) or any(value not in ("reasoning.encrypted_content", "message.output_text.logprobs") for value in include):
         raise ConversionError("Codex profile only permits the encrypted reasoning include hint")
+    if "message.output_text.logprobs" in include:
+        result["include"] = ["message.output_text.logprobs"]
     if "reasoning" in result:
         reasoning = result["reasoning"]
         if not isinstance(reasoning, dict) or set(reasoning) - {"effort", "summary"}:
