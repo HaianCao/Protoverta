@@ -15,7 +15,19 @@ from .observability import RequestObservation
 _NAME = re.compile(r"session-[a-f0-9]{32}\.jsonl\Z")
 _FIELDS = set(RequestObservation.__dataclass_fields__)
 _OPTIONAL = {"first_payload_ms", "input_tokens", "output_tokens", "cached_input_tokens", "cache_creation_input_tokens"}
-_MODEL_DIGESTS = {"requested_model_digest", "effective_model_digest"}
+_DIGESTS = {"requested_model_digest", "effective_model_digest", "agent_digest", "chain_digest"}
+_TRACE_META = {"phase", "feature"}
+_PHASES = {"request", "preflight", "admission", "upstream", "response", "stream"}
+_FEATURES = {
+    "refusal",
+    "content_filter",
+    "stop_sequence",
+    "pause_turn",
+    "stream_usage_policy",
+    "codex_closed_resume",
+    "compaction",
+    "reasoning",
+}
 
 
 def _journals(root):
@@ -101,14 +113,14 @@ def diagnostic_journal(directory):
         try:
             with path.open("r", encoding="utf-8") as source:
                 header = json.loads(source.readline(512))
-            if header == {"kind": "protoverta-session", "schema_version": 1}:
+            if isinstance(header, dict) and header.get("kind") == "protoverta-session" and header.get("schema_version") in (1, 2):
                 path.unlink()
         except (OSError, ValueError):
             pass
     path = root / ("session-" + secrets.token_hex(16) + ".jsonl")
     stream = path.open("x", encoding="utf-8")
     try:
-        stream.write(json.dumps({"kind": "protoverta-session", "schema_version": 1}) + "\n")
+        stream.write(json.dumps({"kind": "protoverta-session", "schema_version": 2}) + "\n")
         stream.flush()
         observe = _JournalSink(stream)
     except BaseException:
@@ -130,8 +142,10 @@ def latest_diagnostics(directory):
             if path.stat().st_size > 1024 * 1024:
                 continue
             with path.open("r", encoding="utf-8") as stream:
-                if json.loads(stream.readline(512)) != {"kind": "protoverta-session", "schema_version": 1}:
+                header = json.loads(stream.readline(512))
+                if not isinstance(header, dict) or set(header) != {"kind", "schema_version"} or header.get("kind") != "protoverta-session" or header.get("schema_version") not in (1, 2):
                     continue
+                schema_version = header["schema_version"]
                 records = []
                 dropped = 0
                 for index, line in enumerate(stream):
@@ -141,13 +155,19 @@ def latest_diagnostics(directory):
                     if isinstance(value, dict) and set(value) == {"kind", "dropped_records"} and value["kind"] == "protoverta-summary" and type(value["dropped_records"]) is int and value["dropped_records"] >= 0:
                         dropped = value["dropped_records"]
                         continue
-                    if not isinstance(value, dict) or set(value) - _FIELDS or not (_FIELDS - _OPTIONAL - _MODEL_DIGESTS) <= set(value):
+                    if not isinstance(value, dict) or set(value) - _FIELDS or not (_FIELDS - _OPTIONAL - _DIGESTS - _TRACE_META) <= set(value):
                         continue
                     for key in _OPTIONAL:
                         value.setdefault(key, None)
-                    for key in _MODEL_DIGESTS:
+                    for key in _DIGESTS:
                         value.setdefault(key, None)
-                    if any(value[key] is not None and (not isinstance(value[key], str) or re.fullmatch(r"[a-f0-9]{64}", value[key]) is None) for key in _MODEL_DIGESTS):
+                    for key in _TRACE_META:
+                        value.setdefault(key, None)
+                    if any(value[key] is not None and (not isinstance(value[key], str) or re.fullmatch(r"[a-f0-9]{64}", value[key]) is None) for key in _DIGESTS):
+                        continue
+                    if value["phase"] is not None and value["phase"] not in _PHASES:
+                        continue
+                    if value["feature"] is not None and value["feature"] not in _FEATURES:
                         continue
                     if not isinstance(value["request_id"], str) or not re.fullmatch(r"[a-f0-9]{32}", value["request_id"]):
                         continue
@@ -164,7 +184,7 @@ def latest_diagnostics(directory):
                     if any(value[key] is not None and (type(value[key]) is not int or value[key] < 0) for key in _OPTIONAL):
                         continue
                     records.append(value)
-            return {"records": records[-100:], "limited": scan_limited or len(records) >= 100 or dropped > 0, "dropped_records": dropped}
+            return {"records": records[-100:], "limited": scan_limited or len(records) >= 100 or dropped > 0, "dropped_records": dropped, "schema_version": schema_version}
         except (OSError, ValueError, TypeError):
             continue
     return {"records": [], "limited": scan_limited}

@@ -10,13 +10,14 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from typing import Literal, TextIO
 
-WireProtocol = Literal["chat", "messages", "responses", "unknown"]
+WireProtocol = Literal["chat", "messages", "responses", "models", "unknown"]
 Outcome = Literal[
-    "success", "invalid_request", "authentication", "not_found", "capacity",
+    "success", "truncated_output", "invalid_request", "authentication", "not_found", "capacity",
     "shared_admission", "admission_unavailable", "upstream_http", "timeout",
-    "upstream_transport", "unsupported_reasoning", "unsupported_feature", "invalid_stream", "invalid_response",
-    "stream_limit", "client_disconnected", "internal_error",
+    "upstream_transport", "unsupported_reasoning", "unsupported_feature", "policy_refusal",
+    "invalid_stream", "invalid_response", "stream_limit", "client_disconnected", "internal_error",
 ]
+TracePhase = Literal["request", "preflight", "admission", "upstream", "response", "stream"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +38,10 @@ class RequestObservation:
     cache_creation_input_tokens: int | None = None
     requested_model_digest: str | None = None
     effective_model_digest: str | None = None
+    phase: TracePhase | None = None
+    feature: str | None = None
+    agent_digest: str | None = None
+    chain_digest: str | None = None
 
 
 Observer = Callable[[RequestObservation], None]
@@ -62,6 +67,10 @@ class RequestTrace:
         self.cache_creation_input_tokens: int | None = None
         self.requested_model_digest: str | None = None
         self.effective_model_digest: str | None = None
+        self.phase: TracePhase | None = None
+        self.feature: str | None = None
+        self.agent_digest: str | None = None
+        self.chain_digest: str | None = None
 
     def models(self, requested: object, effective: object, salt: bytes) -> None:
         """Session-scoped identity only; never store model names or a global hash."""
@@ -75,6 +84,17 @@ class RequestTrace:
             return hmac.digest(salt, raw, "sha256").hex()
         self.requested_model_digest = digest(requested)
         self.effective_model_digest = digest(effective)
+
+    def correlation(self, agent: object, chain: object, salt: bytes) -> None:
+        """Bounded HMAC-digested correlation only; never used for auth or routing."""
+        def digest(value: object) -> str | None:
+            if not isinstance(value, str) or not 1 <= len(value) <= 128:
+                return None
+            if any(ord(c) < 33 or ord(c) >= 127 for c in value):
+                return None
+            return hmac.digest(salt, value.encode("ascii"), "sha256").hex()
+        self.agent_digest = digest(agent)
+        self.chain_digest = digest(chain)
 
     def mark_first_payload(self) -> None:
         if self.first_payload_ms is None:
@@ -95,7 +115,8 @@ class RequestTrace:
                                   self.status, self.outcome,
                                   max(0, int((self._clock() - self._started) * 1000)),
                                   self.streaming, self.first_payload_ms, self.input_tokens, self.output_tokens, self.cached_input_tokens, self.cache_creation_input_tokens,
-                                  self.requested_model_digest, self.effective_model_digest)
+                                  self.requested_model_digest, self.effective_model_digest,
+                                  self.phase, self.feature, self.agent_digest, self.chain_digest)
 
     def emit(self, observer: Observer | None) -> None:
         if observer is not None:

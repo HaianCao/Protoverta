@@ -176,6 +176,7 @@ class _LifecycleValidator:
         self.choices: set[int] = set()
         self.stop_reason = False
         self.saw_trailing_done = False
+        self.truncated = False
 
     def _index(self, body: dict, field: str) -> int:
         value = body.get(field)
@@ -223,6 +224,8 @@ class _LifecycleValidator:
                 if choice.get("finish_reason") is not None:
                     self.finished_choices.add(index)
                     self.finish_reasons[index] = choice["finish_reason"]
+                    if choice["finish_reason"] == "length":
+                        self.truncated = True
             self.started = True
             return
         kind = body.get("type")
@@ -255,6 +258,8 @@ class _LifecycleValidator:
                     raise StreamError("invalid Messages delta")
                 if delta.get("stop_reason") is not None:
                     self.stop_reason = True
+                    if delta.get("stop_reason") == "max_tokens":
+                        self.truncated = True
             elif kind == "message_stop":
                 if self.open_items or not self.stop_reason:
                     raise StreamError("Messages stopped before content/stop reason completed")
@@ -286,6 +291,8 @@ class _LifecycleValidator:
             expected = "completed" if kind == "response.completed" else "incomplete"
             if self.open_items or not isinstance(response, dict) or response.get("status") != expected:
                 raise StreamError("Responses terminal event disagrees with lifecycle")
+            if kind == "response.incomplete" and isinstance(response.get("incomplete_details"), dict) and response["incomplete_details"].get("reason") == "max_output_tokens":
+                self.truncated = True
             self.ended = True
         elif kind == "response.failed":
             raise StreamError("upstream Responses stream failed")

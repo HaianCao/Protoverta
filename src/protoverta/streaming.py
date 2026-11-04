@@ -436,7 +436,7 @@ class StreamDecoder:
                 raise StreamError("Messages message_delta out of order")
             delta = _obj(body.get("delta"), "message_delta.delta")
             reason = _str(delta.get("stop_reason"), "Messages stop_reason")
-            if reason in ("refusal", "stop_sequence"):
+            if reason in ("refusal", "stop_sequence", "pause_turn"):
                 raise UnsupportedStreamFeatureError(reason)
             self.reason = {"end_turn": "stop", "tool_use": "tool_calls", "max_tokens": "length"}.get(reason)
             if self.reason is None:

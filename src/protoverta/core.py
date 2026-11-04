@@ -923,7 +923,7 @@ def _decode_result(body: dict[str, Any], source: Protocol, *, public_reasoning: 
             raise ConversionError("tool result is not a valid Messages response")
         usage = _object(body.get("usage") or {}, "usage")
         reason = body.get("stop_reason")
-        if reason in ("refusal", "stop_sequence"):
+        if reason in ("refusal", "stop_sequence", "pause_turn"):
             raise UnsupportedFeatureError(reason)
         if reason not in ("end_turn", "tool_use", "max_tokens"):
             raise ConversionError(f"unsupported Messages stop_reason: {reason}")

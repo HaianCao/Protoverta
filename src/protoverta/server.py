@@ -34,7 +34,7 @@ from .core import (
     convert_response,
 )
 from .errors import UnsupportedFeatureError
-from .failures import gateway_failure
+from .failures import FailurePhase, gateway_failure
 from .json_wire import decode_json, encode_json
 from .lifetime import DisconnectWatch
 from .model_snapshot import ModelMetadataUnavailable, ModelSnapshot
@@ -293,11 +293,15 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
             raw = encode_json(payload)
             self._raw_json(status, raw, headers)
 
-        def _error(self, status, message, protocol, *, code=None, headers=None):
+        def _error(self, status, message, protocol, *, code=None, phase: FailurePhase | None = None, feature: str | None = None, path: str | None = None, headers=None):
             self._trace.outcome = {400: "invalid_request", 401: "authentication", 404: "not_found", 408: "timeout", 411: "invalid_request", 413: "invalid_request", 422: "invalid_request", 429: "upstream_http", 503: "upstream_http", 504: "timeout"}.get(status, "upstream_http")
-            if code in {"unsupported_feature", "unsupported_reasoning", "invalid_stream", "stream_limit", "upstream_transport"}:
+            if feature in {"refusal", "content_filter"} and code in {None, "unsupported_feature", "policy_refusal"}:
+                code = "policy_refusal"
+            if code in {"unsupported_feature", "unsupported_reasoning", "policy_refusal", "truncated_output", "invalid_stream", "invalid_response", "stream_limit", "upstream_transport"}:
                 self._trace.outcome = code
-            failure = gateway_failure(status, message, code=code, secrets=(config.upstream_api_key, config.inbound_token))
+            self._trace.phase = phase
+            self._trace.feature = feature
+            failure = gateway_failure(status, message, code=code, phase=phase, feature=feature, path=path, secrets=(config.upstream_api_key, config.inbound_token))
             self._json(failure.status, failure.payload(protocol), headers)
 
         def _forward_headers(self, headers) -> None:
@@ -311,11 +315,14 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
             self.connection.settimeout(self._budget.remaining() if status < 400 else min(config.timeout, 1))
             self._trace.status = status
             if status < 400:
-                self._trace.outcome = "success"
+                if self._trace.outcome != "truncated_output":
+                    self._trace.outcome = "success"
             elif self._trace.outcome == "internal_error":
                 self._trace.outcome = "upstream_http"
             self.send_response(status)
             self.send_header("X-Protoverta-Request-ID", self._trace.request_id)
+            if self._trace.outcome == "truncated_output":
+                self.send_header("X-Protoverta-Finish-Category", "truncated_output")
             for name, value in getattr(self, "_context_headers", {}).items():
                 self.send_header(name, value)
             self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -403,8 +410,10 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                     send_headers()
                     write_output(tail)
                 send_headers()
-                self._trace.outcome = "success"
                 decoder = pipeline.decoder
+                stream_truncated = getattr(decoder, "reason", None) == "length" or "length" in getattr(decoder, "finish_reasons", {}).values() or getattr(decoder, "truncated", False)
+                self._trace.outcome = "truncated_output" if stream_truncated else "success"
+                self._trace.phase = "stream"
                 details = getattr(decoder, "usage_details", {})
                 self._trace.usage(getattr(decoder, "input_tokens", None), getattr(decoder, "output_tokens", None), details.get("cached_input_tokens"), details.get("cache_creation_input_tokens"))
             except (StreamError, UnicodeError, OSError, HTTPException) as exc:
@@ -413,6 +422,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                     self._trace.outcome = "client_disconnected"
                     return
                 unsupported = isinstance(exc, (UnsupportedReasoningError, UnsupportedStreamFeatureError))
+                feature = "reasoning" if isinstance(exc, UnsupportedReasoningError) else exc.feature if isinstance(exc, UnsupportedStreamFeatureError) else None
                 message = f"upstream stream error: {type(exc).__name__}"
                 if isinstance(exc, UnsupportedReasoningError):
                     hint = "Messages requires its own thinking/signature contract; use native Messages or a compatible Responses route." if target == Protocol.MESSAGES else "For unsigned Chat reasoning_content, enable public_reasoning explicitly on a Chat/Responses route; summaries, signed or encrypted state remain unsupported."
@@ -421,9 +431,13 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                     message = str(exc)
                 timeout = isinstance(exc, TimeoutError)
                 limited = isinstance(exc, StreamLimitError)
-                code = "unsupported_reasoning" if isinstance(exc, UnsupportedReasoningError) else "unsupported_feature" if unsupported else exc.kind if isinstance(exc, DeadlineExceeded) else "upstream_timeout" if timeout else "stream_limit" if limited else "invalid_stream"
-                self._trace.outcome = "unsupported_reasoning" if isinstance(exc, UnsupportedReasoningError) else "unsupported_feature" if unsupported else "timeout" if timeout else "stream_limit" if limited else "invalid_stream"
-                failure = gateway_failure(422 if unsupported else 504 if timeout else 502, message, code=code)
+                refusal = feature in {"refusal", "content_filter"}
+                code = "policy_refusal" if refusal else "unsupported_reasoning" if isinstance(exc, UnsupportedReasoningError) else "unsupported_feature" if unsupported else exc.kind if isinstance(exc, DeadlineExceeded) else "upstream_timeout" if timeout else "stream_limit" if limited else "invalid_stream"
+                self._trace.outcome = "policy_refusal" if refusal else "unsupported_reasoning" if isinstance(exc, UnsupportedReasoningError) else "unsupported_feature" if unsupported else "timeout" if timeout else "stream_limit" if limited else "invalid_stream"
+                self._trace.phase = "stream"
+                self._trace.feature = feature
+                req_path = getattr(self, "_request_path", None)
+                failure = gateway_failure(422 if unsupported else 504 if timeout else 502, message, code=code, phase="stream", feature=feature, path=req_path, secrets=(config.upstream_api_key, config.inbound_token))
                 payload = failure.payload(target)
                 try:
                     if not headers_sent:
@@ -440,40 +454,44 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
         def do_GET(self) -> None:
             self._trace = RequestTrace("models", config.upstream_protocol.value)
             self._context_headers = {}
+            self._request_path = "/v1/models"
             list_protocol = Protocol.MESSAGES if self.headers.get("anthropic-version") else Protocol.CHAT
             acquired = False
             try:
                 try:
                     target = urlsplit(self.path)
                 except ValueError:
-                    self._error(400, "invalid catalog request target", list_protocol)
+                    self._error(400, "invalid catalog request target", list_protocol, phase="request")
                     return
+                self._request_path = target.path
                 if target.path != "/v1/models":
-                    self._error(404, "unsupported endpoint", list_protocol)
+                    self._error(404, "unsupported endpoint", list_protocol, phase="request", path=target.path)
                     return
                 tokens = self.headers.get_all("Authorization", [])
                 api_keys = self.headers.get_all("x-api-key", [])
                 bearer = tokens[0][7:] if len(tokens) == 1 and tokens[0].startswith("Bearer ") else None
                 supplied = bearer if tokens else api_keys[0] if len(api_keys) == 1 else None
                 if len(tokens) > 1 or len(api_keys) > 1 or tokens and api_keys or supplied is None or not supplied.isascii() or not secrets.compare_digest(supplied, config.inbound_token):
-                    self._error(401, "unauthorized", list_protocol)
+                    self._error(401, "unauthorized", list_protocol, phase="request", path=target.path)
                     return
+                self._trace.correlation(self.headers.get("X-Protoverta-Agent-ID"), self.headers.get("X-Protoverta-Chain-ID"), model_identity_salt)
                 acquired = admission.acquire(blocking=False)
                 if not acquired:
-                    self._error(503, "Local gateway request capacity reached.", list_protocol, headers={"Retry-After": "1"})
+                    self._error(503, "Local gateway request capacity reached.", list_protocol, phase="admission", path=target.path, headers={"Retry-After": "1"})
                     self._trace.outcome = "capacity"
                     return
                 if config.model_snapshot is None:
-                    self._error(404, "No session model snapshot configured.", list_protocol)
+                    self._error(404, "No session model snapshot configured.", list_protocol, phase="preflight", path=target.path)
                     return
                 try:
                     payload = config.model_snapshot.page(target.query, default_format="messages" if self.headers.get("anthropic-version") else "normalized", messages_api_version=self.headers.get("anthropic-version", "2023-06-01"))
                 except ModelMetadataUnavailable as exc:
-                    self._error(422, str(exc), list_protocol, code="unsupported_feature", headers={"x-should-retry": "false"})
+                    self._error(422, str(exc), list_protocol, code="unsupported_feature", phase="preflight", path=target.path, headers={"x-should-retry": "false"})
                     return
                 except ValueError as exc:
-                    self._error(400, str(exc), list_protocol)
+                    self._error(400, str(exc), list_protocol, phase="request", path=target.path)
                     return
+                self._trace.phase = "response"
                 self._json(200, payload)
             except (ConnectionError, TimeoutError):
                 self._trace.outcome = "client_disconnected"
@@ -486,6 +504,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
             protocol = _PATHS.get(urlsplit(self.path).path)
             self._trace = RequestTrace(protocol.value if protocol is not None else "unknown", config.upstream_protocol.value)
             self._context_headers = {}
+            self._request_path = None
             try:
                 self._dispatch_post()
             except ConnectionError:
@@ -498,28 +517,30 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
 
         def _dispatch_post(self) -> None:
             target_url = urlsplit(self.path)
+            self._request_path = target_url.path
             protocol = _PATHS.get(target_url.path)
             if protocol is None:
-                self._error(404, "unsupported endpoint", Protocol.CHAT)
+                self._error(404, "unsupported endpoint", Protocol.CHAT, phase="request", path=target_url.path)
                 return
             token = self.headers.get("Authorization", "")
             if not token.startswith("Bearer ") or not token[7:].isascii() or not secrets.compare_digest(token[7:], config.inbound_token):
-                self._error(401, "unauthorized", protocol)
+                self._error(401, "unauthorized", protocol, phase="request", path=target_url.path)
                 return
+            self._trace.correlation(self.headers.get("X-Protoverta-Agent-ID"), self.headers.get("X-Protoverta-Chain-ID"), model_identity_salt)
             if not admission.acquire(blocking=False):
-                self._error(503, "Local gateway request capacity reached; retry after an active request finishes.", protocol, headers={"Retry-After": "1"})
+                self._error(503, "Local gateway request capacity reached; retry after an active request finishes.", protocol, phase="admission", path=target_url.path, headers={"Retry-After": "1"})
                 self._trace.outcome = "capacity"
                 return
             try:
                 self._handle_post(protocol, target_url)
             except AdmissionDenied as exc:
-                self._error(429, "Shared provider admission exhausted.", protocol, headers={"Retry-After": str(exc.retry_after)})
+                self._error(429, "Shared provider admission exhausted.", protocol, phase="admission", path=target_url.path, headers={"Retry-After": str(exc.retry_after)})
                 self._trace.outcome = "shared_admission"
             except (AdmissionStorageError, AdmissionPolicyError):
-                self._error(503, "Shared provider admission unavailable.", protocol)
+                self._error(503, "Shared provider admission unavailable.", protocol, phase="admission", path=target_url.path)
                 self._trace.outcome = "admission_unavailable"
             except TimeoutError:
-                self._error(408, "Client request body read timed out.", protocol, headers={"x-should-retry": "false"})
+                self._error(408, "Client request body read timed out.", protocol, phase="request", path=target_url.path, headers={"x-should-retry": "false"})
             except ConnectionError:
                 self._trace.outcome = "client_disconnected"
             finally:
@@ -529,16 +550,17 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
             # One unambiguous framing mode; never interpret chunked input as JSON.
             lengths = self.headers.get_all("Content-Length", [])
             if self.headers.get_all("Transfer-Encoding") or len(lengths) > 1:
-                self._error(400, "ambiguous or unsupported request framing", protocol)
+                self._error(400, "ambiguous or unsupported request framing", protocol, phase="request", path=target_url.path)
                 return
             try:
                 length = int(self.headers.get("Content-Length", ""))
             except ValueError:
-                self._error(411, "Content-Length is required", protocol)
+                self._error(411, "Content-Length is required", protocol, phase="request", path=target_url.path)
                 return
             if length < 0 or length > config.max_body_bytes:
-                self._error(413, "request body is too large", protocol)
+                self._error(413, "request body is too large", protocol, phase="request", path=target_url.path)
                 return
+            stage: FailurePhase = "request"
             try:
                 payload = decode_json(self.rfile.read(length))
                 if not isinstance(payload, dict):
@@ -548,6 +570,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 if target_url.path in ("/v1/messages/count_tokens", "/v1/responses/input_tokens"):
                     if target_url.query:
                         raise ConversionError("count endpoint query parameters are unsupported")
+                    stage = "preflight"
                     from .token_counting import NativeCountError, count_input
 
                     count_lease = None
@@ -559,7 +582,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                         delay = retry_after(exc.headers)
                         if shared_admission is not None and exc.status in (429, 503) and delay is not None:
                             shared_admission.cooldown(delay)
-                        self._error(exc.status, str(exc), protocol, headers=exc.headers)
+                        self._error(exc.status, str(exc), protocol, phase="upstream", path=target_url.path, headers=exc.headers)
                         return
                     finally:
                         if shared_admission is not None and count_lease is not None:
@@ -574,6 +597,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                     result = {"input_tokens": count}
                     if protocol == Protocol.RESPONSES:
                         result["object"] = "response.input_tokens"
+                    self._trace.phase = "response"
                     self._json(200, result)
                     return
                 streaming = payload.get("stream", False)
@@ -629,6 +653,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 if config.provider_profiles is not None:
                     outbound = config.provider_profiles.apply(config.upstream_base_url, config.upstream_protocol, outbound)
                 self._trace.models(response_request.get("model"), outbound.get("model"), model_identity_salt)
+                stage = "preflight"
                 if config.capabilities is not None:
                     from .evidence_identity import evidence_options
 
@@ -667,13 +692,13 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                     outbound["stream_options"] = {"include_usage": True}
                 data = encode_json(outbound)
             except RecursionError:
-                self._error(422, "request nesting exceeds the supported depth", protocol, headers={"x-should-retry": "false"})
+                self._error(422, "request nesting exceeds the supported depth", protocol, phase=stage, path=target_url.path, headers={"x-should-retry": "false"})
                 return
             except UnsupportedFeatureError as exc:
-                self._error(422, str(exc), protocol, code="unsupported_feature", headers={"x-should-retry": "false"})
+                self._error(422, str(exc), protocol, code="unsupported_feature", phase=stage, feature=exc.feature, path=target_url.path, headers={"x-should-retry": "false"})
                 return
             except (json.JSONDecodeError, UnicodeError, ConversionError) as exc:
-                self._error(422, str(exc), protocol, headers={"x-should-retry": "false"})
+                self._error(422, str(exc), protocol, phase=stage, path=target_url.path, headers={"x-should-retry": "false"})
                 return
             headers = {"Content-Type": "application/json", "Accept": "text/event-stream" if streaming else "application/json"}
             if config.auth_style == "bearer":
@@ -752,15 +777,27 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                         from .harness_controls import guard_codex_closed_resume
 
                         guard_codex_closed_resume(result)
+                    truncated = False
+                    if protocol == Protocol.CHAT:
+                        choices = result.get("choices")
+                        truncated = isinstance(choices, list) and any(isinstance(c, dict) and c.get("finish_reason") == "length" for c in choices)
+                    elif protocol == Protocol.MESSAGES:
+                        truncated = result.get("stop_reason") == "max_tokens"
+                    elif protocol == Protocol.RESPONSES and not compact:
+                        inc = result.get("incomplete_details")
+                        truncated = result.get("status") == "incomplete" and isinstance(inc, dict) and inc.get("reason") == "max_output_tokens"
+                    self._trace.phase = "response"
+                    if truncated:
+                        self._trace.outcome = "truncated_output"
                     self._json(200, result, getattr(response, "headers", None))
             except AdmissionDenied as exc:
-                self._error(429, str(exc), protocol, headers={"Retry-After": str(exc.retry_after)})
+                self._error(429, str(exc), protocol, phase="admission", path=target_url.path, headers={"Retry-After": str(exc.retry_after)})
                 self._trace.outcome = "shared_admission"
             except ClientDisconnected:
                 self._trace.outcome = "client_disconnected"
                 return
             except (AdmissionStorageError, AdmissionPolicyError):
-                self._error(503, "Shared provider admission is unavailable or has conflicting policy.", protocol, headers={"x-should-retry": "false"})
+                self._error(503, "Shared provider admission is unavailable or has conflicting policy.", protocol, phase="admission", path=target_url.path, headers={"x-should-retry": "false"})
                 self._trace.outcome = "admission_unavailable"
             except HTTPError as exc:
                 try:
@@ -776,30 +813,32 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                     if not isinstance(error, dict) or not isinstance(error.get("error"), dict):
                         raise TypeError("not an API error object")
                     if protocol == config.upstream_protocol and 400 <= exc.code < 600:
+                        self._trace.phase = "upstream"
                         self._raw_json(exc.code, bytes(raw), exc.headers)
                     else:
                         detail = error["error"]
                         message = detail.get("message")
-                        self._error(exc.code, message if isinstance(message, str) else f"upstream HTTP {exc.code}", protocol, code=detail.get("code") if isinstance(detail.get("code"), str) else None, headers=exc.headers)
+                        self._error(exc.code, message if isinstance(message, str) else f"upstream HTTP {exc.code}", protocol, code=detail.get("code") if isinstance(detail.get("code"), str) else None, phase="upstream", path=target_url.path, headers=exc.headers)
                 except (ValueError, TypeError, UnicodeError, OSError, HTTPException, RecursionError):
-                    self._error(exc.code, f"upstream HTTP {exc.code}", protocol, headers=exc.headers)
+                    self._error(exc.code, f"upstream HTTP {exc.code}", protocol, phase="upstream", path=target_url.path, headers=exc.headers)
                 finally:
                     self._trace.outcome = "upstream_http"
+                    self._trace.phase = "upstream"
                     exc.close()
             except (URLError, TimeoutError, OSError, HTTPException) as exc:
                 timeout = isinstance(exc, TimeoutError) or isinstance(exc, URLError) and isinstance(exc.reason, TimeoutError)
                 cause = exc.reason if isinstance(exc, URLError) else exc
-                self._error(504 if timeout else 502, f"upstream transport error: {type(exc).__name__}", protocol, code=cause.kind if isinstance(cause, DeadlineExceeded) else "upstream_timeout" if timeout else "upstream_transport", headers={"x-should-retry": "false"} if isinstance(cause, DeadlineExceeded) else None)
+                self._error(504 if timeout else 502, f"upstream transport error: {type(exc).__name__}", protocol, code=cause.kind if isinstance(cause, DeadlineExceeded) else "upstream_timeout" if timeout else "upstream_transport", phase="upstream", path=target_url.path, headers={"x-should-retry": "false"} if isinstance(cause, DeadlineExceeded) else None)
             except UnsupportedFeatureError as exc:
-                self._error(422, str(exc), protocol, code="unsupported_feature", headers={"x-should-retry": "false"})
+                self._error(422, str(exc), protocol, code="unsupported_feature", phase="response", feature=exc.feature, path=target_url.path, headers={"x-should-retry": "false"})
             except (json.JSONDecodeError, UnicodeError, ConversionError, StreamError, RecursionError) as exc:
-                self._error(502, str(exc), protocol)
+                self._error(502, str(exc), protocol, code="invalid_response", phase="response", path=target_url.path)
                 self._trace.outcome = "invalid_response"
             finally:
                 if token_quota is not None:
                     for identifier in token_leases:
                         try:
-                            usage = (self._trace.input_tokens, self._trace.output_tokens) if identifier == successful_token_lease and self._trace.outcome == "success" else (None, None)
+                            usage = (self._trace.input_tokens, self._trace.output_tokens) if identifier == successful_token_lease and self._trace.outcome in ("success", "truncated_output") else (None, None)
                             token_quota.reconcile(identifier, *usage)
                         except AdmissionStorageError:
                             pass  # Crash/storage failure retains a finite conservative lease.
