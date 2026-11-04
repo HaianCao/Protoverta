@@ -27,7 +27,7 @@ LOOKUP = "fixture_lookup"
 VALUE = "LOCAL_SEARCH_FIXTURE_VALUE"
 
 
-def serve_mcp(*, verify_env=False):
+def serve_mcp(*, verify_env=False, lane_values=None):
     for line in sys.stdin:
         request = json.loads(line)
         if "id" not in request:
@@ -37,9 +37,14 @@ def serve_mcp(*, verify_env=False):
             result = {"protocolVersion": request["params"]["protocolVersion"], "capabilities": {"tools": {}}, "serverInfo": {"name": "protoverta-read-only-fixture", "version": "1"}}
         elif method == "tools/list":
             result = {"tools": [{"name": LOOKUP, "description": "Return a fixed synthetic test value; no I/O or side effects.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}, "annotations": {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False}}]}
+            if lane_values is not None:
+                result["tools"][0]["inputSchema"].update(properties={"lane": {"type": "string", "enum": list(lane_values)}}, required=["lane"])
         elif method == "tools/call" and request.get("params", {}).get("name") == LOOKUP:
             env_ok = not verify_env or os.environ.get("PROTOVERTA_MCP_FIXTURE_TOKEN") == "local-mcp-env"
-            result = {"content": [{"type": "text", "text": VALUE if env_ok else "Fixture environment reference did not resolve"}], "isError": not env_ok}
+            arguments = request.get("params", {}).get("arguments", {})
+            lane_ok = lane_values is None or isinstance(arguments, dict) and set(arguments) == {"lane"} and isinstance(arguments["lane"], str) and arguments["lane"] in lane_values
+            value = lane_values[arguments["lane"]] if lane_values is not None and lane_ok else VALUE
+            result = {"content": [{"type": "text", "text": value if env_ok and lane_ok else "Fixture arguments or environment did not resolve"}], "isError": not (env_ok and lane_ok)}
         elif method == "resources/list":
             result = {"resources": []}
         elif method == "prompts/list":

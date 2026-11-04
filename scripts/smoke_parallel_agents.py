@@ -243,7 +243,7 @@ class Scenario:
         raise ValueError("Parent did not replay both verified child results")
 
 
-def drive(scenario, adapter_source, *, claude_tools=None, claude_agent_tools=None, claude_depth=None, gateway_limits=None):
+def drive(scenario, adapter_source, *, claude_tools=None, claude_agent_tools=None, claude_depth=None, gateway_limits=None, mcp_lanes=False, claude_isolation=None):
     """Run an isolated scenario; acceptance belongs to the calling gate."""
     client, upstream = scenario.client, scenario.protocol
     original_client = smoke_clients.run_client
@@ -253,6 +253,8 @@ def drive(scenario, adapter_source, *, claude_tools=None, claude_agent_tools=Non
 
     def invoke(*args, **kwargs):
         scenario.root = Path(args[6])
+        if hasattr(scenario, "prepare"):
+            scenario.prepare(scenario.root)
         if getattr(scenario, "disable_claude_retries", False):
             args[5]["CLAUDE_CODE_MAX_RETRIES"] = "0"
         options = dict(kwargs.get("codex_config") or {})
@@ -273,7 +275,7 @@ def drive(scenario, adapter_source, *, claude_tools=None, claude_agent_tools=Non
     # single-child scenario and acceptance. No production monkeypatch or flag.
     with patch.object(smoke_clients, "fixture_server", fixture), patch.object(smoke_clients, "run_client", invoke):
         driver = single.run(client, upstream, adapter_source=adapter_source, claude_tools=claude_tools,
-                            claude_agent_tools=claude_agent_tools, claude_depth=claude_depth, gateway_limits=gateway_limits)
+                            claude_agent_tools=claude_agent_tools, claude_depth=claude_depth, gateway_limits=gateway_limits, mcp_lanes=mcp_lanes, claude_isolation=claude_isolation)
     return driver
 
 

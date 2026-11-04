@@ -134,7 +134,9 @@ def encode(protocol, model, *, text=None, tool=None, arguments=None, call_id="p0
     return io.BytesIO(b"".join(wire))
 
 
-def run(client, upstream, *, inspect_only=False, adapter_source=None, claude_tools=None, claude_agent_tools=None, claude_depth=None, gateway_limits=None):
+def run(client, upstream, *, inspect_only=False, adapter_source=None, claude_tools=None, claude_agent_tools=None, claude_depth=None, gateway_limits=None, mcp_lanes=False, claude_isolation=None):
+    if claude_isolation not in {None, "worktree"}:
+        raise ValueError("Fixture isolation must be worktree or unset")
     if claude_depth is not None and (type(claude_depth) is not int or not 1 <= claude_depth <= 3):
         raise ValueError("Fixture Claude depth must be an integer from 1 to 3")
     limits = dict(gateway_limits or {})
@@ -190,6 +192,8 @@ def run(client, upstream, *, inspect_only=False, adapter_source=None, claude_too
             codex_options.update({"mcp_servers.p04.command": sys.executable,
                                   "mcp_servers.p04.args": [str(Path(__file__).resolve()), "--mcp", "--fixture-file", str(fixture), "--audit-file", str(audit)],
                                   "mcp_servers.p04.required": True})
+            if mcp_lanes:
+                codex_options["mcp_servers.p04.args"].append("--mcp-lanes")
             if adapter_source is not None:
                 env.update(CODEX_CA_ENABLE_SUBAGENTS="1", CODEX_CA_MODEL_CATALOG=str(catalog_path))
                 # Exercise the launcher's gated opt-in, not a manual -c bypass.
@@ -209,6 +213,10 @@ def run(client, upstream, *, inspect_only=False, adapter_source=None, claude_too
                 args[args.index("--tools") + 1] = claude_tools or "Agent,Read"
                 args[args.index("--allowedTools") + 1] = claude_tools or "Agent,Read"
                 args += ["--agents", json.dumps({"p04-worker": {"description": "Read the synthetic local fixture", "prompt": "Read only the requested fixture file and return its value.", "tools": claude_agent_tools or ["Read"], "model": "inherit"}})]
+                if claude_isolation:
+                    definition = json.loads(args[-1])
+                    definition["p04-worker"]["isolation"] = claude_isolation
+                    args[-1] = json.dumps(definition)
                 kwargs["env"].update(CLAUDE_CODE_SUBAGENT_MODEL=model, CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
                 if claude_depth is not None:
                     kwargs["env"]["CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH"] = str(claude_depth)
@@ -288,6 +296,7 @@ def main():
     parser.add_argument("--adapter-source", type=Path)
     parser.add_argument("--report", type=Path)
     parser.add_argument("--mcp", action="store_true")
+    parser.add_argument("--mcp-lanes", action="store_true")
     parser.add_argument("--fixture-file", type=Path)
     parser.add_argument("--audit-file", type=Path)
     args = parser.parse_args()
@@ -306,7 +315,7 @@ def main():
             return request
 
         with patch.object(smoke_tool_search.json, "loads", record):
-            smoke_tool_search.serve_mcp()
+            smoke_tool_search.serve_mcp(lane_values={lane: VALUE + "_" + lane for lane in ("parent", "a", "b")} if args.mcp_lanes else None)
         return 0
     if not args.client or args.upstream is None:
         parser.error("Client and upstream are required")
