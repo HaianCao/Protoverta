@@ -53,7 +53,7 @@ Acceptance evidence:
 Remaining limits / pending gates:
   - Cross-provider opaque reasoning/compaction state remains non-portable by design; closed Codex child resume with custom auxiliary model remains blocked before execution; P09–P14 remain to be executed next.
 User review: Autonomous execution requested by user across P08–P14 with per-milestone commits.
-Commit(s): Pending P08 commit immediately after Ruff/mypy/git diff checks.
+Commit(s): core 810231b; Codex 529239d; Claude e65429a. Remaining-milestone statements above record the historical P08 checkpoint; use the current root implementation plan for progress.
 ```
 
 ## Acceptance map

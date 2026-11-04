@@ -1,0 +1,122 @@
+{
+  "date": "2026-11-04",
+  "scope": "local Windows source/wheel acceptance; not provider, full-schema or remote CI certification",
+  "source": [
+    {
+      "name": "protoverta",
+      "version": "0.3.0a8",
+      "head": "52b201c840da496a8e42f1d50d96567e8ddd9ca4",
+      "dirty": true,
+      "runtime_sha256": "e079f8c70632a8b8d237c645d0449dac52b2d3578c99b8d7d461a8eb8394886d"
+    },
+    {
+      "name": "codexapter",
+      "version": "0.2.0a2",
+      "head": "e757fd30051b1d9bc751ccf1018ac2556431df7e",
+      "dirty": false,
+      "runtime_sha256": "0a9725d69b2dd2dccf54d1c8b5288094d285c85e6498b70278531e94ce094ff0"
+    },
+    {
+      "name": "claudapter",
+      "version": "0.2.0a2",
+      "head": "1d727faa8be90651ebab0ce26b306a31b3131682",
+      "dirty": false,
+      "runtime_sha256": "821680bfa6f1bd08819649648c90059fe6f407ca00894562c6eb5f58a2631aef"
+    }
+  ],
+  "wheels": [
+    {
+      "file": "protoverta-0.3.0a8-py3-none-any.whl",
+      "sha256": "07d1041b4b76e79277d8440e71684e7bff1dd106430264c4e9b1ccdd0fe2d321",
+      "source_files_matched": 43
+    },
+    {
+      "file": "codexapter-0.2.0a2-py3-none-any.whl",
+      "sha256": "531e3b02e48a161fa91fbbc05ba30741053d8dd57d970306524554ba5a3f2530",
+      "source_files_matched": 27
+    },
+    {
+      "file": "claudapter-0.2.0a2-py3-none-any.whl",
+      "sha256": "fa45ce17b53fae73120da1adc05500659d4d32647e42b801c362beb7b68ba5ba",
+      "source_files_matched": 24
+    }
+  ],
+  "source_test_results": {
+    "protoverta": 2146,
+    "codexapter": 394,
+    "codexapter_subtests": 12,
+    "claudapter": 426
+  },
+  "installed_sdk_passed": 29,
+  "installed_property_tests_passed": 24,
+  "generated_examples_per_property": 50,
+  "clients": [
+    {
+      "client": "claude",
+      "upstream": "chat",
+      "passed": true,
+      "returncode": 0,
+      "rounds": 2,
+      "tool_result_count": 2
+    },
+    {
+      "client": "claude",
+      "upstream": "messages",
+      "passed": true,
+      "returncode": 0,
+      "rounds": 2,
+      "tool_result_count": 2
+    },
+    {
+      "client": "claude",
+      "upstream": "responses",
+      "passed": true,
+      "returncode": 0,
+      "rounds": 2,
+      "tool_result_count": 2
+    },
+    {
+      "client": "codex",
+      "upstream": "chat",
+      "passed": true,
+      "returncode": 0,
+      "rounds": 2,
+      "tool_result_count": 2
+    },
+    {
+      "client": "codex",
+      "upstream": "messages",
+      "passed": true,
+      "returncode": 0,
+      "rounds": 2,
+      "tool_result_count": 2
+    },
+    {
+      "client": "codex",
+      "upstream": "responses",
+      "passed": true,
+      "returncode": 0,
+      "rounds": 2,
+      "tool_result_count": 2
+    }
+  ],
+  "browser_both_passed": true,
+  "windows_lifecycle_both_passed": true,
+  "user_path_changed": false,
+  "provider_requests": 0,
+  "remote_ci_run": false,
+  "new_soak_run": false,
+  "pending": [
+    "newer SDK candidate job/evaluation",
+    "full-schema OpenResponses",
+    "remote CI/platform acceptance",
+    "live MCP/search"
+  ],
+  "test_dependencies": {
+    "openai": "3.37.0",
+    "anthropic": "2.3.0",
+    "hypothesis": "6.170.9",
+    "playwright": "1.64.1",
+    "psutil": "7.2.2"
+  }
+}

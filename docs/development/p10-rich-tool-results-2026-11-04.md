@@ -37,7 +37,7 @@ Acceptance evidence:
 Remaining limits / pending gates:
 - Arbitrary JSON objects as raw `content`/`output` (without text/image content blocks), PDFs in tool results, and `resource_link` blocks remain intentionally rejected across portable routes.
 User review: Autonomous execution per user instruction
-Commit(s): Pending P10 commit
+Commit(s): ac25f32
 ```
 
 ## Six-Direction Tool Result Support Matrix

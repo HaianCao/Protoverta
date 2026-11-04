@@ -64,7 +64,10 @@ class GatewayFailure:
 
     def stream_payload(self, target: str, *, sequence_number: int = 0) -> dict[str, object]:
         if target == "responses":
-            event: dict[str, object] = {"type": "error", "code": self.code, "message": self.message, "param": self.path, "sequence_number": sequence_number}
+            # ``param`` names a request parameter in the Responses contract. The
+            # gateway path is an HTTP route, so it is reported separately and
+            # never presented as if a request field were invalid.
+            event: dict[str, object] = {"type": "error", "code": self.code, "message": self.message, "param": None, "sequence_number": sequence_number}
             if self.phase is not None:
                 event["phase"] = self.phase
             if self.feature is not None:

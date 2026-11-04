@@ -46,7 +46,7 @@ def test_gateway_failure_carries_structured_phase_feature_path_and_policy_refusa
         "type": "error",
         "code": "policy_refusal",
         "message": "refusal cannot be preserved with [REDACTED]",
-        "param": "/v1/responses",
+        "param": None,
         "sequence_number": 4,
         "phase": "response",
         "feature": "refusal",

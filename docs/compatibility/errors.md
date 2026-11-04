@@ -12,6 +12,9 @@ use an `error` object, including `server_error` for generic upstream failures.
 Responses SSE errors instead use the typed `error` event's top-level `code`,
 `message`, `param` and monotonically increasing `sequence_number`, not the HTTP
 error envelope.
+When no invalid request parameter is identified, translated Responses SSE
+errors use `param: null`. The optional gateway `path` names the HTTP route and
+is separate from `param`; clients must not interpret a route as a field name.
 HTTP statuses and allowed retry/request-ID headers are preserved. Native upstream
 API errors keep their original valid JSON body and status. This normalization
 does not add retries, provider/model fallback or output repair.

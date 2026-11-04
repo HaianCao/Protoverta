@@ -56,7 +56,7 @@ def test_known_unrepresentable_json_returns_non_retryable_422_not_502(target):
     assert caught.value.code == 422 and caught.value.headers["x-should-retry"] == "false"
     error = json.load(caught.value)
     caught.value.close()
-    assert error["error"]["code"] == "unsupported_feature"
+    assert error["error"]["code"] == "policy_refusal"
     assert "private-refusal" not in json.dumps(error)
 
 
@@ -81,13 +81,13 @@ def test_unsupported_stream_semantics_never_become_success(visible, feature):
                 raw = response.read()
             assert b"response.completed" not in raw and b"private-refusal" not in raw
             error = json.loads(SSEParser().feed(raw)[-1].data)
-            assert error["code"] == "unsupported_feature"
+            assert error["code"] == "policy_refusal"
         else:
             with pytest.raises(HTTPError) as caught:
                 post(url, {"model": "m", "input": "hi", "stream": True})
             assert caught.value.code == 422
             assert caught.value.headers["x-should-retry"] == "false"
-            assert json.load(caught.value)["error"]["code"] == "unsupported_feature"
+            assert json.load(caught.value)["error"]["code"] == "policy_refusal"
             caught.value.close()
 
 

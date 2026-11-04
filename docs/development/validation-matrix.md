@@ -1,5 +1,17 @@
 # Versioned compatibility and validation records
 
+## Latest local acceptance — 2026-11-04
+
+See [P14 source/wheel acceptance](p14-packaging-acceptance-2026-11-04.md): core
+0.3.0a8 at `52b201c` plus the uncommitted Responses SSE parameter correction;
+consumers 0.2.0a2 at `e757fd3` / `1d727fa`. It records runtime/wheel hashes,
+all three full source suites, installed SDK/property gates, six real CLI tool
+loops, both installed browser flows and isolated Windows lifecycle/shell checks.
+Codex 0.166.0 / Claude 2.1.308 and pinned SDK 3.37.0 / 2.3.0 are the tested
+baselines. No new provider live probe, remote CI, or soak is claimed. Full-schema
+OpenResponses remains failing; a newer-SDK candidate evaluation remains pending.
+The dated matrix below is historical, not a description of the current build.
+
 Record source identity with `python scripts/compatibility_snapshot.py --output
 SNAPSHOT.json`. It captures each project's version, Git HEAD, dirty flag and hash
 of runtime Python/HTML bytes, plus local interpreter/platform and installed test

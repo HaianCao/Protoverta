@@ -14,8 +14,12 @@ $workspace, $previewRoot và $previewPython. Nếu một bước lỗi, dừng t
 ## 1. Kiểm tra đúng thư mục và nhánh
 
 Cần Python 3.11 trở lên, Git, Codex CLI và Claude Code CLI đã cài.
-Lần thử gần nhất dùng Python 3.13.9, Codex CLI 0.164.0 và Claude Code 2.1.308;
+Đợt kiểm chứng P14 ngày 04/11/2026 dùng Python 3.13.9, Codex CLI 0.166.0 và Claude Code 2.1.308;
 phiên bản CLI khác có thể thay đổi cờ lệnh.
+
+Xem [báo cáo P14](p14-packaging-acceptance-2026-11-04.md) để phân biệt test
+source, wheel đã cài và các gate còn pending. Các artifact preview của đợt
+cũ không tự chứng minh source mới đã đạt.
 
 Mở terminal ở thư mục **chứa cả ba repo**:
 

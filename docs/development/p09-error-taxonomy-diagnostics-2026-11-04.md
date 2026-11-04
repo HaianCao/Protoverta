@@ -13,7 +13,7 @@ Reproduction:
 - pytest tests/test_p09_error_taxonomy_diagnostics.py tests/test_failures.py tests/test_observability.py tests/test_session_diagnostics.py
 - python scripts/check_types.py && python scripts/check_sdk.py
 Contract decision:
-1. Structured error taxonomy: GatewayFailure and wire error envelopes now include optional validated phase ("request", "preflight", "admission", "upstream", "response", "stream"), feature ("refusal", "content_filter", "stop_sequence", "pause_turn", "stream_usage_policy", "codex_closed_resume", "compaction", "reasoning"), and ASCII path (also populating param on Responses SSE error events).
+1. Structured error taxonomy: GatewayFailure and wire error envelopes include optional validated phase ("request", "preflight", "admission", "upstream", "response", "stream"), feature ("refusal", "content_filter", "stop_sequence", "pause_turn", "stream_usage_policy", "codex_closed_resume", "compaction", "reasoning"), and ASCII path. Follow-up correction: Responses SSE `param` is null when no request parameter is identified; the HTTP route remains in `path` and is never mislabelled as a parameter.
 2. Policy refusal vs network/unsupported: feature in {"refusal", "content_filter"} maps to code="policy_refusal" and RequestObservation.outcome="policy_refusal" with HTTP 422 and x-should-retry: false before headers (or SSE error event after partial output), preventing clients from treating refusals as retryable network failures.
 3. Pause turn: Messages stop_reason="pause_turn" raises UnsupportedFeatureError("pause_turn") in JSON and UnsupportedStreamFeatureError("pause_turn") in SSE; it is never converted into normal end_turn completion.
 4. Truncated output: JSON and SSE completions that finish with length / max_tokens / max_output_tokens record outcome="truncated_output" (with X-Protoverta-Finish-Category: truncated_output on JSON responses) while still reconciling token quotas accurately.
@@ -48,5 +48,5 @@ Acceptance evidence:
 Remaining limits / pending gates:
 - Cross-protocol pause_turn continuation and cross-protocol refusal translation remain intentionally rejected under strict semantics.
 User review: Autonomous execution per user instruction
-Commit(s): Pending P09 commit
+Commit(s): core 22b020d; Codex e757fd3; Claude 1d727fa. The param correction above is a later uncommitted change; see the P14 report.
 ```

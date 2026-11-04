@@ -6,6 +6,11 @@ Milestone `P13` re-runs the pinned official OpenResponses schema audit without a
 
 ## Key Changes & Verification
 
+Reconciliation note (2026-11-04): implemented in commit `52b201c`. The
+candidate SDK flag is an evaluation mechanism, not evidence that newer SDKs
+were tested. The workflow currently defines pinned SDK jobs; no separate
+newer-SDK candidate run is certified here. Keep that acceptance gate pending.
+
 1. **Pinned Official OpenResponses Re-audit & Provenance Classification (`scripts/check_openresponses.py`, `docs/development/openresponses-audit.md`)**:
    - Re-ran `scripts/check_openresponses.py` against `openresponses@8907bc3b7c4300ff5c21fd647cfde9929243afa1` (`runner_sha256: c825257dc3b45165e31e3b02c8e52b2188e91f1de0e7af72f613cfa4a1e80e4c`). Verdict remains honest: `FAILED_FULL_SCHEMA` (`0 passed, 12 failed, 0 skipped`, exit code `1`).
    - Added `classify_missing_field()` and `summary.provenance_classes` grouping findings into `gateway-owned` (`truncation`: 10), `request-declared` (`parallel_tool_calls`: 12, `temperature`: 12, `text`: 10, `tool_choice`: 12, `tools`: 10, `top_p`: 12), `upstream-measured` (`service_tier`: 12, `usage`: 6), and `unavailable` (`frequency_penalty`: 12, `presence_penalty`: 12, `top_logprobs`: 12).
