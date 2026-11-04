@@ -341,9 +341,12 @@ def run_client(
     mcp_tool_name: str | None = None,
     adapter_reasoning_policy: str | None = None,
     agent_model_policy: str | None = None,
+    agent_model_id: str | None = None,
 ):
-    if agent_model_policy is not None and (agent_model_policy not in {"inherit", "selected"} or not (adapter_source or installed_adapter)):
-        raise ValueError("Agent policy fixture requires an adapter and inherit or selected policy")
+    if agent_model_policy is not None and (agent_model_policy not in {"inherit", "selected", "custom"} or not (adapter_source or installed_adapter)):
+        raise ValueError("Agent policy fixture requires an adapter and an explicit known policy")
+    if agent_model_policy == "custom" and (not isinstance(agent_model_id, str) or not agent_model_id or any(char.isspace() for char in agent_model_id)):
+        raise ValueError("Custom agent fixture requires an exact child model")
     if client == "codex":
         settings = {
             "model_provider": "protoverta_smoke",
@@ -486,7 +489,13 @@ def run_client(
             ]
         if agent_model_policy is not None:
             content = config_path.read_text(encoding="utf-8")
-            content = content.replace("upstream_reasoning = ", f'agent_models = {{ policy = "{agent_model_policy}" }}\nupstream_reasoning = ', 1)
+            agents = {"policy": agent_model_policy}
+            if agent_model_policy == "custom":
+                agents["default"] = agent_model_id
+                if client == "codex":
+                    agents["effort"] = "low"
+            inline = "{ " + ", ".join(key + " = " + json.dumps(value) for key, value in agents.items()) + " }"
+            content = content.replace("upstream_reasoning = ", f'agent_models = {inline}\nupstream_reasoning = ', 1)
             config_path.write_text(content, encoding="utf-8")
         if provider_id != "smoke":
             content = config_path.read_text(encoding="utf-8")

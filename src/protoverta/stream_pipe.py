@@ -302,12 +302,13 @@ class StreamValidator:
     multimodal and hosted-tool events without interpreting their contents.
     """
 
-    def __init__(self, protocol: Protocol | str, *, max_stream_bytes=32 * 1024 * 1024, max_stream_items=1024, max_tool_argument_bytes=8 * 1024 * 1024) -> None:
+    def __init__(self, protocol: Protocol | str, *, max_stream_bytes=32 * 1024 * 1024, max_stream_items=1024, max_tool_argument_bytes=8 * 1024 * 1024, event_guard=None) -> None:
         self.parser = SSEParser()
         self.decoder = _LifecycleValidator(protocol)
         self.limits = StreamLimits(max_stream_bytes, max_stream_items, max_tool_argument_bytes)
         self._terminal = b""
         self._closed = False
+        self.event_guard = event_guard
 
     def feed(self, chunk: bytes) -> bytes:
         if self._closed:
@@ -321,6 +322,8 @@ class StreamValidator:
         for event in events:
             self.limits.observe(event)
             self.decoder.feed(event)
+            if self.event_guard is not None:
+                self.event_guard(event)
             wire = encode_sse(event.event, event.data, id=event.id)
             if self.decoder.ended:
                 self._terminal += wire

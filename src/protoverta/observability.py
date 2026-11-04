@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import json
 import secrets
 import time
@@ -34,6 +35,8 @@ class RequestObservation:
     output_tokens: int | None = None
     cached_input_tokens: int | None = None
     cache_creation_input_tokens: int | None = None
+    requested_model_digest: str | None = None
+    effective_model_digest: str | None = None
 
 
 Observer = Callable[[RequestObservation], None]
@@ -57,6 +60,21 @@ class RequestTrace:
         self.output_tokens: int | None = None
         self.cached_input_tokens: int | None = None
         self.cache_creation_input_tokens: int | None = None
+        self.requested_model_digest: str | None = None
+        self.effective_model_digest: str | None = None
+
+    def models(self, requested: object, effective: object, salt: bytes) -> None:
+        """Session-scoped identity only; never store model names or a global hash."""
+        def digest(value: object) -> str | None:
+            if not isinstance(value, str) or not 1 <= len(value) <= 512:
+                return None
+            try:
+                raw = value.encode("utf-8")
+            except UnicodeError:
+                return None
+            return hmac.digest(salt, raw, "sha256").hex()
+        self.requested_model_digest = digest(requested)
+        self.effective_model_digest = digest(effective)
 
     def mark_first_payload(self) -> None:
         if self.first_payload_ms is None:
@@ -76,7 +94,8 @@ class RequestTrace:
         return RequestObservation(self.request_id, self.protocol, self.upstream_protocol,
                                   self.status, self.outcome,
                                   max(0, int((self._clock() - self._started) * 1000)),
-                                  self.streaming, self.first_payload_ms, self.input_tokens, self.output_tokens, self.cached_input_tokens, self.cache_creation_input_tokens)
+                                  self.streaming, self.first_payload_ms, self.input_tokens, self.output_tokens, self.cached_input_tokens, self.cache_creation_input_tokens,
+                                  self.requested_model_digest, self.effective_model_digest)
 
     def emit(self, observer: Observer | None) -> None:
         if observer is not None:

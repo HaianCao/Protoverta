@@ -117,8 +117,11 @@ class GatewayConfig:
     prompt_caching: str = "off"
     openrouter_provider: str | None = None
     shared_token_limit: int | None = None
+    codex_model_safe_resume: bool = False
 
     def __post_init__(self) -> None:
+        if type(self.codex_model_safe_resume) is not bool:
+            raise ValueError("codex_model_safe_resume must be a boolean")
         if type(self.require_current_evidence) is not bool or self.evidence_max_age_days is not None and (type(self.evidence_max_age_days) is not int or self.evidence_max_age_days < 0):
             raise ValueError("invalid evidence identity/freshness policy")
         if self.prompt_caching not in ("off", "ephemeral") or self.prompt_caching != "off" and self.provider_profiles is None:
@@ -251,6 +254,7 @@ class _RedirectBlocker(HTTPRedirectHandler):
 
 
 def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observer | None = None) -> type[BaseHTTPRequestHandler]:
+    model_identity_salt = secrets.token_bytes(32)
     opener = build_opener(_RedirectBlocker(), DeadlineHTTPHandler(), DeadlineHTTPSHandler())
     open_upstream = upstream_open or opener.open
     admission = threading.BoundedSemaphore(config.max_concurrent_requests)
@@ -319,8 +323,13 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
             self._trace.mark_first_payload()
 
         def _stream(self, response, source: Protocol, target: Protocol, response_transform=None, tool_name_transform=None, budget=None, delta_transform=None) -> None:
+            native_guard = None
+            if config.codex_model_safe_resume and source == target == Protocol.RESPONSES:
+                from .harness_controls import guard_codex_closed_resume
+
+                native_guard = lambda event: guard_codex_closed_resume(json.loads(event.data), streaming=True)
             limits = {"max_stream_bytes": config.max_stream_bytes, "max_stream_items": config.max_stream_items, "max_tool_argument_bytes": config.max_tool_argument_bytes}
-            pipeline = StreamTranscoder(source, target, messages_usage_policy=config.messages_usage_policy, max_pending_bytes=config.max_body_bytes, response_transform=response_transform, public_reasoning=config.public_reasoning, tool_name_transform=tool_name_transform, delta_transform=delta_transform, **limits) if source != target else StreamValidator(source, **limits)
+            pipeline = StreamTranscoder(source, target, messages_usage_policy=config.messages_usage_policy, max_pending_bytes=config.max_body_bytes, response_transform=response_transform, public_reasoning=config.public_reasoning, tool_name_transform=tool_name_transform, delta_transform=delta_transform, **limits) if source != target else StreamValidator(source, event_guard=native_guard, **limits)
             budget = budget or RequestBudget(config.timeout, config.total_timeout, config.progress_timeout)
             headers_sent = False
             initial = bytearray()
@@ -486,6 +495,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 if not isinstance(payload, dict):
                     raise ConversionError("request body must be a JSON object")
                 response_request = copy.deepcopy(payload)
+                self._trace.models(payload.get("model"), payload.get("model"), model_identity_salt)
                 if target_url.path in ("/v1/messages/count_tokens", "/v1/responses/input_tokens"):
                     if target_url.query:
                         raise ConversionError("count endpoint query parameters are unsupported")
@@ -564,6 +574,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 semantic_outbound = outbound
                 if config.provider_profiles is not None:
                     outbound = config.provider_profiles.apply(config.upstream_base_url, config.upstream_protocol, outbound)
+                self._trace.models(response_request.get("model"), outbound.get("model"), model_identity_salt)
                 if config.capabilities is not None:
                     from .evidence_identity import evidence_options
 
@@ -628,6 +639,10 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 mapped = namespace_map.restore(result) if namespace_map else copy.deepcopy(result)
                 if search_map is not None:
                     mapped = search_map.restore(mapped)
+                if config.codex_model_safe_resume and protocol == Protocol.RESPONSES:
+                    from .harness_controls import guard_codex_closed_resume
+
+                    guard_codex_closed_resume(mapped, streaming=streaming)
                 if protocol == Protocol.RESPONSES:
                     from .response_context import restore_request_context
 
@@ -679,6 +694,10 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                     if protocol != config.upstream_protocol:
                         result = convert_response(result, config.upstream_protocol, protocol, public_reasoning=config.public_reasoning)
                         result = restore_response(result)
+                    elif config.codex_model_safe_resume and protocol == Protocol.RESPONSES:
+                        from .harness_controls import guard_codex_closed_resume
+
+                        guard_codex_closed_resume(result)
                     self._json(200, result, getattr(response, "headers", None))
             except AdmissionDenied as exc:
                 self._error(429, str(exc), protocol, headers={"Retry-After": str(exc.retry_after)})

@@ -15,6 +15,7 @@ from .observability import RequestObservation
 _NAME = re.compile(r"session-[a-f0-9]{32}\.jsonl\Z")
 _FIELDS = set(RequestObservation.__dataclass_fields__)
 _OPTIONAL = {"first_payload_ms", "input_tokens", "output_tokens", "cached_input_tokens", "cache_creation_input_tokens"}
+_MODEL_DIGESTS = {"requested_model_digest", "effective_model_digest"}
 
 
 def _journals(root):
@@ -140,10 +141,14 @@ def latest_diagnostics(directory):
                     if isinstance(value, dict) and set(value) == {"kind", "dropped_records"} and value["kind"] == "protoverta-summary" and type(value["dropped_records"]) is int and value["dropped_records"] >= 0:
                         dropped = value["dropped_records"]
                         continue
-                    if not isinstance(value, dict) or set(value) - _FIELDS or not (_FIELDS - _OPTIONAL) <= set(value):
+                    if not isinstance(value, dict) or set(value) - _FIELDS or not (_FIELDS - _OPTIONAL - _MODEL_DIGESTS) <= set(value):
                         continue
                     for key in _OPTIONAL:
                         value.setdefault(key, None)
+                    for key in _MODEL_DIGESTS:
+                        value.setdefault(key, None)
+                    if any(value[key] is not None and (not isinstance(value[key], str) or re.fullmatch(r"[a-f0-9]{64}", value[key]) is None) for key in _MODEL_DIGESTS):
+                        continue
                     if not isinstance(value["request_id"], str) or not re.fullmatch(r"[a-f0-9]{32}", value["request_id"]):
                         continue
                     if value["protocol"] not in ("chat", "messages", "responses", "unknown") or value["upstream_protocol"] not in ("chat", "messages", "responses", "unknown"):

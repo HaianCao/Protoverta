@@ -134,7 +134,7 @@ def encode(protocol, model, *, text=None, tool=None, arguments=None, call_id="p0
     return io.BytesIO(b"".join(wire))
 
 
-def run(client, upstream, *, inspect_only=False, adapter_source=None, claude_tools=None, claude_agent_tools=None, claude_depth=None, gateway_limits=None, mcp_lanes=False, claude_isolation=None):
+def run(client, upstream, *, inspect_only=False, adapter_source=None, claude_tools=None, claude_agent_tools=None, claude_depth=None, gateway_limits=None, mcp_lanes=False, claude_isolation=None, child_model=None):
     if claude_isolation not in {None, "worktree"}:
         raise ValueError("Fixture isolation must be worktree or unset")
     if claude_depth is not None and (type(claude_depth) is not int or not 1 <= claude_depth <= 3):
@@ -187,7 +187,10 @@ def run(client, upstream, *, inspect_only=False, adapter_source=None, claude_too
             metadata.update(slug=model, display_name="Synthetic subagent fixture", support_verbosity=False,
                             apply_patch_tool_type=None, tool_mode=None, experimental_supported_tools=[], supports_search_tool=False)
             catalog_path = root / "models.json"
-            catalog_path.write_text(json.dumps({"models": [metadata]}), encoding="utf-8")
+            models = [metadata]
+            if child_model:
+                models.append({**metadata, "slug": child_model, "display_name": "Synthetic child fixture"})
+            catalog_path.write_text(json.dumps({"models": models}), encoding="utf-8")
             codex_options["model_catalog_json"] = str(catalog_path)
             codex_options.update({"mcp_servers.p04.command": sys.executable,
                                   "mcp_servers.p04.args": [str(Path(__file__).resolve()), "--mcp", "--fixture-file", str(fixture), "--audit-file", str(audit)],
@@ -213,11 +216,16 @@ def run(client, upstream, *, inspect_only=False, adapter_source=None, claude_too
                 args[args.index("--tools") + 1] = claude_tools or "Agent,Read"
                 args[args.index("--allowedTools") + 1] = claude_tools or "Agent,Read"
                 args += ["--agents", json.dumps({"p04-worker": {"description": "Read the synthetic local fixture", "prompt": "Read only the requested fixture file and return its value.", "tools": claude_agent_tools or ["Read"], "model": "inherit"}})]
+                if child_model:
+                    definition = json.loads(args[-1])
+                    definition["p04-worker"].pop("model")
+                    args[-1] = json.dumps(definition)
                 if claude_isolation:
                     definition = json.loads(args[-1])
                     definition["p04-worker"]["isolation"] = claude_isolation
                     args[-1] = json.dumps(definition)
-                kwargs["env"].update(CLAUDE_CODE_SUBAGENT_MODEL=model, CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
+                if not child_model:
+                    kwargs["env"].update(CLAUDE_CODE_SUBAGENT_MODEL=model, CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
                 if claude_depth is not None:
                     kwargs["env"]["CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH"] = str(claude_depth)
             return original_process(args, **kwargs)
@@ -277,7 +285,8 @@ def run(client, upstream, *, inspect_only=False, adapter_source=None, claude_too
                                                  True, adapter_source, False, upstream, 45, model,
                                                  prompt="Delegate one local read-only task to a subagent, wait for its result, then summarize.",
                                                  codex_config=codex_options,
-                                                 agent_model_policy="selected" if adapter_source is not None else None)
+                                                 agent_model_policy=("custom" if child_model else "selected") if adapter_source is not None else None,
+                                                 agent_model_id=child_model)
         audited = audit.exists() and audit.read_text(encoding="utf-8").splitlines() == ["read"]
         lifecycle = lifecycle_verified(client, result.stdout)
         passed = result.returncode == 0 and DONE in result.stdout and (inspect_only or state["child"] == 2 and state["parent"] == (3 if client == "codex" else 2) and (client != "codex" or audited) and lifecycle)

@@ -54,7 +54,7 @@ def test_trace_is_frozen_bounded_and_has_no_payload_fields():
     record = trace.snapshot()
     assert 122 <= record.duration_ms <= 123
     assert re.fullmatch("[0-9a-f]{32}", record.request_id)
-    assert set(asdict(record)) == {"request_id", "protocol", "upstream_protocol", "status", "outcome", "duration_ms", "streaming", "first_payload_ms", "input_tokens", "output_tokens", "cached_input_tokens", "cache_creation_input_tokens"}
+    assert set(asdict(record)) == {"request_id", "protocol", "upstream_protocol", "status", "outcome", "duration_ms", "streaming", "first_payload_ms", "input_tokens", "output_tokens", "cached_input_tokens", "cache_creation_input_tokens", "requested_model_digest", "effective_model_digest"}
     assert record.first_payload_ms is record.input_tokens is record.output_tokens is None
     with pytest.raises(FrozenInstanceError):
         record.outcome = "timeout"
