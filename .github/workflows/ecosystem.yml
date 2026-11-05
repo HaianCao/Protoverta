@@ -61,6 +61,8 @@ jobs:
           node-version: '22'
       - name: Prepare validation tools
         run: python -m pip install pytest ruff==0.17.2 mypy==2.4.0 build twine hatchling
+      - name: Launcher shared modules stay in sync
+        run: python protoverta/scripts/check_launcher_sync.py --codex-source free-codex-cli --claude-source free-claude-cli
       - name: Strict runtime boundary types and gate fixtures
         working-directory: protoverta
         run: python scripts/check_types.py

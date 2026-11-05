@@ -102,7 +102,7 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
                     page.locator("#baseUrl").fill("https://example.invalid/v1")
                     assert page.locator("#agentPolicy").input_value() == "selected"
                     if codex:
-                        page.locator("#providerProtocol").select_option("chat_completions")
+                        page.locator("#providerProtocol").select_option("chat")
                         assert page.locator("#upstreamReasoning").input_value() == "auto"
                         expect(page.locator("#publicReasoning")).to_be_hidden()
                         page.locator("#reasoningSettings summary").click()
