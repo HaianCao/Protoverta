@@ -339,7 +339,11 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
             if config.codex_model_safe_resume and source == target == Protocol.RESPONSES:
                 from .harness_controls import guard_codex_closed_resume
 
-                native_guard = lambda event: guard_codex_closed_resume(json.loads(event.data), streaming=True)
+                def native_guard(event):
+                    # The lifecycle validator already accepted any trailing
+                    # [DONE] marker; it is not JSON and carries no tool call.
+                    if event.data != "[DONE]":
+                        guard_codex_closed_resume(json.loads(event.data), streaming=True)
             limits = {"max_stream_bytes": config.max_stream_bytes, "max_stream_items": config.max_stream_items, "max_tool_argument_bytes": config.max_tool_argument_bytes}
             pipeline = StreamTranscoder(source, target, messages_usage_policy=config.messages_usage_policy, max_pending_bytes=config.max_body_bytes, response_transform=response_transform, public_reasoning=config.public_reasoning, tool_name_transform=tool_name_transform, delta_transform=delta_transform, tool_policy=tool_policy, text_logprobs=text_logprobs, max_top_logprobs=max_top_logprobs, **limits) if source != target else StreamValidator(source, event_guard=native_guard, **limits)
             budget = budget or RequestBudget(config.timeout, config.total_timeout, config.progress_timeout)

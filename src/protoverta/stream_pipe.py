@@ -338,7 +338,14 @@ class StreamValidator:
             self.limits.observe(event)
             self.decoder.feed(event)
             if self.event_guard is not None:
-                self.event_guard(event)
+                try:
+                    self.event_guard(event)
+                except StreamError:
+                    raise
+                except ValueError as exc:
+                    # Keep guard faults in the stream taxonomy so a gateway
+                    # that already sent SSE headers reports an SSE error.
+                    raise StreamError(f"native stream guard rejected an event: {type(exc).__name__}") from exc
             wire = encode_sse(event.event, event.data, id=event.id)
             if self.decoder.ended:
                 self._terminal += wire

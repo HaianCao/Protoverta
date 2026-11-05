@@ -62,6 +62,53 @@ def test_guard_leaves_unrelated_functions_and_safe_continuation_unchanged(namesp
     guard_codex_closed_resume({"output": [{"type": "function_call", "namespace": namespace, "name": name}]})
 
 
+def _responses_text_wire(trailing_done):
+    def sse(data):
+        return f"event: {data['type']}\ndata: {json.dumps(data)}\n\n".encode()
+
+    base = {"id": "resp_1", "object": "response", "created_at": 1, "status": "in_progress", "model": "main", "output": []}
+    part = {"type": "output_text", "text": "", "annotations": []}
+    item = {"id": "msg_1", "type": "message", "role": "assistant", "status": "in_progress", "content": []}
+    final_item = dict(item, status="completed", content=[dict(part, text="hi")])
+    position = {"item_id": "msg_1", "output_index": 0, "content_index": 0}
+    events = [
+        {"type": "response.created", "response": base},
+        {"type": "response.output_item.added", "output_index": 0, "item": item},
+        {"type": "response.content_part.added", **position, "part": part},
+        {"type": "response.output_text.delta", **position, "delta": "hi", "logprobs": []},
+        {"type": "response.output_text.done", **position, "text": "hi", "logprobs": []},
+        {"type": "response.content_part.done", **position, "part": dict(part, text="hi")},
+        {"type": "response.output_item.done", "output_index": 0, "item": final_item},
+        {"type": "response.completed", "response": dict(base, status="completed", output=[final_item], usage={"input_tokens": 3, "output_tokens": 1, "total_tokens": 4})},
+    ]
+    wire = b"".join(sse({**event, "sequence_number": index}) for index, event in enumerate(events))
+    return wire + (b"data: [DONE]\n\n" if trailing_done else b"")
+
+
+@pytest.mark.parametrize("trailing_done", [False, True])
+def test_guarded_native_stream_accepts_trailing_done_marker(trailing_done):
+    config = GatewayConfig(Protocol.RESPONSES, "https://example.invalid/v1", "fake", "local", codex_model_safe_resume=True)
+    upstream = lambda request, *, timeout: io.BytesIO(_responses_text_wire(trailing_done))
+    with listener(config, upstream) as url, post(url, {"model": "main", "input": "synthetic", "stream": True}) as response:
+        assert response.status == 200
+        raw = response.read()
+    events = SSEParser().feed(raw)
+    completed = [event for event in events if event.event == "response.completed"]
+    assert len(completed) == 1 and b'"type": "error"' not in raw
+    assert (events[-1].data == "[DONE]") == trailing_done
+
+
+def test_native_guard_value_errors_stay_stream_errors():
+    from protoverta.stream_pipe import StreamValidator
+    from protoverta.streaming import StreamError
+
+    def faulty(event):
+        raise ValueError("not json")
+
+    with pytest.raises(StreamError, match="guard rejected"):
+        StreamValidator(Protocol.RESPONSES, event_guard=faulty).feed(_responses_text_wire(False))
+
+
 def test_guard_checks_native_completed_snapshot_too():
     with pytest.raises(UnsupportedFeatureError, match="Closed child resume"):
         guard_codex_closed_resume({"response": {"output": [{"type": "function_call", "namespace": "multi_agent_v1", "name": "resume_agent"}]}})
