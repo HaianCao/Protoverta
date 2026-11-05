@@ -96,8 +96,9 @@ def test_invalid_request_arrays_never_dispatch_and_next_request_recovers(source,
         for value in INVALID:
             bodies = [{**text_request(source), "tools": value, "stream": stream}]
             if source == "chat":
-                bodies.append({"model": "m", "max_tokens": 20, "stream": stream,
-                               "messages": [{"role": "assistant", "content": "synthetic", "tool_calls": value}]})
+                bodies.append(
+                    {"model": "m", "max_tokens": 20, "stream": stream, "messages": [{"role": "assistant", "content": "synthetic", "tool_calls": value}]}
+                )
             for body in bodies:
                 with pytest.raises(HTTPError) as error:
                     request(origin, source, encode_json(body))

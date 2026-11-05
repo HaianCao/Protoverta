@@ -19,7 +19,11 @@ def _policy(package, source):
     except ModuleNotFoundError as exc:
         if exc.name not in {package, package + ".harness"}:
             raise
-        warnings.warn("Launcher version policy unavailable: bare CLI fixture uses legacy conservative settings, not version-verified acceptance.", RuntimeWarning, stacklevel=2)
+        warnings.warn(
+            "Launcher version policy unavailable: bare CLI fixture uses legacy conservative settings, not version-verified acceptance.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
         return None
 
 
@@ -38,15 +42,27 @@ def _prefix(package, name, prefix, source):
 
 def codex_settings(executable, source=None):
     policy = _policy("codex_adapter", source)
-    settings = policy.cross_protocol_overrides(_prefix("codex_adapter", "codex", [executable], source)) if policy else [
-        'model_reasoning_summary="none"', 'features.multi_agent=false', 'web_search="disabled"',
-    ]
+    settings = (
+        policy.cross_protocol_overrides(_prefix("codex_adapter", "codex", [executable], source))
+        if policy
+        else [
+            'model_reasoning_summary="none"',
+            "features.multi_agent=false",
+            'web_search="disabled"',
+        ]
+    )
     return {key: json.loads(value) for key, value in (item.split("=", 1) for item in settings)}
 
 
 def claude_environment(prefix, source=None):
     policy = _policy("claudapter", source)
-    return policy.cross_protocol_environment(_prefix("claudapter", "claude", prefix, source)) if policy else {
-        "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1", "CLAUDE_CODE_DISABLE_STRUCTURED_OUTPUTS": "1",
-        "DISABLE_PROMPT_CACHING": "1", "ENABLE_TOOL_SEARCH": "false",
-    }
+    return (
+        policy.cross_protocol_environment(_prefix("claudapter", "claude", prefix, source))
+        if policy
+        else {
+            "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1",
+            "CLAUDE_CODE_DISABLE_STRUCTURED_OUTPUTS": "1",
+            "DISABLE_PROMPT_CACHING": "1",
+            "ENABLE_TOOL_SEARCH": "false",
+        }
+    )

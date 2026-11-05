@@ -12,7 +12,7 @@ import zipfile
 from email.parser import BytesParser
 from pathlib import Path
 
-FIXTURE = '''
+FIXTURE = """
 import hashlib,importlib.metadata,json,sys
 from pathlib import Path
 from unittest.mock import patch
@@ -40,7 +40,7 @@ for path,load,gateway,token_patch,label in [(codex,codex_load,codex_gateway,'cod
 expected=json.loads((root/'fingerprints.json').read_text(encoding='utf-8'))
 assert all(hashlib.sha256((root/name).read_bytes()).hexdigest()==digest for name,digest in expected.items())
 print(stage+': legacy config/key bytes unchanged; runtime compatibility PASS')
-'''
+"""
 
 
 def wheel_version(path):
@@ -68,7 +68,14 @@ def validate(previous, next_wheel, codex, claude):
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     with tempfile.TemporaryDirectory(prefix="protoverta-upgrade-check-") as directory:
         root = Path(directory)
-        env.update(HOME=directory, USERPROFILE=directory, APPDATA=str(root / "roaming"), LOCALAPPDATA=str(root / "local"), CODEX_CA_ENV_FILE=str(root / ".env"), CLAUDE_CA_ENV_FILE=str(root / ".env"))
+        env.update(
+            HOME=directory,
+            USERPROFILE=directory,
+            APPDATA=str(root / "roaming"),
+            LOCALAPPDATA=str(root / "local"),
+            CODEX_CA_ENV_FILE=str(root / ".env"),
+            CLAUDE_CA_ENV_FILE=str(root / ".env"),
+        )
         environment = root / "venv"
         venv.EnvBuilder(with_pip=True).create(environment)
         python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")

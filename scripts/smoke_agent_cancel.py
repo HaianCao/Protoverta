@@ -24,14 +24,19 @@ def result_text(value):
     if isinstance(value, str):
         return value
     if isinstance(value, list):
-        return "\n".join(item["text"] for item in value if isinstance(item, dict) and item.get("type") in {"text", "input_text"} and isinstance(item.get("text"), str))
+        return "\n".join(
+            item["text"] for item in value if isinstance(item, dict) and item.get("type") in {"text", "input_text"} and isinstance(item.get("text"), str)
+        )
     return json.dumps(value)
 
 
 def task_identifier(value):
     text = result_text(value)
-    patterns = [r'"(?:task_id|agent_id|agentId)"\s*:\s*"([A-Za-z0-9_-]+)"',
-                r'(?:task_id|agentId|agent_id):\s*([A-Za-z0-9_-]+)', r'<task_id>([A-Za-z0-9_-]+)</task_id>']
+    patterns = [
+        r'"(?:task_id|agent_id|agentId)"\s*:\s*"([A-Za-z0-9_-]+)"',
+        r"(?:task_id|agentId|agent_id):\s*([A-Za-z0-9_-]+)",
+        r"<task_id>([A-Za-z0-9_-]+)</task_id>",
+    ]
     for pattern in patterns:
         match = re.search(pattern, text)
         if match:
@@ -40,15 +45,19 @@ def task_identifier(value):
 
 
 def notification_evidence(body, task_id, marker):
-    candidates = [(message.get("role"), result_text(message.get("content")))
-                  for message in body.get("messages", body.get("input", []))
-                  if isinstance(message, dict) and message.get("role") in {"user", "system", "developer"}]
+    candidates = [
+        (message.get("role"), result_text(message.get("content")))
+        for message in body.get("messages", body.get("input", []))
+        if isinstance(message, dict) and message.get("role") in {"user", "system", "developer"}
+    ]
     for key in ("system", "instructions"):
         if key in body:
             candidates.append((key, result_text(body[key])))
-    shapes = [{"role": role, "has_task_id": task_id in text, "has_result_marker": marker in text,
-               "is_task_notification": "<task-notification>" in text}
-              for role, text in candidates if marker in text]
+    shapes = [
+        {"role": role, "has_task_id": task_id in text, "has_result_marker": marker in text, "is_task_notification": "<task-notification>" in text}
+        for role, text in candidates
+        if marker in text
+    ]
     return any(item["has_task_id"] and item["is_task_notification"] for item in shapes), shapes
 
 
@@ -120,11 +129,22 @@ class Scenario(parallel.Scenario):
         self.parent_results.append(records)
         spawn = single.find_tool(tools, "agent" if self.client == "claude" else "spawn_agent")
         if stage == 1 and self.client == "claude":
-            return parallel.calls_wire(self.protocol, body["model"], [
-                (spawn, {"prompt": task + " Read fixture.txt", "description": "Read local fixture", "subagent_type": "p04-worker", "run_in_background": True}, f"spawn_{index}")
-                for index, task in enumerate(parallel.TASKS)])
+            return parallel.calls_wire(
+                self.protocol,
+                body["model"],
+                [
+                    (
+                        spawn,
+                        {"prompt": task + " Read fixture.txt", "description": "Read local fixture", "subagent_type": "p04-worker", "run_in_background": True},
+                        f"spawn_{index}",
+                    )
+                    for index, task in enumerate(parallel.TASKS)
+                ],
+            )
         if self.client == "codex" and stage <= 2:
-            return parallel.calls_wire(self.protocol, body["model"], [(spawn, {"message": parallel.TASKS[stage - 1] + " Read fixture.txt"}, f"spawn_{stage - 1}")])
+            return parallel.calls_wire(
+                self.protocol, body["model"], [(spawn, {"message": parallel.TASKS[stage - 1] + " Read fixture.txt"}, f"spawn_{stage - 1}")]
+            )
         stop_stage = 2 if self.client == "claude" else 3
         if stage == stop_stage:
             if not self.both_started.wait(6):
@@ -148,12 +168,16 @@ class Scenario(parallel.Scenario):
             return single.encode(self.protocol, body["model"], text=DONE)
         if self.client == "codex":
             target = single.agent_id([records.get("spawn_1")])
-            return parallel.calls_wire(self.protocol, body["model"], [(single.find_tool(tools, "wait_agent"), {"targets": [target], "timeout_ms": 10000}, f"wait_b_{stage}")])
+            return parallel.calls_wire(
+                self.protocol, body["model"], [(single.find_tool(tools, "wait_agent"), {"targets": [target], "timeout_ms": 10000}, f"wait_b_{stage}")]
+            )
         if not self.sibling_final.wait(6):
             raise ValueError("Sibling did not finish its inference after cancellation")
         # A local read gives the harness a tool boundary at which to deliver its
         # background completion notification. TaskOutput is not advertised here.
-        return parallel.calls_wire(self.protocol, body["model"], [(single.find_tool(tools, "read"), {"file_path": str(self.root / "fixture.txt")}, f"parent_read_{stage}")])
+        return parallel.calls_wire(
+            self.protocol, body["model"], [(single.find_tool(tools, "read"), {"file_path": str(self.root / "fixture.txt")}, f"parent_read_{stage}")]
+        )
 
 
 def verified_lifecycle(client, stdout, scenario):
@@ -167,14 +191,23 @@ def verified_lifecycle(client, stdout, scenario):
             return False
         stats = result.get("subagent_stats", {})
         killed = stats.get("killed") if isinstance(stats, dict) else None
-        return (isinstance(stats, dict) and result.get("is_error") is False and result.get("permission_denials") == []
-                and all(type(stats.get(key)) is int for key in ("spawned", "completed", "failed"))
-                and stats.get("spawned") == 2 and stats.get("completed") == 1 and stats.get("failed") == 0
-                and isinstance(killed, dict) and all(type(value) is int for value in killed.values())
-                and killed == {"parent": 1, "user": 0, "system": 0}
-                and stats.get("started_in_background") == 2 and scenario.notification_seen
-                and stop.get("task_id") == scenario.cancel_target and stop.get("task_type") == "local_agent"
-                and str(stop.get("message", "")).startswith("Successfully stopped task:"))
+        return (
+            isinstance(stats, dict)
+            and result.get("is_error") is False
+            and result.get("permission_denials") == []
+            and all(type(stats.get(key)) is int for key in ("spawned", "completed", "failed"))
+            and stats.get("spawned") == 2
+            and stats.get("completed") == 1
+            and stats.get("failed") == 0
+            and isinstance(killed, dict)
+            and all(type(value) is int for value in killed.values())
+            and killed == {"parent": 1, "user": 0, "system": 0}
+            and stats.get("started_in_background") == 2
+            and scenario.notification_seen
+            and stop.get("task_id") == scenario.cancel_target
+            and stop.get("task_type") == "local_agent"
+            and str(stop.get("message", "")).startswith("Successfully stopped task:")
+        )
     assigned, spawned, closed, waited = {}, set(), set(), {}
     for line in stdout.splitlines():
         try:
@@ -200,10 +233,15 @@ def verified_lifecycle(client, stdout, scenario):
             for key, state in item["agents_states"].items():
                 if isinstance(state, dict) and state.get("status") == "completed":
                     waited[key] = state.get("message")
-    return (len(assigned) == 2 and spawned == {scenario.cancel_target, scenario.sibling_target} and scenario.cancel_target != scenario.sibling_target
-            and assigned.get(parallel.TASKS[0]) == scenario.cancel_target
-            and assigned.get(parallel.TASKS[1]) == scenario.sibling_target
-            and closed == {scenario.cancel_target} and waited == {scenario.sibling_target: parallel.FINALS[1]})
+    return (
+        len(assigned) == 2
+        and spawned == {scenario.cancel_target, scenario.sibling_target}
+        and scenario.cancel_target != scenario.sibling_target
+        and assigned.get(parallel.TASKS[0]) == scenario.cancel_target
+        and assigned.get(parallel.TASKS[1]) == scenario.sibling_target
+        and closed == {scenario.cancel_target}
+        and waited == {scenario.sibling_target: parallel.FINALS[1]}
+    )
 
 
 def run(client, upstream, adapter_source):
@@ -211,18 +249,38 @@ def run(client, upstream, adapter_source):
     driver = parallel.drive(scenario, adapter_source, claude_tools="Agent,Read,TaskStop")
     result = scenario.result
     lifecycle = result is not None and verified_lifecycle(client, result.stdout, scenario)
-    passed = (result is not None and result.returncode == 0 and DONE in result.stdout and lifecycle
-              and scenario.cancelled.is_set() and scenario.sibling_alive_when_cancelled
-              and scenario.sibling_final.is_set() and scenario.stages["a"] == 1 and scenario.stages["b"] == 2
-              and not scenario.errors and (scenario.audit_count == 1 if client == "codex" else scenario.background_artifacts_owned))
-    return {"passed": passed, "client": client, "upstream": upstream.value, "cli_version": driver["cli_version"],
-            "cancelled_upstream": scenario.cancelled.is_set(), "sibling_final_inference": scenario.sibling_final.is_set(),
-            "lifecycle_verified": lifecycle, "sibling_alive_when_cancelled": scenario.sibling_alive_when_cancelled,
-            "background_notification_seen": scenario.notification_seen, "mcp_audit_count": scenario.audit_count,
-            "background_artifacts_owned": scenario.background_artifacts_owned,
-            "notification_shape": scenario.notification_shape,
-            "fixture_errors": scenario.errors, "observed": scenario.observed, "returncode": result.returncode if result else None,
-            "stdout": result.stdout if result else "", "stderr": result.stderr if result else ""}
+    passed = (
+        result is not None
+        and result.returncode == 0
+        and DONE in result.stdout
+        and lifecycle
+        and scenario.cancelled.is_set()
+        and scenario.sibling_alive_when_cancelled
+        and scenario.sibling_final.is_set()
+        and scenario.stages["a"] == 1
+        and scenario.stages["b"] == 2
+        and not scenario.errors
+        and (scenario.audit_count == 1 if client == "codex" else scenario.background_artifacts_owned)
+    )
+    return {
+        "passed": passed,
+        "client": client,
+        "upstream": upstream.value,
+        "cli_version": driver["cli_version"],
+        "cancelled_upstream": scenario.cancelled.is_set(),
+        "sibling_final_inference": scenario.sibling_final.is_set(),
+        "lifecycle_verified": lifecycle,
+        "sibling_alive_when_cancelled": scenario.sibling_alive_when_cancelled,
+        "background_notification_seen": scenario.notification_seen,
+        "mcp_audit_count": scenario.audit_count,
+        "background_artifacts_owned": scenario.background_artifacts_owned,
+        "notification_shape": scenario.notification_shape,
+        "fixture_errors": scenario.errors,
+        "observed": scenario.observed,
+        "returncode": result.returncode if result else None,
+        "stdout": result.stdout if result else "",
+        "stderr": result.stderr if result else "",
+    }
 
 
 def main():

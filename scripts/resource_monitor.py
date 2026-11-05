@@ -25,9 +25,13 @@ class ResourceMonitor:
         try:
             process = self.process
             count = process.num_handles() if hasattr(process, "num_handles") else process.num_fds()
-            value = {"seconds": round(time.monotonic() - self.started, 3), "rss_bytes": process.memory_info().rss,
-                     "threads": process.num_threads(), "handles_or_fds": count,
-                     "tcp_connections": len(process.net_connections(kind="tcp"))}
+            value = {
+                "seconds": round(time.monotonic() - self.started, 3),
+                "rss_bytes": process.memory_info().rss,
+                "threads": process.num_threads(),
+                "handles_or_fds": count,
+                "tcp_connections": len(process.net_connections(kind="tcp")),
+            }
             self.samples.append(value)
             self.sample_count += 1
             if self.first is None:
@@ -56,11 +60,22 @@ class ResourceMonitor:
         first, last = self.first, self.last
         warm = self.warm if last["seconds"] >= 90 else None
         warm = warm or next((item for item in self.samples if item["seconds"] >= min(30, last["seconds"] / 3)), first)
-        return {"available": True, "baseline": first, "after": last,
-                "peak": self.peaks.copy(), "warm_baseline": warm,
-                "warm_rss_growth_bytes": last["rss_bytes"] - warm["rss_bytes"], "sample_count": self.sample_count,
-                "retained_sample_count": len(self.samples), "sample_capacity": self.samples.maxlen,
-                "retained_thread_delta": last["threads"] - first["threads"], "retained_handle_delta": last["handles_or_fds"] - first["handles_or_fds"],
-                "retained_tcp_delta": last["tcp_connections"] - first["tcp_connections"],
-                "policy_passed": last["rss_bytes"] - warm["rss_bytes"] <= 64 * 1024 * 1024 and last["threads"] - first["threads"] <= 2 and last["handles_or_fds"] - first["handles_or_fds"] <= 4 and last["tcp_connections"] <= first["tcp_connections"],
-                "policy": "warm RSS growth <=64 MiB; retained threads <=2, handles/fds <=4, TCP <=baseline; bounded-run observation only"}
+        return {
+            "available": True,
+            "baseline": first,
+            "after": last,
+            "peak": self.peaks.copy(),
+            "warm_baseline": warm,
+            "warm_rss_growth_bytes": last["rss_bytes"] - warm["rss_bytes"],
+            "sample_count": self.sample_count,
+            "retained_sample_count": len(self.samples),
+            "sample_capacity": self.samples.maxlen,
+            "retained_thread_delta": last["threads"] - first["threads"],
+            "retained_handle_delta": last["handles_or_fds"] - first["handles_or_fds"],
+            "retained_tcp_delta": last["tcp_connections"] - first["tcp_connections"],
+            "policy_passed": last["rss_bytes"] - warm["rss_bytes"] <= 64 * 1024 * 1024
+            and last["threads"] - first["threads"] <= 2
+            and last["handles_or_fds"] - first["handles_or_fds"] <= 4
+            and last["tcp_connections"] <= first["tcp_connections"],
+            "policy": "warm RSS growth <=64 MiB; retained threads <=2, handles/fds <=4, TCP <=baseline; bounded-run observation only",
+        }

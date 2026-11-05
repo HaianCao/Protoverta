@@ -13,7 +13,12 @@ from protoverta.server import GatewayConfig
 
 
 def request():
-    return {"model": "m", "messages": [{"role": "system", "content": "rules"}, {"role": "user", "content": "hello 🌏"}], "max_tokens": 10, "tools": [{"type": "function", "function": {"name": "f", "parameters": {"type": "object", "properties": {}}}}]}
+    return {
+        "model": "m",
+        "messages": [{"role": "system", "content": "rules"}, {"role": "user", "content": "hello 🌏"}],
+        "max_tokens": 10,
+        "tools": [{"type": "function", "function": {"name": "f", "parameters": {"type": "object", "properties": {}}}}],
+    }
 
 
 def test_estimate_is_labelled_and_includes_tools_history_without_mutating_request():
@@ -79,7 +84,9 @@ def test_gateway_context_preflight_is_opt_in_and_rejection_never_calls_upstream(
 
     def upstream(request, timeout):
         received.append(1)
-        return io.BytesIO(b'{"model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}')
+        return io.BytesIO(
+            b'{"model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}'
+        )
 
     with listener(config, upstream) as url:
         if status == 200:
@@ -104,7 +111,9 @@ def test_media_never_gets_a_fake_byte_token_count(kind):
 
 
 def test_tool_schema_field_names_are_not_media():
-    body = request() | {"tools": [{"type": "function", "function": {"name": "image", "parameters": {"type": "object", "properties": {"type": {"const": "image"}}}}}]}
+    body = request() | {
+        "tools": [{"type": "function", "function": {"name": "image", "parameters": {"type": "object", "properties": {"type": {"const": "image"}}}}}]
+    }
     assert assess_context(body, "chat", 10000).input_tokens is not None
 
 

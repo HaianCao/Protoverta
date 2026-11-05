@@ -60,11 +60,20 @@ class ProviderProfile:
         if self.token_budget_semantics != "completion_total":
             raise ValueError("profile requires evidence of equivalent completion-total budget semantics")
         if self.reasoning_field is not None:
-            if not isinstance(self.reasoning_field, str) or not re.fullmatch(r"(?:reasoning|thinking|reasoning_effort)(?:\.[a-z_]+){0,2}", self.reasoning_field):
+            if not isinstance(self.reasoning_field, str) or not re.fullmatch(
+                r"(?:reasoning|thinking|reasoning_effort)(?:\.[a-z_]+){0,2}", self.reasoning_field
+            ):
                 raise ValueError("reasoning profile requires an explicit bounded vendor field")
-            if self.reasoning_semantics != "effort_equivalent" or not isinstance(self.reasoning_values, Mapping) or not self.reasoning_values or set(self.reasoning_values) - {"none", "low", "medium", "high"}:
+            if (
+                self.reasoning_semantics != "effort_equivalent"
+                or not isinstance(self.reasoning_values, Mapping)
+                or not self.reasoning_values
+                or set(self.reasoning_values) - {"none", "low", "medium", "high"}
+            ):
                 raise ValueError("reasoning mapping requires equivalent-effort evidence")
-            if any(type(value) not in (str, bool, int) or isinstance(value, str) and (not value or len(value) > 64) for value in self.reasoning_values.values()):
+            if any(
+                type(value) not in (str, bool, int) or isinstance(value, str) and (not value or len(value) > 64) for value in self.reasoning_values.values()
+            ):
                 raise ValueError("reasoning values must be bounded JSON scalars")
             if len({(type(value), value) for value in self.reasoning_values.values()}) != len(self.reasoning_values):
                 raise ValueError("reasoning mapping cannot collapse distinct effort levels")
@@ -83,7 +92,13 @@ class ProviderProfile:
                 if not isinstance(param_map, Mapping) or not param_map:
                     raise ValueError("parameter_aliases entry must be a non-empty parameter mapping")
                 for src_param, dst_param in param_map.items():
-                    if not isinstance(src_param, str) or not src_param or not isinstance(dst_param, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", dst_param) or src_param == dst_param:
+                    if (
+                        not isinstance(src_param, str)
+                        or not src_param
+                        or not isinstance(dst_param, str)
+                        or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", dst_param)
+                        or src_param == dst_param
+                    ):
                         raise ValueError("parameter_aliases requires distinct non-empty source and portable target parameter names")
                 if len(set(param_map.values())) != len(param_map):
                     raise ValueError("parameter_aliases mapping must be injective")
@@ -180,7 +195,13 @@ class ProviderProfiles:
         if len(raw) > 2 * 1024 * 1024:
             raise ValueError("provider profiles exceed 2 MiB")
         body = json.loads(raw)
-        if not isinstance(body, dict) or set(body) != {"schema_version", "profiles"} or type(body["schema_version"]) is not int or body["schema_version"] != 1 or not isinstance(body["profiles"], list):
+        if (
+            not isinstance(body, dict)
+            or set(body) != {"schema_version", "profiles"}
+            or type(body["schema_version"]) is not int
+            or body["schema_version"] != 1
+            or not isinstance(body["profiles"], list)
+        ):
             raise ValueError("invalid provider profile document")
         records = []
         for item in body["profiles"]:

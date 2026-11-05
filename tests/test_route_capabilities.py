@@ -16,17 +16,47 @@ from protoverta.server import GatewayConfig
 
 def record(**changes):
     config = GatewayConfig("chat", "https://example.test/v1", "key", "local")
-    values = {"base_url": config.upstream_base_url, "protocol": "chat", "model": "m", "source_protocol": "responses", "streaming": False,
-              "client_profile": "strict", "policies": route_policies(config), "features": {"text": True}, "checked_at": "2026-10-25", "evidence": "synthetic local fixture", "verified_with": "fixture core/client versions"}
+    values = {
+        "base_url": config.upstream_base_url,
+        "protocol": "chat",
+        "model": "m",
+        "source_protocol": "responses",
+        "streaming": False,
+        "client_profile": "strict",
+        "policies": route_policies(config),
+        "features": {"text": True},
+        "checked_at": "2026-10-25",
+        "evidence": "synthetic local fixture",
+        "verified_with": "fixture core/client versions",
+    }
     return RouteCapabilityRecord(**(values | changes))
 
 
 def assess(registry, **changes):
-    values = {"base_url": "https://example.test/v1", "protocol": "chat", "model": "m", "features": {"text"}, "source_protocol": "responses", "streaming": False, "client_profile": "strict", "policies": route_policies(GatewayConfig("chat", "https://example.test/v1", "k", "t"))}
+    values = {
+        "base_url": "https://example.test/v1",
+        "protocol": "chat",
+        "model": "m",
+        "features": {"text"},
+        "source_protocol": "responses",
+        "streaming": False,
+        "client_profile": "strict",
+        "policies": route_policies(GatewayConfig("chat", "https://example.test/v1", "k", "t")),
+    }
     return registry.assess_route(**(values | changes))
 
 
-@pytest.mark.parametrize("changes", [{"source_protocol": "messages"}, {"protocol": "responses"}, {"streaming": True}, {"client_profile": "codex"}, {"model": "other"}, {"base_url": "https://other.test/v1"}])
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"source_protocol": "messages"},
+        {"protocol": "responses"},
+        {"streaming": True},
+        {"client_profile": "codex"},
+        {"model": "other"},
+        {"base_url": "https://other.test/v1"},
+    ],
+)
 def test_route_evidence_does_not_leak_to_a_different_selector(changes):
     registry = CapabilityRegistry(routes=(record(),))
     assert assess(registry).supported == ("text",)
@@ -57,14 +87,22 @@ def test_schema_three_routes_and_older_registries_remain_separate():
         assert assess(old).unknown == ("text",)
 
 
-@pytest.mark.parametrize(("routes", "required", "expected"), [([], False, 200), ([], True, 422), ([record()], True, 200), ([record(features={"text": False})], False, 422)])
+@pytest.mark.parametrize(
+    ("routes", "required", "expected"), [([], False, 200), ([], True, 422), ([record()], True, 200), ([record(features={"text": False})], False, 422)]
+)
 def test_gateway_checks_exact_route_before_upstream(routes, required, expected):
-    config = replace(GatewayConfig("chat", "https://example.test/v1", "key", "local"), capabilities=CapabilityRegistry(routes=tuple(routes)), require_verified_routes=required)
+    config = replace(
+        GatewayConfig("chat", "https://example.test/v1", "key", "local"),
+        capabilities=CapabilityRegistry(routes=tuple(routes)),
+        require_verified_routes=required,
+    )
     calls = []
 
     def upstream(request, timeout):
         calls.append(1)
-        return io.BytesIO(b'{"model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}')
+        return io.BytesIO(
+            b'{"model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}'
+        )
 
     with listener(config, upstream) as url:
         if expected == 200:

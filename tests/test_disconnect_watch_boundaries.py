@@ -19,8 +19,10 @@ def test_unusable_client_cancels_once_and_watch_thread_exits(monkeypatch, mode):
         if mode == "exceptional":
             monkeypatch.setattr("protoverta.lifetime.select.select", lambda *_: ([], [], [one]))
         elif mode == "select_error":
+
             def failed_select(*_):
                 raise OSError("synthetic socket failure")
+
             monkeypatch.setattr("protoverta.lifetime.select.select", failed_select)
         else:
             other.close()

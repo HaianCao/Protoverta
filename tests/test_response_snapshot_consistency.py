@@ -17,31 +17,50 @@ from protoverta.sse import SSEParser
 from protoverta.streaming import Delta
 
 KNOWN = {
-    "instructions": None, "max_output_tokens": None, "max_tool_calls": None,
-    "previous_response_id": None, "reasoning": None, "store": False,
-    "background": False, "safety_identifier": None, "prompt_cache_key": None,
+    "instructions": None,
+    "max_output_tokens": None,
+    "max_tool_calls": None,
+    "previous_response_id": None,
+    "reasoning": None,
+    "store": False,
+    "background": False,
+    "safety_identifier": None,
+    "prompt_cache_key": None,
     "truncation": "disabled",
 }
 UNKNOWN = {"tools", "tool_choice", "parallel_tool_calls", "text", "temperature", "top_p"}
 EXPLICIT = {
-    "instructions": "", "max_output_tokens": 17, "tools": [],
-    "tool_choice": "none", "parallel_tool_calls": False, "temperature": 0,
-    "top_p": 0, "text": {"format": {"type": "text"}},
+    "instructions": "",
+    "max_output_tokens": 17,
+    "tools": [],
+    "tool_choice": "none",
+    "parallel_tool_calls": False,
+    "temperature": 0,
+    "top_p": 0,
+    "text": {"format": {"type": "text"}},
 }
 
 
 def chat_result(*, length=False):
-    return {"model": "fixture-model", "choices": [{
-        "message": {"role": "assistant", "content": TEXT},
-        "finish_reason": "length" if length else "stop",
-    }], "usage": {"prompt_tokens": 19, "completion_tokens": 7,
-                  "prompt_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
-                  "completion_tokens_details": {"reasoning_tokens": 0}}}
+    return {
+        "model": "fixture-model",
+        "choices": [
+            {
+                "message": {"role": "assistant", "content": TEXT},
+                "finish_reason": "length" if length else "stop",
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 19,
+            "completion_tokens": 7,
+            "prompt_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
+            "completion_tokens_details": {"reasoning_tokens": 0},
+        },
+    }
 
 
 def snapshots(raw):
-    return [payload["response"] for item in SSEParser().feed(raw)
-            if isinstance((payload := json.loads(item.data)).get("response"), dict)]
+    return [payload["response"] for item in SSEParser().feed(raw) if isinstance((payload := json.loads(item.data)).get("response"), dict)]
 
 
 @pytest.mark.parametrize("source", ["chat", "messages"])
@@ -114,14 +133,26 @@ def test_gateway_snapshot_reports_only_the_output_cap_actually_applied(source, s
 
 @pytest.mark.parametrize("stream", [False, True])
 def test_native_responses_metadata_and_truncation_are_never_rewritten(stream):
-    native = {"id": "resp_native", "object": "response", "status": "completed", "model": "m", "output": [],
-              "truncation": "auto", "store": True, "background": True,
-              "previous_response_id": "resp_prior", "temperature": 0.7, "top_p": 0.9,
-              "service_tier": "upstream-tier", "text": {"format": {"type": "text"}}}
+    native = {
+        "id": "resp_native",
+        "object": "response",
+        "status": "completed",
+        "model": "m",
+        "output": [],
+        "truncation": "auto",
+        "store": True,
+        "background": True,
+        "previous_response_id": "resp_prior",
+        "temperature": 0.7,
+        "top_p": 0.9,
+        "service_tier": "upstream-tier",
+        "text": {"format": {"type": "text"}},
+    }
     assert convert_response(native, "responses", "responses") == native
     calls = []
-    wire = (event("response.created", {"type": "response.created", "sequence_number": 0, "response": {**native, "status": "in_progress"}})
-            + event("response.completed", {"type": "response.completed", "sequence_number": 1, "response": native}))
+    wire = event("response.created", {"type": "response.created", "sequence_number": 0, "response": {**native, "status": "in_progress"}}) + event(
+        "response.completed", {"type": "response.completed", "sequence_number": 1, "response": native}
+    )
     raw = wire if stream else json.dumps(native).encode()
 
     def upstream(req, *, timeout):
@@ -138,11 +169,22 @@ def test_native_responses_metadata_and_truncation_are_never_rewritten(stream):
 
 @pytest.mark.parametrize("source", ["chat", "messages"])
 @pytest.mark.parametrize("stream", [False, True])
-@pytest.mark.parametrize("text", [None, {}, {"format": {"type": "text"}}, {
-    "format": {"type": "json_schema", "name": "answer", "strict": True,
-               "schema": {"type": "object", "properties": {"answer": {"type": "string"}},
-                          "required": ["answer"], "additionalProperties": False}},
-}])
+@pytest.mark.parametrize(
+    "text",
+    [
+        None,
+        {},
+        {"format": {"type": "text"}},
+        {
+            "format": {
+                "type": "json_schema",
+                "name": "answer",
+                "strict": True,
+                "schema": {"type": "object", "properties": {"answer": {"type": "string"}}, "required": ["answer"], "additionalProperties": False},
+            },
+        },
+    ],
+)
 def test_gateway_knows_unstructured_mode_but_preserves_explicit_json_schema(source, stream, text):
     calls = []
     structured = bool(text and text.get("format", {}).get("type") == "json_schema")
@@ -150,10 +192,16 @@ def test_gateway_knows_unstructured_mode_but_preserves_explicit_json_schema(sour
     result = chat_result()
     result["choices"][0]["message"]["content"] = answer
     encoder = StreamEncoder(source)
-    deltas = [Delta("start", model="fixture-model", input_tokens=19, output_tokens=0),
-              Delta("text", text=answer), Delta("finish", reason="stop", input_tokens=19, output_tokens=7)]
-    raw = (b"".join(event(item.event, item.data) for delta in deltas for item in encoder.feed(delta))
-           if stream else json.dumps(convert_response(result, "chat", source)).encode())
+    deltas = [
+        Delta("start", model="fixture-model", input_tokens=19, output_tokens=0),
+        Delta("text", text=answer),
+        Delta("finish", reason="stop", input_tokens=19, output_tokens=7),
+    ]
+    raw = (
+        b"".join(event(item.event, item.data) for delta in deltas for item in encoder.feed(delta))
+        if stream
+        else json.dumps(convert_response(result, "chat", source)).encode()
+    )
 
     def upstream(req, *, timeout):
         calls.append(json.loads(req.data))

@@ -252,11 +252,7 @@ def test_streamed_client_tool_search_holds_until_valid_json_object_and_rejects_t
     events = [json.loads(ev.data) for ev in SSEParser().feed(out)]
     types = [ev["type"] for ev in events]
     assert "response.function_call_arguments.delta" not in types
-    added = next(
-        ev["item"]
-        for ev in events
-        if ev["type"] == "response.output_item.added" and ev["item"].get("type") == "tool_search_call"
-    )
+    added = next(ev["item"] for ev in events if ev["type"] == "response.output_item.added" and ev["item"].get("type") == "tool_search_call")
     assert added == {
         "id": added["id"],
         "type": "tool_search_call",
@@ -273,10 +269,22 @@ def test_streamed_client_tool_search_holds_until_valid_json_object_and_rejects_t
         Delta("tool_start", index=0, call_id="s1", name="pv_client_tool_search"),
         Delta("tool_delta", index=0, text='["not-an-object"]'),
     ]
-    bad_wire = b"".join(encode_sse(ev.event, ev.data) for d in bad_deltas for ev in bad_encoder.feed(d)) + encode_sse(
-        "message",
-        json.dumps({"id": "1", "object": "chat.completion.chunk", "created": 1, "model": "m", "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]}),
-    ) + encode_sse("message", "[DONE]")
+    bad_wire = (
+        b"".join(encode_sse(ev.event, ev.data) for d in bad_deltas for ev in bad_encoder.feed(d))
+        + encode_sse(
+            "message",
+            json.dumps(
+                {
+                    "id": "1",
+                    "object": "chat.completion.chunk",
+                    "created": 1,
+                    "model": "m",
+                    "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}],
+                }
+            ),
+        )
+        + encode_sse("message", "[DONE]")
+    )
     bad_pipe = StreamTranscoder(Protocol.CHAT, Protocol.RESPONSES, delta_transform=search_map.stream_delta)
     with pytest.raises(StreamError):
         bad_pipe.feed(bad_wire)

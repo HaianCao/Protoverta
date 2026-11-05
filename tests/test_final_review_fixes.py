@@ -21,8 +21,7 @@ def test_shared_temperature_subset_preserves_value(source, target, temperature):
     assert convert_request(body, source, target)["temperature"] == temperature
 
 
-@pytest.mark.parametrize("source,target", [("chat", "messages"), ("responses", "messages"),
-    ("messages", "chat"), ("messages", "responses")])
+@pytest.mark.parametrize("source,target", [("chat", "messages"), ("responses", "messages"), ("messages", "chat"), ("messages", "responses")])
 @pytest.mark.parametrize("temperature", [1.01, 2])
 def test_messages_temperature_bounds_reject_without_clamping(source, target, temperature):
     body = convert_request(BASE, "chat", source) | {"temperature": temperature}
@@ -62,10 +61,13 @@ def test_temperature_local_http_rejection_does_not_dispatch(source):
 def finish_chunk(reason="stop"):
     delta = {"role": "assistant", "content": "synthetic"}
     if reason == "tool_calls":
-        delta["tool_calls"] = [{"index": 0, "id": "c", "type": "function",
-            "function": {"name": "fixture", "arguments": "{}"}}]
-    return {"object": "chat.completion.chunk", "model": "m", "choices": [{"index": 0,
-        "delta": delta, "finish_reason": reason}], "usage": {"prompt_tokens": 3, "completion_tokens": 2}}
+        delta["tool_calls"] = [{"index": 0, "id": "c", "type": "function", "function": {"name": "fixture", "arguments": "{}"}}]
+    return {
+        "object": "chat.completion.chunk",
+        "model": "m",
+        "choices": [{"index": 0, "delta": delta, "finish_reason": reason}],
+        "usage": {"prompt_tokens": 3, "completion_tokens": 2},
+    }
 
 
 @pytest.mark.parametrize("target", PROTOCOLS)

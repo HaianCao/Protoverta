@@ -12,9 +12,7 @@ from protoverta.streaming import Delta, StreamDecoder, StreamError
 
 def wire_for(source, deltas):
     encoder = StreamEncoder(source)
-    return b"".join(
-        encode_sse(e.event, e.data) for d in deltas for e in encoder.feed(d)
-    )
+    return b"".join(encode_sse(e.event, e.data) for d in deltas for e in encoder.feed(d))
 
 
 def decode_messages(wire):
@@ -28,9 +26,7 @@ def decode_messages(wire):
 
 @pytest.mark.parametrize("source", ["chat", "responses"])
 @pytest.mark.parametrize("chunk_size", [1, 17, 100000])
-def test_deferred_messages_streams_text_and_serializes_overlapping_tools(
-    source, chunk_size
-):
+def test_deferred_messages_streams_text_and_serializes_overlapping_tools(source, chunk_size):
     prefix = wire_for(source, [Delta("start", model="m"), Delta("text", text="hello")])
     # A separate encoder is used for the complete stream; the prefix above only
     # proves that conversion emits text before upstream usage exists.
@@ -39,10 +35,7 @@ def test_deferred_messages_streams_text_and_serializes_overlapping_tools(
     with pytest.raises(StreamError, match="terminal"):
         probe.finish()
     deltas = [Delta("start", model="m"), Delta("text", text="hello")]
-    deltas += [
-        Delta("tool_start", index=i, call_id=f"call_{i}", name="lookup")
-        for i in range(2)
-    ]
+    deltas += [Delta("tool_start", index=i, call_id=f"call_{i}", name="lookup") for i in range(2)]
     deltas += [
         Delta("tool_delta", index=1, text='{"b":2}'),
         Delta("tool_delta", index=0, text='{"a":1}'),
@@ -59,9 +52,7 @@ def test_deferred_messages_streams_text_and_serializes_overlapping_tools(
     ]
     wire = wire_for(source, deltas)
     pipe = StreamTranscoder(source, "messages", messages_usage_policy="deferred")
-    output = b"".join(
-        pipe.feed(wire[i : i + chunk_size]) for i in range(0, len(wire), chunk_size)
-    )
+    output = b"".join(pipe.feed(wire[i : i + chunk_size]) for i in range(0, len(wire), chunk_size))
     assert b"message_stop" not in output
     decoded, events = decode_messages(output + pipe.finish())
     assert decoded[0].input_tokens == 0
@@ -101,9 +92,7 @@ def test_messages_deferred_requires_real_final_usage_and_bounds_queue():
     )
     with pytest.raises(StreamError, match="real input_tokens"):
         pipe.feed(wire)
-    pipe = StreamTranscoder(
-        "chat", "messages", messages_usage_policy="deferred", max_pending_bytes=200
-    )
+    pipe = StreamTranscoder("chat", "messages", messages_usage_policy="deferred", max_pending_bytes=200)
     wire = wire_for(
         "chat",
         [
@@ -190,9 +179,7 @@ def test_claude_profile_is_explicit_and_does_not_erase_thinking():
         "model": "m",
         "metadata": {"user_id": "fixture"},
         "thinking": {"type": "disabled"},
-        "system": [
-            {"type": "text", "text": "rules", "cache_control": {"type": "ephemeral"}}
-        ],
+        "system": [{"type": "text", "text": "rules", "cache_control": {"type": "ephemeral"}}],
         "messages": [
             {
                 "role": "user",
@@ -209,10 +196,7 @@ def test_claude_profile_is_explicit_and_does_not_erase_thinking():
     }
     result = prepare_claude_request(body)
     assert "cache_control" not in result["system"][0]
-    assert (
-        result["messages"][0]["content"][0]["content"]
-        == "[Tool execution error]\nfailed"
-    )
+    assert result["messages"][0]["content"][0]["content"] == "[Tool execution error]\nfailed"
     assert body["messages"][0]["content"][0]["is_error"] is True
     body["thinking"] = {"type": "adaptive"}
     with pytest.raises(ConversionError, match="thinking disabled"):
@@ -221,12 +205,7 @@ def test_claude_profile_is_explicit_and_does_not_erase_thinking():
 
 @pytest.mark.parametrize(
     "source,target",
-    [
-        (a, b)
-        for a in ("chat", "messages", "responses")
-        for b in ("chat", "messages", "responses")
-        if a != b
-    ],
+    [(a, b) for a in ("chat", "messages", "responses") for b in ("chat", "messages", "responses") if a != b],
 )
 @pytest.mark.parametrize("reason", ["stop", "length"])
 def test_all_six_streaming_edges_and_length_finish(source, target, reason):
@@ -280,6 +259,10 @@ def test_deferred_messages_does_not_succeed_after_invalid_arguments_or_trailing_
 
 def test_chat_hidden_reasoning_is_not_silently_discarded():
     pipe = StreamTranscoder("chat", "messages", messages_usage_policy="deferred")
-    body = {"object": "chat.completion.chunk", "model": "m", "choices": [{"index": 0, "delta": {"role": "assistant", "reasoning_content": "hidden"}, "finish_reason": None}]}
+    body = {
+        "object": "chat.completion.chunk",
+        "model": "m",
+        "choices": [{"index": 0, "delta": {"role": "assistant", "reasoning_content": "hidden"}, "finish_reason": None}],
+    }
     with pytest.raises(StreamError, match="reasoning_content"):
         pipe.feed(encode_sse("message", json.dumps(body)))

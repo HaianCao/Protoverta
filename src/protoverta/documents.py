@@ -36,15 +36,22 @@ def decode_pdf(block, source):
         data = value["data"]
     else:
         value = block.get("file") if source == "chat" else block
-        if source == "chat" and set(block) != {"type", "file"} or not isinstance(value, dict) or set(value) - ({"type", "file_data", "filename"} if source == "responses" else {"file_data", "filename"}):
+        if (
+            source == "chat"
+            and set(block) != {"type", "file"}
+            or not isinstance(value, dict)
+            or set(value) - ({"type", "file_data", "filename"} if source == "responses" else {"file_data", "filename"})
+        ):
             raise ConversionError("PDF file IDs, URLs and unknown fields are not portable")
         data = value.get("file_data")
         prefix = "data:application/pdf;base64,"
         if not isinstance(data, str) or not data.startswith(prefix):
             raise ConversionError("portable PDF requires an explicit application/pdf data URL")
-        data = data[len(prefix):]
+        data = data[len(prefix) :]
         filename = value.get("filename")
-        if filename is not None and (not isinstance(filename, str) or not filename or len(filename) > 255 or any(ord(c) < 32 or ord(c) == 127 or c in "/\\" for c in filename)):
+        if filename is not None and (
+            not isinstance(filename, str) or not filename or len(filename) > 255 or any(ord(c) < 32 or ord(c) == 127 or c in "/\\" for c in filename)
+        ):
             raise ConversionError("invalid portable PDF filename")
     if not isinstance(data, str) or len(data) > 8 * 1024 * 1024:
         raise ConversionError("PDF inline data exceeds supported bounds")

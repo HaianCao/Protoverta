@@ -13,7 +13,12 @@ from protoverta.server import GatewayConfig, _RedirectBlocker
 
 def probe(base_url: str, model: str, key: str, *, timeout: int = 90) -> dict:
     config = GatewayConfig("chat", base_url, key, "isolated-probe")
-    body = {"model": model, "messages": [{"role": "user", "content": "Reply with exactly PROTOVERTA_OK. Do not use tools."}], "max_tokens": 256, "stream": False}
+    body = {
+        "model": model,
+        "messages": [{"role": "user", "content": "Reply with exactly PROTOVERTA_OK. Do not use tools."}],
+        "max_tokens": 256,
+        "stream": False,
+    }
     request = Request(config.upstream_url, json.dumps(body).encode(), {"Authorization": "Bearer " + key, "Content-Type": "application/json"}, method="POST")
     try:
         with build_opener(_RedirectBlocker()).open(request, timeout=timeout) as response:
@@ -31,7 +36,14 @@ def probe(base_url: str, model: str, key: str, *, timeout: int = 90) -> dict:
     message = choice.get("message", {})
     if not isinstance(message, dict):
         return {"model": model, "passed": False, "error": "invalid_message"}
-    return {"model": model, "http_status": 200, "passed": "PROTOVERTA_OK" in str(message.get("content", "")), "finish_reason": choice.get("finish_reason"), "reasoning_fields": [name for name in ("reasoning", "reasoning_content", "reasoning_details") if message.get(name)], "has_text": bool(message.get("content"))}
+    return {
+        "model": model,
+        "http_status": 200,
+        "passed": "PROTOVERTA_OK" in str(message.get("content", "")),
+        "finish_reason": choice.get("finish_reason"),
+        "reasoning_fields": [name for name in ("reasoning", "reasoning_content", "reasoning_details") if message.get(name)],
+        "has_text": bool(message.get("content")),
+    }
 
 
 def main() -> int:

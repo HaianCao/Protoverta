@@ -59,10 +59,27 @@ def test_auth_bounded_paging_and_no_upstream_or_private_metadata():
     assert all(record.requested_model_digest is None and record.input_tokens is None for record in records)
 
 
-@pytest.mark.parametrize("query", ["?limit=0", "?limit=1001", "?limit=-1", "?limit=01", "?limit=1.0",
-                                  "?limit=", "?limit=true", "?limit=1&limit=2", "?unknown=x",
-                                  "?after_id=missing", "?after_id=", "?limit", "?after_id=%zz", "?after_id=%ff",
-                                  "?limit=1&after_id=b&third=x", "?x=" + "a" * 2048])
+@pytest.mark.parametrize(
+    "query",
+    [
+        "?limit=0",
+        "?limit=1001",
+        "?limit=-1",
+        "?limit=01",
+        "?limit=1.0",
+        "?limit=",
+        "?limit=true",
+        "?limit=1&limit=2",
+        "?unknown=x",
+        "?after_id=missing",
+        "?after_id=",
+        "?limit",
+        "?after_id=%zz",
+        "?after_id=%ff",
+        "?limit=1&after_id=b&third=x",
+        "?x=" + "a" * 2048,
+    ],
+)
 def test_bad_query_is_bounded_safe_error(query):
     config = GatewayConfig("chat", BASE, "secret-key", "local", model_snapshot=snapshot("a", "b"))
     with listener(config, unavailable) as url:
@@ -94,9 +111,20 @@ def test_snapshot_identity_requires_exact_prefix_and_protocol():
     assert snapshot("a").matches(BASE + "/", "chat")
 
 
-@pytest.mark.parametrize("identifier,name", [("", "name"), ("has space", "name"), ("a", ""), ("a\n", "name"),
-                                            ("a", "name\x7f"), ("a", "\ud800"), ("\udfff", "name"),
-                                            ("a" * 513, "name"), ("a", "n" * 513)])
+@pytest.mark.parametrize(
+    "identifier,name",
+    [
+        ("", "name"),
+        ("has space", "name"),
+        ("a", ""),
+        ("a\n", "name"),
+        ("a", "name\x7f"),
+        ("a", "\ud800"),
+        ("\udfff", "name"),
+        ("a" * 513, "name"),
+        ("a", "n" * 513),
+    ],
+)
 def test_invalid_entries_rejected_without_reflecting_content(identifier, name):
     with pytest.raises(ValueError, match="invalid snapshot"):
         SnapshotModel(identifier, name)
@@ -136,13 +164,14 @@ def test_explicit_id_constructor_is_bounded_and_deduplicates():
 
 
 def test_concurrent_gateways_keep_snapshots_and_tokens_isolated():
-    configs = [GatewayConfig("chat", BASE, "key", token, model_snapshot=snapshot(model))
-               for token, model in (("alpha", "A"), ("beta", "B"))]
+    configs = [GatewayConfig("chat", BASE, "key", token, model_snapshot=snapshot(model)) for token, model in (("alpha", "A"), ("beta", "B"))]
     with listener(configs[0], unavailable) as a, listener(configs[1], unavailable) as b:
+
         def read(pair):
             url, token, expected = pair
             with get(url, token=token) as response:
                 return json.load(response)["data"][0]["id"] == expected
+
         with ThreadPoolExecutor(max_workers=4) as pool:
             assert all(pool.map(read, [(a, "alpha", "A"), (b, "beta", "B")] * 5))
         with pytest.raises(HTTPError) as exc:
@@ -203,13 +232,14 @@ def test_catalog_obeys_local_admission_while_inference_is_active():
         assert release.wait(4)
         return io.BytesIO(b'{"id":"r","object":"response","output":[]}')
 
-    config = GatewayConfig("responses", BASE, "key", "local", max_concurrent_requests=1,
-                           model_snapshot=ModelSnapshot.from_ids(BASE, "responses", ("a",)))
+    config = GatewayConfig("responses", BASE, "key", "local", max_concurrent_requests=1, model_snapshot=ModelSnapshot.from_ids(BASE, "responses", ("a",)))
     with listener(config, upstream) as url, ThreadPoolExecutor(max_workers=1) as pool:
+
         def infer():
             with post(url, {"model": "a", "input": "hi"}) as response:
                 response.read()
                 return response.status
+
         pending = pool.submit(infer)
         try:
             assert entered.wait(2)

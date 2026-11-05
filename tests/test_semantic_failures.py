@@ -18,17 +18,32 @@ from protoverta.streaming import (
 
 
 def chat_refusal(value="private-refusal", *, reason="stop"):
-    return {"model": "m", "choices": [{"message": {"role": "assistant", "content": None, "refusal": value}, "finish_reason": reason}], "usage": {"prompt_tokens": 1, "completion_tokens": 1}}
+    return {
+        "model": "m",
+        "choices": [{"message": {"role": "assistant", "content": None, "refusal": value}, "finish_reason": reason}],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+    }
 
 
-@pytest.mark.parametrize(("source", "body", "feature"), [
-    ("chat", chat_refusal(), "refusal"),
-    ("chat", chat_refusal(None, reason="content_filter"), "content_filter"),
-    ("messages", {"model": "m", "content": [], "stop_reason": "refusal"}, "refusal"),
-    ("messages", {"model": "m", "content": [], "stop_reason": "stop_sequence", "stop_sequence": "private-sequence"}, "stop_sequence"),
-    ("responses", {"model": "m", "status": "completed", "output": [{"type": "message", "role": "assistant", "content": [{"type": "refusal", "refusal": "private-refusal"}]}]}, "refusal"),
-    ("responses", {"model": "m", "status": "incomplete", "incomplete_details": {"reason": "content_filter"}, "output": []}, "content_filter"),
-])
+@pytest.mark.parametrize(
+    ("source", "body", "feature"),
+    [
+        ("chat", chat_refusal(), "refusal"),
+        ("chat", chat_refusal(None, reason="content_filter"), "content_filter"),
+        ("messages", {"model": "m", "content": [], "stop_reason": "refusal"}, "refusal"),
+        ("messages", {"model": "m", "content": [], "stop_reason": "stop_sequence", "stop_sequence": "private-sequence"}, "stop_sequence"),
+        (
+            "responses",
+            {
+                "model": "m",
+                "status": "completed",
+                "output": [{"type": "message", "role": "assistant", "content": [{"type": "refusal", "refusal": "private-refusal"}]}],
+            },
+            "refusal",
+        ),
+        ("responses", {"model": "m", "status": "incomplete", "incomplete_details": {"reason": "content_filter"}, "output": []}, "content_filter"),
+    ],
+)
 def test_known_unrepresentable_output_is_not_malformed_json(source, body, feature):
     for target in ("chat", "messages", "responses"):
         if source == target:
@@ -69,7 +84,12 @@ def test_unsupported_stream_semantics_never_become_success(visible, feature):
     class Response(io.BytesIO):
         def __init__(self):
             super().__init__()
-            self.chunks = iter([chunk({"role": "assistant", "content": "visible" if visible else ""}), chunk({"refusal": "private-refusal"} if feature == "refusal" else {}, "content_filter" if feature == "content_filter" else None)])
+            self.chunks = iter(
+                [
+                    chunk({"role": "assistant", "content": "visible" if visible else ""}),
+                    chunk({"refusal": "private-refusal"} if feature == "refusal" else {}, "content_filter" if feature == "content_filter" else None),
+                ]
+            )
 
         def read1(self, size):
             return next(self.chunks, b"")
@@ -141,7 +161,11 @@ def test_measured_cache_writes_survive_messages_conversion_and_roundtrip(source)
     usage = {"input_tokens": 19, "output_tokens": 7, "input_tokens_details": {"cached_tokens": 3, "cache_write_tokens": 4}}
     response = {"model": "m", "status": "completed", "output": [], "usage": usage}
     if source == "chat":
-        response = {"model": "m", "choices": [{"message": {"role": "assistant", "content": None}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 19, "completion_tokens": 7, "prompt_tokens_details": {"cached_tokens": 3, "cache_write_tokens": 4}}}
+        response = {
+            "model": "m",
+            "choices": [{"message": {"role": "assistant", "content": None}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 19, "completion_tokens": 7, "prompt_tokens_details": {"cached_tokens": 3, "cache_write_tokens": 4}},
+        }
     messages = convert_response(response, source, "messages")
     assert messages["usage"] == {"input_tokens": 12, "output_tokens": 7, "cache_read_input_tokens": 3, "cache_creation_input_tokens": 4}
     result = convert_response(messages, "messages", source)

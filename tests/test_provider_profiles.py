@@ -11,7 +11,18 @@ from protoverta.server import GatewayConfig
 
 
 def profile(**options):
-    return ProviderProfile(**{"base_url": "https://example.test/v1", "protocol": "chat", "model": "m", "checked_at": "2026-10-24", "evidence": "synthetic fixture; not a real provider certification", "chat_token_field": "max_tokens", "token_budget_semantics": "completion_total", **options})
+    return ProviderProfile(
+        **{
+            "base_url": "https://example.test/v1",
+            "protocol": "chat",
+            "model": "m",
+            "checked_at": "2026-10-24",
+            "evidence": "synthetic fixture; not a real provider certification",
+            "chat_token_field": "max_tokens",
+            "token_budget_semantics": "completion_total",
+            **options,
+        }
+    )
 
 
 def test_exact_scoped_field_mapping_keeps_options_history_and_input_unchanged():
@@ -27,7 +38,9 @@ def test_exact_scoped_field_mapping_keeps_options_history_and_input_unchanged():
         profiles.apply("https://example.test/v1", "chat", {**body, "max_tokens": 8})
 
 
-@pytest.mark.parametrize("options", [{"protocol": "messages"}, {"evidence": ""}, {"chat_token_field": "other"}, {"token_budget_semantics": "unknown"}, {"checked_at": "invalid"}])
+@pytest.mark.parametrize(
+    "options", [{"protocol": "messages"}, {"evidence": ""}, {"chat_token_field": "other"}, {"token_budget_semantics": "unknown"}, {"checked_at": "invalid"}]
+)
 def test_profiles_require_narrow_evidence_and_known_semantics(options):
     with pytest.raises(ValueError):
         profile(**options)

@@ -47,18 +47,50 @@ def test_gateway_namespace_round_trip_and_request_isolation(protocol, stream, co
         seen.append(alias)
         if stream:
             encoder = StreamEncoder(protocol)
-            deltas = [Delta("start", model="m", input_tokens=1, output_tokens=0), Delta("tool_start", index=0, call_id="call_1", name=alias), Delta("tool_delta", index=0, text='{"x":1}'), Delta("tool_end", index=0), Delta("finish", reason="tool_calls", input_tokens=1, output_tokens=1)]
+            deltas = [
+                Delta("start", model="m", input_tokens=1, output_tokens=0),
+                Delta("tool_start", index=0, call_id="call_1", name=alias),
+                Delta("tool_delta", index=0, text='{"x":1}'),
+                Delta("tool_end", index=0),
+                Delta("finish", reason="tool_calls", input_tokens=1, output_tokens=1),
+            ]
             return io.BytesIO(b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta)))
         if protocol == "chat":
-            result = {"model": "m", "choices": [{"finish_reason": "tool_calls", "message": {"role": "assistant", "content": None, "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": alias, "arguments": '{"x":1}'}}]}}]}
+            result = {
+                "model": "m",
+                "choices": [
+                    {
+                        "finish_reason": "tool_calls",
+                        "message": {
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": alias, "arguments": '{"x":1}'}}],
+                        },
+                    }
+                ],
+            }
         else:
-            result = {"model": "m", "role": "assistant", "content": [{"type": "tool_use", "id": "call_1", "name": alias, "input": {"x": 1}}], "stop_reason": "tool_use", "usage": {"input_tokens": 1, "output_tokens": 1}}
+            result = {
+                "model": "m",
+                "role": "assistant",
+                "content": [{"type": "tool_use", "id": "call_1", "name": alias, "input": {"x": 1}}],
+                "stop_reason": "tool_use",
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            }
         return io.BytesIO(json.dumps(result).encode())
 
     config = GatewayConfig(protocol, "https://example.test/v1", "key", "local", namespace_tools="flatten")
     with listener(config, upstream) as url:
+
         def run(namespace):
-            body = {"model": "m", "input": "Hi", "max_output_tokens": 64, "stream": stream, "tools": [{"type": "namespace", "name": namespace, "tools": [{"type": "function", "name": "lookup", "parameters": {"type": "object"}}]}], "tool_choice": {"type": "function", "namespace": namespace, "name": "lookup"}}
+            body = {
+                "model": "m",
+                "input": "Hi",
+                "max_output_tokens": 64,
+                "stream": stream,
+                "tools": [{"type": "namespace", "name": namespace, "tools": [{"type": "function", "name": "lookup", "parameters": {"type": "object"}}]}],
+                "tool_choice": {"type": "function", "namespace": namespace, "name": "lookup"},
+            }
             with post(url, body) as response:
                 wire = response.read()
             if stream:
@@ -74,6 +106,7 @@ def test_gateway_namespace_round_trip_and_request_isolation(protocol, stream, co
             calls = [item for item in items if item["type"] == "function_call"]
             assert calls
             assert all((item["namespace"], item["name"], item["call_id"]) == (namespace, "lookup", "call_1") for item in calls)
+
         if concurrent:
             with ThreadPoolExecutor(max_workers=3) as pool:
                 list(pool.map(run, ("crm", "mail", "crm")))
@@ -95,12 +128,26 @@ def test_gateway_structured_format_reaches_upstream_and_response_snapshots(proto
         captured.append(body)
         if stream:
             encoder = StreamEncoder(protocol)
-            deltas = [Delta("start", model="m", input_tokens=1, output_tokens=0), Delta("text", text='{"ok":true}'), Delta("finish", reason="stop", input_tokens=1, output_tokens=4)]
+            deltas = [
+                Delta("start", model="m", input_tokens=1, output_tokens=0),
+                Delta("text", text='{"ok":true}'),
+                Delta("finish", reason="stop", input_tokens=1, output_tokens=4),
+            ]
             return io.BytesIO(b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta)))
         if protocol == "chat":
-            result = {"model": "m", "choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": '{"ok":true}'}}], "usage": {"prompt_tokens": 1, "completion_tokens": 4}}
+            result = {
+                "model": "m",
+                "choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": '{"ok":true}'}}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 4},
+            }
         else:
-            result = {"model": "m", "role": "assistant", "content": [{"type": "text", "text": '{"ok":true}'}], "stop_reason": "end_turn", "usage": {"input_tokens": 1, "output_tokens": 4}}
+            result = {
+                "model": "m",
+                "role": "assistant",
+                "content": [{"type": "text", "text": '{"ok":true}'}],
+                "stop_reason": "end_turn",
+                "usage": {"input_tokens": 1, "output_tokens": 4},
+            }
         return io.BytesIO(json.dumps(result).encode())
 
     config = GatewayConfig(protocol, "https://example.test/v1", "key", "local")
@@ -127,7 +174,9 @@ def test_registry_rejection_happens_before_network_in_native_and_translated_rout
         calls.append(request)
         raise AssertionError("unsupported capability must fail before upstream I/O")
 
-    registry = CapabilityRegistry((CapabilityRecord("https://example.test/v1", "responses" if native else "chat", "m", {"text": True, "streaming": False}, "2026-10-23", "fixture"),))
+    registry = CapabilityRegistry(
+        (CapabilityRecord("https://example.test/v1", "responses" if native else "chat", "m", {"text": True, "streaming": False}, "2026-10-23", "fixture"),)
+    )
     config = GatewayConfig("responses" if native else "chat", "https://example.test/v1", "key", "local", capabilities=registry)
     with listener(config, upstream) as url:
         with pytest.raises(HTTPError) as caught:
@@ -143,9 +192,21 @@ def test_gateway_mid_system_allowlist_is_exact_and_keeps_invalid_history_rejecte
 
     def upstream(request, *, timeout):
         captured.append(json.loads(request.data))
-        return io.BytesIO(json.dumps({"model": "verified", "role": "assistant", "content": [{"type": "text", "text": "OK"}], "stop_reason": "end_turn", "usage": {"input_tokens": 1, "output_tokens": 1}}).encode())
+        return io.BytesIO(
+            json.dumps(
+                {
+                    "model": "verified",
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "OK"}],
+                    "stop_reason": "end_turn",
+                    "usage": {"input_tokens": 1, "output_tokens": 1},
+                }
+            ).encode()
+        )
 
-    config = GatewayConfig("messages", "https://example.test/v1", "key", "local", client_profile="codex", default_max_output_tokens=64, messages_system_models=("verified",))
+    config = GatewayConfig(
+        "messages", "https://example.test/v1", "key", "local", client_profile="codex", default_max_output_tokens=64, messages_system_models=("verified",)
+    )
     with listener(config, upstream) as url:
         body = {"model": "verified", "input": [{"role": "user", "content": "Hi"}, {"role": "developer", "content": "New instruction"}]}
         with post(url, body) as response:

@@ -7,11 +7,27 @@ from protoverta.capabilities import request_features
 
 
 def message_result():
-    return {"model": "m", "max_tokens": 64, "messages": [
-        {"role": "assistant", "content": [{"type": "tool_use", "id": "call_one", "name": "screenshot", "input": {}}]},
-        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "call_one", "content": [
-            {"type": "text", "text": "before"}, {"type": "image", "source": {"type": "url", "url": "https://example.test/image.png"}},
-            {"type": "text", "text": "after"}]}]}]}
+    return {
+        "model": "m",
+        "max_tokens": 64,
+        "messages": [
+            {"role": "assistant", "content": [{"type": "tool_use", "id": "call_one", "name": "screenshot", "input": {}}]},
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "call_one",
+                        "content": [
+                            {"type": "text", "text": "before"},
+                            {"type": "image", "source": {"type": "url", "url": "https://example.test/image.png"}},
+                            {"type": "text", "text": "after"},
+                        ],
+                    }
+                ],
+            },
+        ],
+    }
 
 
 def test_rich_tool_results_preserve_role_identity_order_and_content():
@@ -59,7 +75,11 @@ def test_invalid_stops_are_rejected(value):
 @pytest.mark.parametrize("strict", [True, False])
 def test_explicit_strict_tool_flag_and_schema_are_preserved(source, target, strict):
     fn = {"name": "fn", "parameters": {"type": "object", "properties": {}, "additionalProperties": False}, "strict": strict}
-    body = {"model": "m", "max_tokens": 64, "messages": [{"role": "user", "content": "hi"}], "tools": [{"type": "function", "function": fn}]} if source == "chat" else {"model": "m", "max_output_tokens": 64, "input": "hi", "tools": [{"type": "function", **fn}]}
+    body = (
+        {"model": "m", "max_tokens": 64, "messages": [{"role": "user", "content": "hi"}], "tools": [{"type": "function", "function": fn}]}
+        if source == "chat"
+        else {"model": "m", "max_output_tokens": 64, "input": "hi", "tools": [{"type": "function", **fn}]}
+    )
     out = convert_request(body, source, target)
     tool = out["tools"][0]["function"] if target == "chat" else out["tools"][0]
     assert tool["parameters"] == fn["parameters"] and tool["strict"] is strict
@@ -70,9 +90,15 @@ def test_explicit_strict_tool_flag_and_schema_are_preserved(source, target, stri
 
 def test_matched_stop_sequence_metadata_still_fails_closed():
     with pytest.raises(ConversionError):
-        convert_response({"model": "m", "content": [{"type": "text", "text": "done"}], "stop_reason": "stop_sequence", "stop_sequence": "END"}, "messages", "chat")
+        convert_response(
+            {"model": "m", "content": [{"type": "text", "text": "done"}], "stop_reason": "stop_sequence", "stop_sequence": "END"}, "messages", "chat"
+        )
 
 
 def test_nonstrict_chat_function_does_not_enable_responses_schema_normalization():
-    body = {"model": "m", "messages": [{"role": "user", "content": "hi"}], "tools": [{"type": "function", "function": {"name": "fn", "parameters": {"type": "object", "properties": {}}}}]}
+    body = {
+        "model": "m",
+        "messages": [{"role": "user", "content": "hi"}],
+        "tools": [{"type": "function", "function": {"name": "fn", "parameters": {"type": "object", "properties": {}}}}],
+    }
     assert convert_request(body, "chat", "responses")["tools"][0]["strict"] is False

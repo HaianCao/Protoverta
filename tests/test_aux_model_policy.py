@@ -25,16 +25,46 @@ def response(protocol, model):
     if protocol == Protocol.CHAT:
         value = {"model": model, "choices": [{"message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}]}
     elif protocol == Protocol.MESSAGES:
-        value = {"model": model, "role": "assistant", "content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn", "usage": {"input_tokens": 1, "output_tokens": 1}}
+        value = {
+            "model": model,
+            "role": "assistant",
+            "content": [{"type": "text", "text": "ok"}],
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 1, "output_tokens": 1},
+        }
     else:
         value = {"model": model, "output": []}
     return io.BytesIO(json.dumps(value).encode())
 
 
 def records(protocol, *, child=True, child_context=64):
-    rows = [CapabilityRecord(BASE, protocol, "main", {"text": True, "tools": True, "reasoning_effort": True}, "2026-11-04", "synthetic", max_output_tokens=128, context_window_tokens=1024, reasoning_efforts=("low", "high"))]
+    rows = [
+        CapabilityRecord(
+            BASE,
+            protocol,
+            "main",
+            {"text": True, "tools": True, "reasoning_effort": True},
+            "2026-11-04",
+            "synthetic",
+            max_output_tokens=128,
+            context_window_tokens=1024,
+            reasoning_efforts=("low", "high"),
+        )
+    ]
     if child:
-        rows.append(CapabilityRecord(BASE, protocol, "worker", {"text": True, "tools": False, "reasoning_effort": True}, "2026-11-04", "synthetic-child", max_output_tokens=8, context_window_tokens=child_context, reasoning_efforts=("low",)))
+        rows.append(
+            CapabilityRecord(
+                BASE,
+                protocol,
+                "worker",
+                {"text": True, "tools": False, "reasoning_effort": True},
+                "2026-11-04",
+                "synthetic-child",
+                max_output_tokens=8,
+                context_window_tokens=child_context,
+                reasoning_efforts=("low",),
+            )
+        )
     return rows
 
 
@@ -43,12 +73,15 @@ def records(protocol, *, child=True, child_context=64):
 def test_child_rejection_uses_child_capabilities_and_budget_before_dispatch(protocol, fault):
     calls = []
     registry = CapabilityRegistry(tuple(records(protocol, child_context=12 if fault == "context" else 64)))
-    config = GatewayConfig(protocol, BASE, "fake", "local", capabilities=registry,
-                           context_preflight="reject_estimate", token_counter=lambda *_: TokenCount(10, exact=True))
+    config = GatewayConfig(
+        protocol, BASE, "fake", "local", capabilities=registry, context_preflight="reject_estimate", token_counter=lambda *_: TokenCount(10, exact=True)
+    )
+
     def upstream(request, *, timeout):
         body = json.loads(request.data)
         calls.append(body)
         return response(protocol, body["model"])
+
     body = {"model": "worker", "input": "synthetic", "max_output_tokens": 8}
     if fault == "tools":
         body["tools"] = [{"type": "function", "name": "read", "parameters": {"type": "object"}}]
@@ -72,14 +105,19 @@ def test_child_rejection_uses_child_capabilities_and_budget_before_dispatch(prot
 def test_unknown_child_never_borrows_parent_evidence_or_silently_falls_back(verified, route):
     calls = []
     config = GatewayConfig("chat", BASE, "fake", "local")
-    route_record = RouteCapabilityRecord(BASE, "chat", "main", "responses", False, "strict", route_policies(config), {"text": True}, "2026-11-04", "synthetic", "fixture")
+    route_record = RouteCapabilityRecord(
+        BASE, "chat", "main", "responses", False, "strict", route_policies(config), {"text": True}, "2026-11-04", "synthetic", "fixture"
+    )
     registry = CapabilityRegistry(tuple(records("chat", child=False)), (route_record,))
-    config = replace(config, capabilities=registry, require_verified_routes=verified if route else False,
-                     require_verified_capabilities=verified if not route else False)
+    config = replace(
+        config, capabilities=registry, require_verified_routes=verified if route else False, require_verified_capabilities=verified if not route else False
+    )
+
     def upstream(request, *, timeout):
         body = json.loads(request.data)
         calls.append(body)
         return response(Protocol.CHAT, body["model"])
+
     with listener(config, upstream) as url:
         if verified:
             with pytest.raises(HTTPError) as error:
@@ -95,14 +133,20 @@ def test_unknown_child_never_borrows_parent_evidence_or_silently_falls_back(veri
 
 def test_both_models_require_their_own_positive_route_evidence_in_verified_mode():
     config = GatewayConfig("chat", BASE, "fake", "local")
-    routes = tuple(RouteCapabilityRecord(BASE, "chat", model, "responses", False, "strict", route_policies(config),
-                                        {"text": True}, "2026-11-04", "synthetic-" + model, "fixture") for model in ("main", "worker"))
+    routes = tuple(
+        RouteCapabilityRecord(
+            BASE, "chat", model, "responses", False, "strict", route_policies(config), {"text": True}, "2026-11-04", "synthetic-" + model, "fixture"
+        )
+        for model in ("main", "worker")
+    )
     config = replace(config, capabilities=CapabilityRegistry(tuple(records("chat")), routes), require_verified_routes=True)
     called = []
+
     def upstream(request, *, timeout):
         body = json.loads(request.data)
         called.append(body["model"])
         return response(Protocol.CHAT, body["model"])
+
     with listener(config, upstream) as url:
         for model in ("main", "worker"):
             with post(url, {"model": model, "input": "synthetic", "max_output_tokens": 8}):
@@ -126,10 +170,12 @@ def test_model_digests_distinguish_models_without_raw_or_global_identity():
 def test_gateway_records_actual_models_separately_with_one_session_identity():
     observed, calls = [], []
     config = GatewayConfig("chat", BASE, "fake", "local")
+
     def upstream(request, *, timeout):
         body = json.loads(request.data)
         calls.append(body["model"])
         return response(Protocol.CHAT, body["model"])
+
     with listener(config, upstream, observer=observed.append) as url:
         for model in ("main", "worker", "main"):
             with post(url, {"model": model, "input": "synthetic"}):
@@ -175,12 +221,17 @@ def test_child_cannot_inherit_or_fetch_provider_owned_opaque_parent_state(protoc
     config = GatewayConfig(protocol, BASE, "fake", "local")
     body = {"model": "worker", "input": "continue", "max_output_tokens": 8}
     if opaque == "reasoning":
-        body["input"] = [{"role": "user", "content": "continue"}, {"type": "reasoning", "id": "owner-only", "summary": [], "encrypted_content": "synthetic-parent-state"}]
+        body["input"] = [
+            {"role": "user", "content": "continue"},
+            {"type": "reasoning", "id": "owner-only", "summary": [], "encrypted_content": "synthetic-parent-state"},
+        ]
     else:
         body["previous_response_id"] = "synthetic-parent-response"
+
     def upstream(*args, **kwargs):
         calls.append(True)
         raise AssertionError("opaque state must fail before network")
+
     with listener(config, upstream) as url:
         with pytest.raises(HTTPError) as error:
             post(url, body)

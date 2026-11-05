@@ -27,10 +27,18 @@ def chat_chunk(delta, reason=None, usage=None):
 
 
 def tool_stream(*, usage=False):
-    wire = chat_chunk({"role": "assistant", "tool_calls": [{"index": 0, "id": "private-call-id", "type": "function", "function": {"name": "private-tool-name", "arguments": "{}"}}]})
+    wire = chat_chunk(
+        {
+            "role": "assistant",
+            "tool_calls": [{"index": 0, "id": "private-call-id", "type": "function", "function": {"name": "private-tool-name", "arguments": "{}"}}],
+        }
+    )
     wire += chat_chunk({}, "tool_calls")
     if usage:
-        wire += encode_sse("message", json.dumps({"object": "chat.completion.chunk", "model": "synthetic", "choices": [], "usage": {"prompt_tokens": 3, "completion_tokens": 2}}))
+        wire += encode_sse(
+            "message",
+            json.dumps({"object": "chat.completion.chunk", "model": "synthetic", "choices": [], "usage": {"prompt_tokens": 3, "completion_tokens": 2}}),
+        )
     return wire + encode_sse("message", "[DONE]")
 
 
@@ -53,6 +61,7 @@ def test_missing_usage_tool_failure_is_in_encoder_without_decoder_exception(diag
 def test_diagnostics_preserve_successful_bytes_and_clean_eof(diagnostics_module, target, monkeypatch):
     monkeypatch.setattr("protoverta.stream_encoder.uuid", SimpleNamespace(uuid4=lambda: SimpleNamespace(hex="synthetic")))
     monkeypatch.setattr("protoverta.stream_encoder.time", SimpleNamespace(time=lambda: 100))
+
     def convert():
         pipe = StreamTranscoder("chat", target, messages_usage_policy="deferred")
         return pipe.feed(tool_stream(usage=True)) + pipe.finish()
@@ -112,7 +121,14 @@ def test_diagnostics_retain_strict_rejection_and_never_echo_field_values(diagnos
     assert "private" not in json.dumps(diagnostic.snapshot())
 
 
-@pytest.mark.parametrize("exc,category", [(HTTPError("https://private-url", 429, "private-error-key", {"Retry-After": "38"}, io.BytesIO(b"private-body")), "upstream_http"), (URLError("private-key"), "upstream_transport"), (URLError(TimeoutError("private-key")), "upstream_timeout")])
+@pytest.mark.parametrize(
+    "exc,category",
+    [
+        (HTTPError("https://private-url", 429, "private-error-key", {"Retry-After": "38"}, io.BytesIO(b"private-body")), "upstream_http"),
+        (URLError("private-key"), "upstream_transport"),
+        (URLError(TimeoutError("private-key")), "upstream_timeout"),
+    ],
+)
 def test_transport_status_and_category_are_safe_and_original_error_is_retained(diagnostics_module, exc, category):
     diagnostic = diagnostics_module.StreamDiagnostics()
 
@@ -172,7 +188,18 @@ def test_diagnostic_storage_and_snapshot_are_bounded(diagnostics_module):
 
 def test_shape_never_echoes_unknown_object_finish_reason_or_function_fields(diagnostics_module):
     assert diagnostics_module.chat_shape(SSEEvent("private-event", '{"object":"private-object"}')) == {"kind": "other"}
-    wire = chat_chunk({"tool_calls": [{"id": "private-id", "private-field": "private-value", "function": {"name": "private-name", "arguments": "private-arguments", "private-signature": "private-state"}}]}, "private-reason")
+    wire = chat_chunk(
+        {
+            "tool_calls": [
+                {
+                    "id": "private-id",
+                    "private-field": "private-value",
+                    "function": {"name": "private-name", "arguments": "private-arguments", "private-signature": "private-state"},
+                }
+            ]
+        },
+        "private-reason",
+    )
     shape = diagnostics_module.chat_shape(SSEParser().feed(wire)[0])
     assert shape["choices"][0]["finish_reason"] == "other"
     assert shape["choices"][0]["tools"][0]["unknown_fields"]
@@ -216,7 +243,11 @@ def test_transport_capture_keeps_gateway_session_observer(diagnostics_module, mo
 
     opened = []
     records = []
-    payload = {"model": "fixture", "choices": [{"message": {"role": "assistant", "content": "fixture-answer"}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 2, "completion_tokens": 1}}
+    payload = {
+        "model": "fixture",
+        "choices": [{"message": {"role": "assistant", "content": "fixture-answer"}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 2, "completion_tokens": 1},
+    }
 
     def upstream(request, *, timeout):
         opened.append(request)
@@ -227,7 +258,11 @@ def test_transport_capture_keeps_gateway_session_observer(diagnostics_module, mo
     original = server.make_handler
     config = server.GatewayConfig("chat", "https://example.invalid/v1", "synthetic-upstream", "synthetic-local")
     with diagnostic.capture(), server.gateway_session(config, observer=records.append if observed else None) as origin:
-        request = Request(origin + "/v1/responses", data=b'{"model":"fixture","input":"fixture"}', headers={"Authorization": "Bearer synthetic-local", "Content-Type": "application/json"})
+        request = Request(
+            origin + "/v1/responses",
+            data=b'{"model":"fixture","input":"fixture"}',
+            headers={"Authorization": "Bearer synthetic-local", "Content-Type": "application/json"},
+        )
         with build_opener(ProxyHandler({})).open(request, timeout=5) as response:
             assert response.status == 200
             assert b"fixture-answer" in response.read()

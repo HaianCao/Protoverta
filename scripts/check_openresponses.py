@@ -29,27 +29,63 @@ def fixture(protocol):
     def upstream(request, timeout):
         body = convert_request(json.loads(request.data), protocol, "chat")
         tool = body.get("tools", [{}])[0].get("function")
-        usage = {"prompt_tokens": 19, "completion_tokens": 7, "prompt_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0}, "completion_tokens_details": {"reasoning_tokens": 0}}
+        usage = {
+            "prompt_tokens": 19,
+            "completion_tokens": 7,
+            "prompt_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
+            "completion_tokens_details": {"reasoning_tokens": 0},
+        }
         message = {"role": "assistant", "content": "Hello synthetic world"}
         reason = "stop"
         if tool:
-            message = {"role": "assistant", "content": None, "tool_calls": [{"id": "call_fixture", "type": "function", "function": {"name": tool["name"], "arguments": '{"location":"San Francisco"}'}}]}
+            message = {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{"id": "call_fixture", "type": "function", "function": {"name": tool["name"], "arguments": '{"location":"San Francisco"}'}}],
+            }
             reason = "tool_calls"
         if body.get("stream"):
             encoder = StreamEncoder(protocol)
             # Match the explicit synthetic measurement in the JSON fixture.
             # Messages cannot carry a reasoning subtotal; its receiver still
             # reports that field as unknown rather than manufacturing zero.
-            deltas = [Delta("start", model="fixture-model", input_tokens=19, output_tokens=0), Delta("text", index=0, text="Hello synthetic world"), Delta("finish", reason="stop", input_tokens=19, output_tokens=7, cached_input_tokens=0, cache_creation_input_tokens=0, reasoning_output_tokens=usage["completion_tokens_details"]["reasoning_tokens"])]
+            deltas = [
+                Delta("start", model="fixture-model", input_tokens=19, output_tokens=0),
+                Delta("text", index=0, text="Hello synthetic world"),
+                Delta(
+                    "finish",
+                    reason="stop",
+                    input_tokens=19,
+                    output_tokens=7,
+                    cached_input_tokens=0,
+                    cache_creation_input_tokens=0,
+                    reasoning_output_tokens=usage["completion_tokens_details"]["reasoning_tokens"],
+                ),
+            ]
             return io.BytesIO(b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta)))
         result = {"model": "fixture-model", "choices": [{"message": message, "finish_reason": reason}], "usage": usage}
         return io.BytesIO(json.dumps(convert_response(result, "chat", protocol)).encode())
+
     return upstream
 
 
 def classify_missing_field(field):
     root = field.split(".", 1)[0]
-    if root in {"id", "object", "created_at", "completed_at", "status", "incomplete_details", "store", "background", "previous_response_id", "max_tool_calls", "safety_identifier", "prompt_cache_key", "truncation"}:
+    if root in {
+        "id",
+        "object",
+        "created_at",
+        "completed_at",
+        "status",
+        "incomplete_details",
+        "store",
+        "background",
+        "previous_response_id",
+        "max_tool_calls",
+        "safety_identifier",
+        "prompt_cache_key",
+        "truncation",
+    }:
         return "gateway-owned"
     if root in {"instructions", "max_output_tokens", "tools", "tool_choice", "parallel_tool_calls", "text", "temperature", "top_p"}:
         return "request-declared"
@@ -63,7 +99,13 @@ def classify_missing_field(field):
 def summarize(reports):
     counts = Counter(item["status"] for report in reports for item in report["results"])
     total = sum(counts.values())
-    passed = len(reports) == 2 and {report["upstream"] for report in reports} == {"chat", "messages"} and total == 2 * len(CASES) and counts["passed"] == total and all(report["exit_code"] == 0 for report in reports)
+    passed = (
+        len(reports) == 2
+        and {report["upstream"] for report in reports} == {"chat", "messages"}
+        and total == 2 * len(CASES)
+        and counts["passed"] == total
+        and all(report["exit_code"] == 0 for report in reports)
+    )
     fields = Counter(error.split(":", 1)[0] for report in reports for item in report["results"] for error in item["errors"])
     groups = {}
     provenance_classes = {}
@@ -79,8 +121,15 @@ def summarize(reports):
             group = "envelope_or_unclassified"
         groups.setdefault(group, {})[field] = count
         provenance_classes.setdefault(classify_missing_field(field), {})[field] = count
-    return {"outcome": "PASSED_FULL_SCHEMA" if passed else "FAILED_FULL_SCHEMA", "passed": counts["passed"], "failed": counts["failed"],
-            "skipped": counts["skipped"], "total": total, "field_groups": groups, "provenance_classes": provenance_classes}
+    return {
+        "outcome": "PASSED_FULL_SCHEMA" if passed else "FAILED_FULL_SCHEMA",
+        "passed": counts["passed"],
+        "failed": counts["failed"],
+        "skipped": counts["skipped"],
+        "total": total,
+        "field_groups": groups,
+        "provenance_classes": provenance_classes,
+    }
 
 
 def validate_cases(output):
@@ -105,20 +154,56 @@ def run(suite, runner, *, installed=False):
 
     reports = []
     for protocol in ("chat", "messages"):
-        config = GatewayConfig(protocol, "https://example.invalid/v1", "synthetic-upstream", "synthetic-local", client_profile="codex", default_max_output_tokens=128)
+        config = GatewayConfig(
+            protocol, "https://example.invalid/v1", "synthetic-upstream", "synthetic-local", client_profile="codex", default_max_output_tokens=128
+        )
         server = GatewayHTTPServer(("127.0.0.1", 0), make_handler(config, upstream_open=fixture(protocol)))
         worker = threading.Thread(target=server.serve_forever, daemon=True)
         worker.start()
         try:
-            result = subprocess.run(["node", str(runner), "--base-url", f"http://127.0.0.1:{server.server_port}/v1", "--api-key", "synthetic-local", "--model", "fixture-model", "--filter", ",".join(CASES), "--json"], env=env, capture_output=True, text=True, timeout=90, check=False)
+            result = subprocess.run(
+                [
+                    "node",
+                    str(runner),
+                    "--base-url",
+                    f"http://127.0.0.1:{server.server_port}/v1",
+                    "--api-key",
+                    "synthetic-local",
+                    "--model",
+                    "fixture-model",
+                    "--filter",
+                    ",".join(CASES),
+                    "--json",
+                ],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=90,
+                check=False,
+            )
             output = json.loads(result.stdout)
             validate_cases(output)
-            reports.append({"upstream": protocol, "exit_code": result.returncode, "summary": output["summary"], "results": [{"id": item["id"], "status": item["status"], "errors": item.get("errors", [])} for item in output["results"]]})
+            reports.append(
+                {
+                    "upstream": protocol,
+                    "exit_code": result.returncode,
+                    "summary": output["summary"],
+                    "results": [{"id": item["id"], "status": item["status"], "errors": item.get("errors", [])} for item in output["results"]],
+                }
+            )
         finally:
             server.shutdown()
             server.server_close()
             worker.join(5)
-    return {"official_revision": PIN, "runner_sha256": hashlib.sha256(runner.read_bytes()).hexdigest(), "cases": CASES, "local_fixtures_only": True, "provider_certification": False, "summary": summarize(reports), "reports": reports}
+    return {
+        "official_revision": PIN,
+        "runner_sha256": hashlib.sha256(runner.read_bytes()).hexdigest(),
+        "cases": CASES,
+        "local_fixtures_only": True,
+        "provider_certification": False,
+        "summary": summarize(reports),
+        "reports": reports,
+    }
 
 
 def main():

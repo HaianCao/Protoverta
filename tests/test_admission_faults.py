@@ -66,7 +66,13 @@ def test_http_release_failure_does_not_overwrite_completed_response(tmp_path):
         return original(self)
 
     config = GatewayConfig("chat", "https://example.test/v1", "key", "local", shared_admission_db=str(tmp_path / "quota.sqlite"))
-    with patch.object(SharedAdmission, "_connect", connect), listener(config, lambda *args, **kwargs: io.BytesIO(b'{"model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}')) as url, post(url, {"model": "m", "input": "hi"}) as response:
+    with (
+        patch.object(SharedAdmission, "_connect", connect),
+        listener(
+            config, lambda *args, **kwargs: io.BytesIO(b'{"model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}')
+        ) as url,
+        post(url, {"model": "m", "input": "hi"}) as response,
+    ):
         assert response.status == 200 and json.load(response)["output"]
     assert len(connections) == 2
 

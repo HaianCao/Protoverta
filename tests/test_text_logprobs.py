@@ -21,8 +21,12 @@ from protoverta.streaming import Delta, StreamError
 
 
 def token(text, raw=None):
-    return {"token": text, "bytes": list(text.encode()) if raw is None else raw, "logprob": -0.25,
-            "top_logprobs": [{"token": "x", "bytes": [120], "logprob": -1.5}]}
+    return {
+        "token": text,
+        "bytes": list(text.encode()) if raw is None else raw,
+        "logprob": -0.25,
+        "top_logprobs": [{"token": "x", "bytes": [120], "logprob": -1.5}],
+    }
 
 
 def response(source, text="hello", probabilities=None):
@@ -55,7 +59,9 @@ def test_opt_in_does_not_weaken_default_rejection_or_messages_boundary(source):
         convert_response(response(source), source, "messages", text_logprobs=True)
 
 
-@pytest.mark.parametrize("mutation", ["bytes_null", "bytes_bool", "bytes_range", "unknown", "positive", "nan", "huge_integer", "top_unknown", "top_missing", "misaligned"])
+@pytest.mark.parametrize(
+    "mutation", ["bytes_null", "bytes_bool", "bytes_range", "unknown", "positive", "nan", "huge_integer", "top_unknown", "top_missing", "misaligned"]
+)
 def test_malformed_or_unalignable_probabilities_never_get_repaired(mutation):
     value = token("hello")
     if mutation == "bytes_null":
@@ -71,7 +77,7 @@ def test_malformed_or_unalignable_probabilities_never_get_repaired(mutation):
     elif mutation == "nan":
         value["logprob"] = float("nan")
     elif mutation == "huge_integer":
-        value["logprob"] = -(10 ** 1000)
+        value["logprob"] = -(10**1000)
     elif mutation == "top_unknown":
         value["top_logprobs"][0]["vendor"] = True
     elif mutation == "top_missing":
@@ -86,9 +92,11 @@ def stream(source, *, split_unicode=False):
     encoder = StreamEncoder(source, text_logprobs=True)
     text = "🙂" if split_unicode else "hello"
     probabilities = [token("�", [240, 159]), token("�", [153, 130])] if split_unicode else [token(text)]
-    deltas = [Delta("start", model="m", input_tokens=2, output_tokens=0),
-              Delta("text", text=text, logprobs=probabilities),
-              Delta("finish", reason="stop", input_tokens=2, output_tokens=1)]
+    deltas = [
+        Delta("start", model="m", input_tokens=2, output_tokens=0),
+        Delta("text", text=text, logprobs=probabilities),
+        Delta("finish", reason="stop", input_tokens=2, output_tokens=1),
+    ]
     return b"".join(encode_sse(e.event, e.data) for d in deltas for e in encoder.feed(d)), probabilities
 
 
@@ -98,7 +106,7 @@ def stream(source, *, split_unicode=False):
 def test_fragmented_stream_preserves_actual_token_bytes_and_terminal_probabilities(source, target, chunk_size, split_unicode):
     raw, expected = stream(source, split_unicode=split_unicode)
     pipe = StreamTranscoder(source, target, text_logprobs=True)
-    output = b"".join(pipe.feed(raw[i:i + chunk_size]) for i in range(0, len(raw), chunk_size)) + pipe.finish()
+    output = b"".join(pipe.feed(raw[i : i + chunk_size]) for i in range(0, len(raw), chunk_size)) + pipe.finish()
     events = [json.loads(e.data) for e in SSEParser().feed(output) if e.data != "[DONE]"]
     if target == "responses":
         assert events[-1]["response"]["output"][-1]["content"][0]["logprobs"] == expected

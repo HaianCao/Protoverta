@@ -20,7 +20,11 @@ from protoverta.streaming import Delta, StreamError
 
 
 def chat_result():
-    return {"model": "m", "choices": [{"finish_reason": "stop", "message": {"role": "assistant", "reasoning_content": "public analysis", "content": "answer"}}], "usage": {"prompt_tokens": 3, "completion_tokens": 4}}
+    return {
+        "model": "m",
+        "choices": [{"finish_reason": "stop", "message": {"role": "assistant", "reasoning_content": "public analysis", "content": "answer"}}],
+        "usage": {"prompt_tokens": 3, "completion_tokens": 4},
+    }
 
 
 def test_completed_public_reasoning_is_distinct_from_answer_and_replayable():
@@ -39,7 +43,15 @@ def test_completed_public_reasoning_is_distinct_from_answer_and_replayable():
     assert body == original
 
 
-@pytest.mark.parametrize("field,value", [("encrypted_content", "opaque"), ("signature", "signed"), ("summary", [{"type": "summary_text", "text": "summary"}]), ("content", [{"type": "reasoning_text", "text": "x", "signature": "signed"}])])
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("encrypted_content", "opaque"),
+        ("signature", "signed"),
+        ("summary", [{"type": "summary_text", "text": "summary"}]),
+        ("content", [{"type": "reasoning_text", "text": "x", "signature": "signed"}]),
+    ],
+)
 def test_reasoning_summary_signature_and_opaque_state_are_not_laundered(field, value):
     item = reasoning_item("public")
     item[field] = value
@@ -78,7 +90,7 @@ def wire(protocol, *, tools=False):
 def test_stream_reasoning_and_answer_or_tool_remain_separate(source, target, tools):
     original = wire(source, tools=tools)
     pipeline = StreamTranscoder(source, target, public_reasoning=True)
-    output = b"".join(pipeline.feed(original[index:index + 7]) for index in range(0, len(original), 7)) + pipeline.finish()
+    output = b"".join(pipeline.feed(original[index : index + 7]) for index in range(0, len(original), 7)) + pipeline.finish()
     decoder = StreamDecoder(target, public_reasoning=True)
     deltas = [delta for event in SSEParser().feed(output) for delta in decoder.feed(event)]
     decoder.finish()

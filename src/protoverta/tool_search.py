@@ -135,7 +135,15 @@ class ClientToolSearchMap:
                     raise ConversionError("duplicate search call ID or non-object arguments")
                 seen.add(call_id)
                 pending.add(call_id)
-                rewritten.append({"type": "function_call", "call_id": call_id, "name": _NAME, "arguments": json.dumps(item["arguments"], ensure_ascii=False), "status": "completed"})
+                rewritten.append(
+                    {
+                        "type": "function_call",
+                        "call_id": call_id,
+                        "name": _NAME,
+                        "arguments": json.dumps(item["arguments"], ensure_ascii=False),
+                        "status": "completed",
+                    }
+                )
             else:
                 _only(item, {"type", "id", "execution", "call_id", "status", "tools"}, "tool_search_output")
                 if call_id not in pending or not isinstance(item.get("tools"), list):
@@ -155,7 +163,9 @@ class ClientToolSearchMap:
                 raise ConversionError("client search requires explicit client execution and an object argument schema")
             if not isinstance(search.get("description", ""), str):
                 raise ConversionError("search description must be text")
-            result["tools"].append({"type": "function", "name": _NAME, "description": search.get("description", ""), "parameters": search["parameters"], "strict": False})
+            result["tools"].append(
+                {"type": "function", "name": _NAME, "description": search.get("description", ""), "parameters": search["parameters"], "strict": False}
+            )
         if isinstance(inputs, list):
             result["input"] = rewritten
         return result

@@ -169,7 +169,10 @@ def test_truncated_output_is_distinguished_in_json_and_sse_observations():
     truncated_json = io.BytesIO(
         b'{"model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"cut"},"finish_reason":"length"}],"usage":{"prompt_tokens":4,"completion_tokens":8,"total_tokens":12}}'
     )
-    with observed_server(lambda req, timeout: truncated_json, records.append) as origin, post(origin, {"model": "m", "input": "hi"}, path="/v1/responses") as response:
+    with (
+        observed_server(lambda req, timeout: truncated_json, records.append) as origin,
+        post(origin, {"model": "m", "input": "hi"}, path="/v1/responses") as response,
+    ):
         assert response.headers.get("X-Protoverta-Finish-Category") == "truncated_output"
         data = json.loads(response.read().decode("utf-8"))
         assert data["status"] == "incomplete"
@@ -196,7 +199,10 @@ def test_truncated_output_is_distinguished_in_json_and_sse_observations():
         ),
         encode_sse("message", "[DONE]"),
     ]
-    with observed_server(lambda req, timeout: Segments(chunks), stream_records.append) as origin, post(origin, {"model": "m", "input": "hi", "stream": True}, path="/v1/responses") as response:
+    with (
+        observed_server(lambda req, timeout: Segments(chunks), stream_records.append) as origin,
+        post(origin, {"model": "m", "input": "hi", "stream": True}, path="/v1/responses") as response,
+    ):
         wire = response.read().decode("utf-8")
         assert "response.incomplete" in wire
     assert len(stream_records) == 1
@@ -210,9 +216,7 @@ def test_agent_and_chain_correlation_is_authenticated_bounded_hashed_and_not_for
 
     def upstream(request, timeout):
         outbound_headers.append({k.lower(): v for k, v in request.header_items()})
-        return io.BytesIO(
-            b'{"model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}'
-        )
+        return io.BytesIO(b'{"model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}')
 
     with observed_server(upstream, records.append) as origin:
         # 1. Unauthenticated request with correlation headers must NOT record digests or reach upstream.
@@ -307,10 +311,7 @@ def test_journal_schema_version_compatibility_for_old_and_new_readers(tmp_path):
         "streaming": False,
     }
     v1_path.write_text(
-        json.dumps({"kind": "protoverta-session", "schema_version": 1})
-        + "\n"
-        + json.dumps(legacy_row)
-        + "\n",
+        json.dumps({"kind": "protoverta-session", "schema_version": 1}) + "\n" + json.dumps(legacy_row) + "\n",
         encoding="utf-8",
     )
     report_v1 = latest_diagnostics(v1_dir)
@@ -320,4 +321,3 @@ def test_journal_schema_version_compatibility_for_old_and_new_readers(tmp_path):
     assert report_v1["records"][0]["feature"] is None
     assert report_v1["records"][0]["agent_digest"] is None
     assert report_v1["records"][0]["chain_digest"] is None
-

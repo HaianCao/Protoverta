@@ -21,7 +21,13 @@ def test_default_reasoning_preserves_native_payload(protocol):
 @pytest.mark.parametrize("policy", ["disabled", "openrouter_disabled"])
 @pytest.mark.parametrize("protocol", list(Protocol))
 def test_disabled_policy_overrides_effort_without_mutating_input(protocol, policy):
-    payload = {"model": "m", "reasoning_effort": "high", "reasoning": {"effort": "high"}, "thinking": {"type": "enabled", "budget_tokens": 100}, "output_config": {"effort": "high", "format": {"type": "json_schema"}}}
+    payload = {
+        "model": "m",
+        "reasoning_effort": "high",
+        "reasoning": {"effort": "high"},
+        "thinking": {"type": "enabled", "budget_tokens": 100},
+        "output_config": {"effort": "high", "format": {"type": "json_schema"}},
+    }
     original = copy.deepcopy(payload)
     result = apply_upstream_reasoning(payload, protocol, policy)
     assert payload == original
@@ -68,7 +74,11 @@ def test_gateway_applies_reasoning_policy_after_conversion(upstream, inbound):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        payload = {"model": "m", "input": "Hello", "max_output_tokens": 32} if inbound == Protocol.RESPONSES else {"model": "m", "messages": [{"role": "user", "content": "Hello"}], "max_tokens": 32}
+        payload = (
+            {"model": "m", "input": "Hello", "max_output_tokens": 32}
+            if inbound == Protocol.RESPONSES
+            else {"model": "m", "messages": [{"role": "user", "content": "Hello"}], "max_tokens": 32}
+        )
         endpoint = "chat/completions" if inbound == Protocol.CHAT else inbound.value
         request = Request(f"http://127.0.0.1:{server.server_port}/v1/{endpoint}", data=json.dumps(payload).encode(), headers={"Authorization": "Bearer local"})
         with pytest.raises(HTTPError) as error:

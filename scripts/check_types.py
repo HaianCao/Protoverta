@@ -21,7 +21,9 @@ def main() -> int:
         good = subprocess.run([*command, "tests/typing/valid.py"], cwd=root, env=env, check=False)
         if good.returncode:
             return good.returncode
-        bad = subprocess.run([*command, "--no-pretty", "--no-color-output", "tests/typing/invalid.py"], cwd=root, env=env, capture_output=True, text=True, check=False)
+        bad = subprocess.run(
+            [*command, "--no-pretty", "--no-color-output", "tests/typing/invalid.py"], cwd=root, env=env, capture_output=True, text=True, check=False
+        )
         # Exactly the two bad arguments and the out-of-vocabulary outcome.
         # A missing checker/import or a syntax/config error must not count.
         if bad.returncode != 1 or bad.stdout.count("[arg-type]") != 2 or bad.stdout.count("[assignment]") != 1 or bad.stdout.count(": error:") != 3:

@@ -30,6 +30,7 @@ jobs:
         run: |
           python -m pytest
           python -m ruff check src tests sdk_tests scripts fuzz_tests
+          python -m ruff format --check src tests sdk_tests scripts fuzz_tests
           python scripts/check_types.py
           python scripts/check_sdk.py
           python scripts/check_fuzz.py

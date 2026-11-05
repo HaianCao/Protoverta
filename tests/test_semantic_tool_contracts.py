@@ -79,14 +79,15 @@ def test_bad_history_never_dispatches_and_next_valid_request_recovers(target, ba
 
 
 def messages_wire(fragments=None, trailing_text=None):
-    events = [("message_start", {"message": {"model": "m", "content": [], "usage": {"input_tokens": 2, "output_tokens": 0}}}),
-        ("content_block_start", {"index": 0, "content_block": {"type": "tool_use", "id": "c", "name": "fixture", "input": {}}})]
+    events = [
+        ("message_start", {"message": {"model": "m", "content": [], "usage": {"input_tokens": 2, "output_tokens": 0}}}),
+        ("content_block_start", {"index": 0, "content_block": {"type": "tool_use", "id": "c", "name": "fixture", "input": {}}}),
+    ]
     for fragment in fragments or []:
         events.append(("content_block_delta", {"index": 0, "delta": {"type": "input_json_delta", "partial_json": fragment}}))
     events.append(("content_block_stop", {"index": 0}))
     if trailing_text is not None:
-        events.extend([("content_block_start", {"index": 1, "content_block": {"type": "text", "text": trailing_text}}),
-            ("content_block_stop", {"index": 1})])
+        events.extend([("content_block_start", {"index": 1, "content_block": {"type": "text", "text": trailing_text}}), ("content_block_stop", {"index": 1})])
     events.extend([("message_delta", {"delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 1}}), ("message_stop", {})])
     return b"".join(encode_sse(kind, json.dumps({"type": kind, **body})) for kind, body in events)
 
@@ -115,8 +116,12 @@ def test_invalid_messages_arguments_are_never_replaced_with_empty_object(target,
 
 @pytest.mark.parametrize("target", ["chat", "responses"])
 def test_sse_text_after_tool_uses_same_strict_subset_as_json(target):
-    body = {"model": "m", "content": [{"type": "tool_use", "id": "c", "name": "fixture", "input": {}},
-        {"type": "text", "text": "after tool"}], "stop_reason": "tool_use", "usage": {"input_tokens": 2, "output_tokens": 1}}
+    body = {
+        "model": "m",
+        "content": [{"type": "tool_use", "id": "c", "name": "fixture", "input": {}}, {"type": "text", "text": "after tool"}],
+        "stop_reason": "tool_use",
+        "usage": {"input_tokens": 2, "output_tokens": 1},
+    }
     with pytest.raises(ConversionError, match="text after a tool"):
         convert_response(body, "messages", target)
     with pytest.raises(StreamError, match="text after a tool"):
@@ -142,10 +147,15 @@ def test_empty_post_tool_delta_is_noop_and_valid_text_before_tools_still_works(t
 def test_chat_choice_index_requires_exact_integer_in_initial_and_usage_chunks(index, postlude):
     decoder = StreamDecoder("chat")
     if postlude:
-        decoder.feed(SSEEvent("message", json.dumps({"object": "chat.completion.chunk", "model": "m",
-            "choices": [{"index": 0, "delta": {"content": "synthetic"}, "finish_reason": "stop"}]})))
-    body = {"object": "chat.completion.chunk", "model": "m", "choices": [{"index": index,
-        "delta": {}, "finish_reason": "stop" if postlude else None}]}
+        decoder.feed(
+            SSEEvent(
+                "message",
+                json.dumps(
+                    {"object": "chat.completion.chunk", "model": "m", "choices": [{"index": 0, "delta": {"content": "synthetic"}, "finish_reason": "stop"}]}
+                ),
+            )
+        )
+    body = {"object": "chat.completion.chunk", "model": "m", "choices": [{"index": index, "delta": {}, "finish_reason": "stop" if postlude else None}]}
     if postlude:
         body["usage"] = {"prompt_tokens": 2, "completion_tokens": 1}
     with pytest.raises(StreamError, match="index"):
@@ -154,9 +164,17 @@ def test_chat_choice_index_requires_exact_integer_in_initial_and_usage_chunks(in
 
 def test_chat_empty_argument_string_is_not_normalized_like_messages_input():
     decoder = StreamDecoder("chat")
-    body = {"object": "chat.completion.chunk", "model": "m", "choices": [{"index": 0,
-        "delta": {"tool_calls": [{"index": 0, "id": "c", "type": "function", "function": {"name": "f", "arguments": ""}}]},
-        "finish_reason": "tool_calls"}]}
+    body = {
+        "object": "chat.completion.chunk",
+        "model": "m",
+        "choices": [
+            {
+                "index": 0,
+                "delta": {"tool_calls": [{"index": 0, "id": "c", "type": "function", "function": {"name": "f", "arguments": ""}}]},
+                "finish_reason": "tool_calls",
+            }
+        ],
+    }
     decoder.feed(SSEEvent("message", json.dumps(body)))
     with pytest.raises(StreamError, match="valid JSON"):
         decoder.feed(SSEEvent("message", "[DONE]"))

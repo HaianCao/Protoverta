@@ -30,7 +30,12 @@ def custom_definition(value: dict, source: str) -> dict:
         grammar = form["grammar"]
     else:
         grammar = {key: val for key, val in form.items() if key != "type"}
-    if set(grammar) != {"syntax", "definition"} or grammar["syntax"] not in ("lark", "regex") or not isinstance(grammar["definition"], str) or not grammar["definition"]:
+    if (
+        set(grammar) != {"syntax", "definition"}
+        or grammar["syntax"] not in ("lark", "regex")
+        or not isinstance(grammar["definition"], str)
+        or not grammar["definition"]
+    ):
         raise ConversionError("custom grammar requires syntax and a nonempty definition")
     result["format"] = {"type": "grammar", **grammar}
     return result

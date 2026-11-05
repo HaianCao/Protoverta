@@ -12,10 +12,25 @@ from typing import Literal, TextIO
 
 WireProtocol = Literal["chat", "messages", "responses", "models", "unknown"]
 Outcome = Literal[
-    "success", "truncated_output", "invalid_request", "authentication", "not_found", "capacity",
-    "shared_admission", "admission_unavailable", "upstream_http", "timeout",
-    "upstream_transport", "unsupported_reasoning", "unsupported_feature", "policy_refusal",
-    "invalid_stream", "invalid_response", "stream_limit", "client_disconnected", "internal_error",
+    "success",
+    "truncated_output",
+    "invalid_request",
+    "authentication",
+    "not_found",
+    "capacity",
+    "shared_admission",
+    "admission_unavailable",
+    "upstream_http",
+    "timeout",
+    "upstream_transport",
+    "unsupported_reasoning",
+    "unsupported_feature",
+    "policy_refusal",
+    "invalid_stream",
+    "invalid_response",
+    "stream_limit",
+    "client_disconnected",
+    "internal_error",
 ]
 TracePhase = Literal["request", "preflight", "admission", "upstream", "response", "stream"]
 
@@ -74,6 +89,7 @@ class RequestTrace:
 
     def models(self, requested: object, effective: object, salt: bytes) -> None:
         """Session-scoped identity only; never store model names or a global hash."""
+
         def digest(value: object) -> str | None:
             if not isinstance(value, str) or not 1 <= len(value) <= 512:
                 return None
@@ -82,17 +98,20 @@ class RequestTrace:
             except UnicodeError:
                 return None
             return hmac.digest(salt, raw, "sha256").hex()
+
         self.requested_model_digest = digest(requested)
         self.effective_model_digest = digest(effective)
 
     def correlation(self, agent: object, chain: object, salt: bytes) -> None:
         """Bounded HMAC-digested correlation only; never used for auth or routing."""
+
         def digest(value: object) -> str | None:
             if not isinstance(value, str) or not 1 <= len(value) <= 128:
                 return None
             if any(ord(c) < 33 or ord(c) >= 127 for c in value):
                 return None
             return hmac.digest(salt, value.encode("ascii"), "sha256").hex()
+
         self.agent_digest = digest(agent)
         self.chain_digest = digest(chain)
 
@@ -111,12 +130,26 @@ class RequestTrace:
             self.cache_creation_input_tokens = created
 
     def snapshot(self) -> RequestObservation:
-        return RequestObservation(self.request_id, self.protocol, self.upstream_protocol,
-                                  self.status, self.outcome,
-                                  max(0, int((self._clock() - self._started) * 1000)),
-                                  self.streaming, self.first_payload_ms, self.input_tokens, self.output_tokens, self.cached_input_tokens, self.cache_creation_input_tokens,
-                                  self.requested_model_digest, self.effective_model_digest,
-                                  self.phase, self.feature, self.agent_digest, self.chain_digest)
+        return RequestObservation(
+            self.request_id,
+            self.protocol,
+            self.upstream_protocol,
+            self.status,
+            self.outcome,
+            max(0, int((self._clock() - self._started) * 1000)),
+            self.streaming,
+            self.first_payload_ms,
+            self.input_tokens,
+            self.output_tokens,
+            self.cached_input_tokens,
+            self.cache_creation_input_tokens,
+            self.requested_model_digest,
+            self.effective_model_digest,
+            self.phase,
+            self.feature,
+            self.agent_digest,
+            self.chain_digest,
+        )
 
     def emit(self, observer: Observer | None) -> None:
         if observer is not None:

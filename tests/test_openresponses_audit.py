@@ -80,9 +80,17 @@ def test_audit_json_and_sse_share_the_same_declared_fixture_measurements(monkeyp
 
 
 def reports(module, *, passed=False):
-    return [{"upstream": source, "exit_code": 0 if passed else 1,
-             "results": [{"id": name, "status": "passed" if passed else "failed", "errors": [] if passed else ["temperature: Required", "usage: Invalid input"]}
-                         for name in module.CASES]} for source in ("chat", "messages")]
+    return [
+        {
+            "upstream": source,
+            "exit_code": 0 if passed else 1,
+            "results": [
+                {"id": name, "status": "passed" if passed else "failed", "errors": [] if passed else ["temperature: Required", "usage: Invalid input"]}
+                for name in module.CASES
+            ],
+        }
+        for source in ("chat", "messages")
+    ]
 
 
 def test_audit_summary_never_calls_expected_schema_failure_a_pass(monkeypatch):

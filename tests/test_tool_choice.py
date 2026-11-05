@@ -8,9 +8,29 @@ from protoverta.namespaces import NamespaceMap
 
 def request(protocol):
     return {
-        Protocol.CHAT: {"model": "m", "messages": [{"role": "user", "content": "Run add"}], "max_completion_tokens": 64, "tools": [{"type": "function", "function": {"name": "add", "parameters": {"type": "object"}}}], "tool_choice": {"type": "function", "function": {"name": "add"}}, "parallel_tool_calls": False},
-        Protocol.MESSAGES: {"model": "m", "messages": [{"role": "user", "content": "Run add"}], "max_tokens": 64, "tools": [{"name": "add", "input_schema": {"type": "object"}}], "tool_choice": {"type": "tool", "name": "add", "disable_parallel_tool_use": True}},
-        Protocol.RESPONSES: {"model": "m", "input": "Run add", "max_output_tokens": 64, "tools": [{"type": "function", "name": "add", "parameters": {"type": "object"}}], "tool_choice": {"type": "function", "name": "add"}, "parallel_tool_calls": False},
+        Protocol.CHAT: {
+            "model": "m",
+            "messages": [{"role": "user", "content": "Run add"}],
+            "max_completion_tokens": 64,
+            "tools": [{"type": "function", "function": {"name": "add", "parameters": {"type": "object"}}}],
+            "tool_choice": {"type": "function", "function": {"name": "add"}},
+            "parallel_tool_calls": False,
+        },
+        Protocol.MESSAGES: {
+            "model": "m",
+            "messages": [{"role": "user", "content": "Run add"}],
+            "max_tokens": 64,
+            "tools": [{"name": "add", "input_schema": {"type": "object"}}],
+            "tool_choice": {"type": "tool", "name": "add", "disable_parallel_tool_use": True},
+        },
+        Protocol.RESPONSES: {
+            "model": "m",
+            "input": "Run add",
+            "max_output_tokens": 64,
+            "tools": [{"type": "function", "name": "add", "parameters": {"type": "object"}}],
+            "tool_choice": {"type": "function", "name": "add"},
+            "parallel_tool_calls": False,
+        },
     }[protocol]
 
 
@@ -25,7 +45,10 @@ def test_forced_function_all_six_routes_and_round_trip(source, target):
     assert body == original
 
 
-@pytest.mark.parametrize("choice", [{"type": "function", "name": "absent"}, {"type": "function", "name": "add", "extra": True}, {"type": "web_search"}, {"type": "function", "name": ""}])
+@pytest.mark.parametrize(
+    "choice",
+    [{"type": "function", "name": "absent"}, {"type": "function", "name": "add", "extra": True}, {"type": "web_search"}, {"type": "function", "name": ""}],
+)
 def test_invalid_or_undeclared_forced_tools_fail(choice):
     body = request(Protocol.RESPONSES)
     body["tool_choice"] = choice
@@ -46,7 +69,9 @@ def test_duplicate_definitions_and_required_without_tools_fail():
 @pytest.mark.parametrize("target", ["chat", "messages"])
 def test_forced_namespace_resolves_exact_definition(target):
     body = request(Protocol.RESPONSES)
-    body["tools"] = [{"type": "namespace", "name": ns, "tools": [{"type": "function", "name": "add", "parameters": {"type": "object"}}]} for ns in ("one", "two")]
+    body["tools"] = [
+        {"type": "namespace", "name": ns, "tools": [{"type": "function", "name": "add", "parameters": {"type": "object"}}]} for ns in ("one", "two")
+    ]
     body["tool_choice"] = {"type": "function", "namespace": "two", "name": "add"}
     mapper = NamespaceMap()
     prepared = mapper.prepare(body)

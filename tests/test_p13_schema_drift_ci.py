@@ -85,7 +85,17 @@ def test_p13_request_context_restores_declared_controls_without_inventing_zero_o
     assert restored_minimal["store"] is False
     assert restored_minimal["background"] is False
     assert restored_minimal["previous_response_id"] is None
-    for uninvented in ("temperature", "top_p", "tools", "tool_choice", "parallel_tool_calls", "service_tier", "presence_penalty", "frequency_penalty", "top_logprobs"):
+    for uninvented in (
+        "temperature",
+        "top_p",
+        "tools",
+        "tool_choice",
+        "parallel_tool_calls",
+        "service_tier",
+        "presence_penalty",
+        "frequency_penalty",
+        "top_logprobs",
+    ):
         assert uninvented not in restored_minimal
     assert "output_tokens_details" not in restored_minimal["usage"]
 
@@ -126,7 +136,7 @@ def test_p13_sdk_candidate_evaluation_mode_preserves_pinned_baseline_gate(monkey
 
     def fake_run(command, *, cwd, env, check):
         Path(command[command.index("--junitxml") + 1]).write_text(
-            '<testsuites><testsuite>' + ''.join(f'<testcase name="candidate_{i}"/>' for i in range(29)) + '</testsuite></testsuites>',
+            "<testsuites><testsuite>" + "".join(f'<testcase name="candidate_{i}"/>' for i in range(29)) + "</testsuite></testsuites>",
             encoding="utf-8",
         )
         return SimpleNamespace(returncode=0)
@@ -163,9 +173,7 @@ def test_p13_feature_gating_by_route_not_coverage():
     base_cfg = GatewayConfig("chat", "https://example.test/v1", "k", "t", client_profile="codex")
     policies = route_policies(base_cfg)
     reg = CapabilityRegistry(
-        records=(
-            CapabilityRecord("https://example.test/v1", "chat", "m", {"text": True, "streaming": True, "tools": True}, "2026-11-04", "model record"),
-        ),
+        records=(CapabilityRecord("https://example.test/v1", "chat", "m", {"text": True, "streaming": True, "tools": True}, "2026-11-04", "model record"),),
         routes=(
             RouteCapabilityRecord(
                 base_url="https://example.test/v1",

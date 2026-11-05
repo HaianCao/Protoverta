@@ -10,7 +10,22 @@ from protoverta.server import GatewayConfig
 
 
 @pytest.mark.parametrize("target", ["chat", "messages", "responses"])
-@pytest.mark.parametrize("status,kind", [(400, "invalid_request"), (401, "authentication"), (403, "permission"), (404, "not_found"), (413, "too_large"), (422, "invalid_request"), (429, "rate_limit"), (500, "upstream"), (503, "overloaded"), (504, "timeout"), (529, "overloaded")])
+@pytest.mark.parametrize(
+    "status,kind",
+    [
+        (400, "invalid_request"),
+        (401, "authentication"),
+        (403, "permission"),
+        (404, "not_found"),
+        (413, "too_large"),
+        (422, "invalid_request"),
+        (429, "rate_limit"),
+        (500, "upstream"),
+        (503, "overloaded"),
+        (504, "timeout"),
+        (529, "overloaded"),
+    ],
+)
 def test_failure_taxonomy_is_independent_of_provider_message(target, status, kind):
     failure = gateway_failure(status, "context window rate limit authentication")
     payload = failure.payload(target)
@@ -63,7 +78,14 @@ def test_context_code_never_overrides_authentication_permission_or_rate_limit(st
     assert gateway_failure(status, "failure", code="context_length_exceeded").kind == kind
 
 
-@pytest.mark.parametrize("exception,status,code", [(TimeoutError("private"), 504, "upstream_timeout"), (URLError(TimeoutError("private")), 504, "upstream_timeout"), (URLError("private"), 502, "upstream_transport")])
+@pytest.mark.parametrize(
+    "exception,status,code",
+    [
+        (TimeoutError("private"), 504, "upstream_timeout"),
+        (URLError(TimeoutError("private")), 504, "upstream_timeout"),
+        (URLError("private"), 502, "upstream_transport"),
+    ],
+)
 def test_transport_failure_does_not_expose_raw_exception(exception, status, code):
     def upstream(request, *, timeout):
         raise exception

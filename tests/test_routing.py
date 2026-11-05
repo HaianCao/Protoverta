@@ -30,7 +30,9 @@ def test_openrouter_route_is_session_local_pinned_and_default_off():
     assert route_identity(base) != route_identity(pinned)
 
 
-@pytest.mark.parametrize("prefix,protocol", [("https://example.invalid/v1", "chat"), ("https://openrouter.ai/api/v1", "responses"), ("https://openrouter.ai/other", "chat")])
+@pytest.mark.parametrize(
+    "prefix,protocol", [("https://example.invalid/v1", "chat"), ("https://openrouter.ai/api/v1", "responses"), ("https://openrouter.ai/other", "chat")]
+)
 def test_routing_never_guesses_provider_or_protocol_support(prefix, protocol):
     with pytest.raises(ValueError):
         GatewayConfig(protocol, prefix, "fixture", "local", openrouter_provider="fixture")

@@ -20,8 +20,13 @@ from protoverta.streaming import Delta
 
 
 def request_body(target, model):
-    body = {"model": model, "stream": True, "input": "synthetic", "max_output_tokens": 32,
-            "tools": [{"type": "function", "name": "work", "parameters": {"type": "object"}}]}
+    body = {
+        "model": model,
+        "stream": True,
+        "input": "synthetic",
+        "max_output_tokens": 32,
+        "tools": [{"type": "function", "name": "work", "parameters": {"type": "object"}}],
+    }
     return convert_request(body, "responses", target)
 
 
@@ -93,10 +98,14 @@ def upstream(source, *, failure=None, parties=3):
                     self.wfile.write(b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta)))
                     self.wfile.flush()
 
-                emit([Delta("start", model=model, input_tokens=1, output_tokens=0),
-                      Delta("text", text="ROLE_" + model + "_SENTINEL"),
-                      Delta("tool_start", index=0, call_id="same-call", name="work"),
-                      Delta("tool_delta", index=0, text='{"lane":"')])
+                emit(
+                    [
+                        Delta("start", model=model, input_tokens=1, output_tokens=0),
+                        Delta("text", text="ROLE_" + model + "_SENTINEL"),
+                        Delta("tool_start", index=0, call_id="same-call", name="work"),
+                        Delta("tool_delta", index=0, text='{"lane":"'),
+                    ]
+                )
                 if model == "a" and failure in {"timeout", "cancel"}:
                     self.connection.settimeout(3)
                     if not self.connection.recv(1):
@@ -106,8 +115,13 @@ def upstream(source, *, failure=None, parties=3):
                     return  # Missing verified terminal must never become success.
                 if failure == "cancel" and model in {"b", "parent"}:
                     assert release.wait(3)
-                emit([Delta("tool_delta", index=0, text=model + '"}'), Delta("tool_end", index=0),
-                      Delta("finish", reason="tool_calls", input_tokens=1, output_tokens=1)])
+                emit(
+                    [
+                        Delta("tool_delta", index=0, text=model + '"}'),
+                        Delta("tool_end", index=0),
+                        Delta("finish", reason="tool_calls", input_tokens=1, output_tokens=1),
+                    ]
+                )
             except (OSError, threading.BrokenBarrierError):
                 if model == "a" and failure in {"cancel", "timeout"}:
                     cancelled.set()
@@ -130,9 +144,11 @@ def upstream(source, *, failure=None, parties=3):
 
 @pytest.mark.parametrize("source,target", [(source, target) for source in Protocol for target in Protocol if source != target])
 def test_three_overlapping_streams_can_reuse_call_ids_without_sharing_state(source, target):
-    with upstream(source) as (base, _, _, records, active, peak), gateway_session(
-        GatewayConfig(source, base, "synthetic", "local", messages_usage_policy="deferred")
-    ) as origin, ThreadPoolExecutor(3) as pool:
+    with (
+        upstream(source) as (base, _, _, records, active, peak),
+        gateway_session(GatewayConfig(source, base, "synthetic", "local", messages_usage_policy="deferred")) as origin,
+        ThreadPoolExecutor(3) as pool,
+    ):
         results = list(pool.map(lambda model: collect(origin, target, model), ["a", "b", "parent"]))
         for model, (status, raw) in zip(["a", "b", "parent"], results, strict=True):
             assert status == 200
@@ -145,10 +161,23 @@ def test_three_overlapping_streams_can_reuse_call_ids_without_sharing_state(sour
 @pytest.mark.parametrize("failure", ["429", "invalid", "timeout"])
 @pytest.mark.parametrize("target", [Protocol.RESPONSES, Protocol.MESSAGES])
 def test_failed_child_lane_does_not_poison_sibling_or_refund_shared_request_quota(tmp_path, failure, target):
-    with upstream(Protocol.CHAT, failure=failure) as (base, _, _, records, _, _), gateway_session(
-        GatewayConfig("chat", base, "synthetic", "local", messages_usage_policy="deferred", progress_timeout=0.5,
-                      shared_admission_db=str(tmp_path / "quota.sqlite"), shared_requests=4, shared_concurrency=3)
-    ) as origin, ThreadPoolExecutor(3) as pool:
+    with (
+        upstream(Protocol.CHAT, failure=failure) as (base, _, _, records, _, _),
+        gateway_session(
+            GatewayConfig(
+                "chat",
+                base,
+                "synthetic",
+                "local",
+                messages_usage_policy="deferred",
+                progress_timeout=0.5,
+                shared_admission_db=str(tmp_path / "quota.sqlite"),
+                shared_requests=4,
+                shared_concurrency=3,
+            )
+        ) as origin,
+        ThreadPoolExecutor(3) as pool,
+    ):
         results = list(pool.map(lambda model: collect(origin, target, model), ["a", "b", "parent"]))
         for status, raw in results[1:]:
             assert status == 200
@@ -164,11 +193,14 @@ def test_failed_child_lane_does_not_poison_sibling_or_refund_shared_request_quot
 
 def test_cancel_one_lane_releases_its_lease_while_siblings_remain_open(tmp_path):
     observations = []
-    with upstream(Protocol.CHAT, failure="cancel") as (base, release, cancelled, records, active, _), gateway_session(
-        GatewayConfig("chat", base, "synthetic", "local", shared_admission_db=str(tmp_path / "quota.sqlite"),
-                      shared_requests=4, shared_concurrency=3),
-        observer=observations.append,
-    ) as origin, ThreadPoolExecutor(3) as pool:
+    with (
+        upstream(Protocol.CHAT, failure="cancel") as (base, release, cancelled, records, active, _),
+        gateway_session(
+            GatewayConfig("chat", base, "synthetic", "local", shared_admission_db=str(tmp_path / "quota.sqlite"), shared_requests=4, shared_concurrency=3),
+            observer=observations.append,
+        ) as origin,
+        ThreadPoolExecutor(3) as pool,
+    ):
         clients = list(pool.map(lambda model: connect(origin, Protocol.RESPONSES, model), ["a", "b", "parent"]))
         try:
             for _, response, _ in clients:
@@ -203,9 +235,14 @@ def test_closing_one_session_does_not_close_another_sessions_upstream_or_mix_cre
         shared = {"shared_admission_db": str(tmp_path / "quota.sqlite"), "shared_requests": 2, "shared_concurrency": 1}
         with gateway_session(GatewayConfig("chat", base, "synthetic-B", "local-B", **shared), observer=observations_b.append) as origin_b:
             try:
-                with gateway_session(GatewayConfig("chat", base, "synthetic-A", "local-A", **shared), observer=observations_a.append) as origin_a, ThreadPoolExecutor(2) as pool:
-                    tasks = [pool.submit(connect, origin_a, Protocol.RESPONSES, "a", "local-A"),
-                             pool.submit(connect, origin_b, Protocol.RESPONSES, "b", "local-B")]
+                with (
+                    gateway_session(GatewayConfig("chat", base, "synthetic-A", "local-A", **shared), observer=observations_a.append) as origin_a,
+                    ThreadPoolExecutor(2) as pool,
+                ):
+                    tasks = [
+                        pool.submit(connect, origin_a, Protocol.RESPONSES, "a", "local-A"),
+                        pool.submit(connect, origin_b, Protocol.RESPONSES, "b", "local-B"),
+                    ]
                     clients = [task.result(timeout=4) for task in tasks]
                     for _, response, _ in clients:
                         through_marker(response)

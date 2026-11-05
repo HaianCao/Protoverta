@@ -37,8 +37,7 @@ class Scenario(parallel.Scenario):
         self.read_verified = False
 
     def git(self, *args):
-        result = run_process(["git", *args], cwd=str(self.root), env=self.git_env,
-                             text=True, encoding="utf-8", errors="replace", timeout=5)
+        result = run_process(["git", *args], cwd=str(self.root), env=self.git_env, text=True, encoding="utf-8", errors="replace", timeout=5)
         if result.returncode:
             raise RuntimeError("Owned native-worktree Git command failed")
         return result.stdout
@@ -50,10 +49,12 @@ class Scenario(parallel.Scenario):
         self.git_env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
         self.git("init", "--initial-branch=main")
         self.git("add", "fixture.txt")
-        self.git("-c", "user.name=Synthetic Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "commit", "-m", "Synthetic fixture")
+        self.git(
+            "-c", "user.name=Synthetic Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "commit", "-m", "Synthetic fixture"
+        )
 
     def paths(self):
-        return [Path(line[len("worktree "):]).resolve() for line in self.git("worktree", "list", "--porcelain").splitlines() if line.startswith("worktree ")]
+        return [Path(line[len("worktree ") :]).resolve() for line in self.git("worktree", "list", "--porcelain").splitlines() if line.startswith("worktree ")]
 
     def open(self, request, *, timeout):
         body = json.loads(request.data)
@@ -67,15 +68,27 @@ class Scenario(parallel.Scenario):
             raise ValueError("Native worktree request budget")
         tools, records = list(functions(body, self.protocol)), dict(single.tool_records(body, self.protocol))
         if role == "parent" and stage == 1:
-            return single.encode(self.protocol, body["model"], tool=single.find_tool(tools, "agent"),
-                                 arguments={"prompt": TASK + " Read fixture.txt relative to your worktree", "description": "Read own worktree", "subagent_type": "p04-worker", "run_in_background": False}, call_id="worktree_spawn")
+            return single.encode(
+                self.protocol,
+                body["model"],
+                tool=single.find_tool(tools, "agent"),
+                arguments={
+                    "prompt": TASK + " Read fixture.txt relative to your worktree",
+                    "description": "Read own worktree",
+                    "subagent_type": "p04-worker",
+                    "run_in_background": False,
+                },
+                call_id="worktree_spawn",
+            )
         if role == "child" and stage == 1:
             children = [path for path in self.paths() if path != self.root.resolve()]
             if len(children) != 1 or not children[0].is_relative_to(self.root.resolve()):
                 raise ValueError("Native Agent did not create an owned linked worktree")
             self.child_path = children[0]
             (self.child_path / "fixture.txt").write_text(VALUE, encoding="utf-8")
-            return single.encode(self.protocol, body["model"], tool=single.find_tool(tools, "read"), arguments={"file_path": "fixture.txt"}, call_id="worktree_read")
+            return single.encode(
+                self.protocol, body["model"], tool=single.find_tool(tools, "read"), arguments={"file_path": "fixture.txt"}, call_id="worktree_read"
+            )
         if role == "child":
             if VALUE not in json.dumps(records.get("worktree_read")):
                 raise ValueError("Child relative read escaped its native worktree")
@@ -97,12 +110,27 @@ def run(upstream, source):
     driver = parallel.drive(state, source, claude_isolation="worktree")
     result = state.result
     lifecycle = result is not None and verified_lifecycle(result.stdout)
-    passed = (result is not None and result.returncode == 0 and DONE in result.stdout and lifecycle and state.cleaned
-              and state.read_verified and state.stages == {"parent": 2, "child": 2} and not state.errors)
-    return {"passed": passed, "upstream": upstream.value, "cli_version": driver["cli_version"],
-            "native_worktree_cleaned": state.cleaned, "relative_read_verified": state.read_verified,
-            "lifecycle_verified": lifecycle, "fixture_errors": state.errors,
-            "stdout": result.stdout if result else "", "stderr": result.stderr if result else ""}
+    passed = (
+        result is not None
+        and result.returncode == 0
+        and DONE in result.stdout
+        and lifecycle
+        and state.cleaned
+        and state.read_verified
+        and state.stages == {"parent": 2, "child": 2}
+        and not state.errors
+    )
+    return {
+        "passed": passed,
+        "upstream": upstream.value,
+        "cli_version": driver["cli_version"],
+        "native_worktree_cleaned": state.cleaned,
+        "relative_read_verified": state.read_verified,
+        "lifecycle_verified": lifecycle,
+        "fixture_errors": state.errors,
+        "stdout": result.stdout if result else "",
+        "stderr": result.stderr if result else "",
+    }
 
 
 def main():

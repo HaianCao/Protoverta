@@ -22,7 +22,14 @@ def run_soak(*, seconds=60, requests=5000, concurrency=4, interval=0.02, measure
     from protoverta.sse import SSEParser, encode_sse
 
     max_seconds, max_requests = (14400, 100000) if sustained else (600, 15000)
-    if not 1 <= seconds <= max_seconds or type(requests) is not int or not 1 <= requests <= max_requests or type(concurrency) is not int or not 1 <= concurrency <= 16 or not 0.01 <= interval <= 1:
+    if (
+        not 1 <= seconds <= max_seconds
+        or type(requests) is not int
+        or not 1 <= requests <= max_requests
+        or type(concurrency) is not int
+        or not 1 <= concurrency <= 16
+        or not 0.01 <= interval <= 1
+    ):
         raise ValueError(f"soak limits: 1-{max_seconds} seconds, 1-{max_requests} requests, 1-16 workers, 0.01-1 second interval")
     from resource_monitor import ResourceMonitor
 
@@ -32,8 +39,11 @@ def run_soak(*, seconds=60, requests=5000, concurrency=4, interval=0.02, measure
         import psutil
 
         process = psutil.Process()
-        cold_resources = {"rss_bytes": process.memory_info().rss, "threads": process.num_threads(),
-                          "handles_or_fds": process.num_handles() if hasattr(process, "num_handles") else process.num_fds()}
+        cold_resources = {
+            "rss_bytes": process.memory_info().rss,
+            "threads": process.num_threads(),
+            "handles_or_fds": process.num_handles() if hasattr(process, "num_handles") else process.num_fds(),
+        }
         # The first network/thread workload initializes process-wide native
         # caches. Report its cost separately, and compare retained resources to
         # an explicitly warmed baseline, never silently widen the thresholds.
@@ -60,8 +70,13 @@ def run_soak(*, seconds=60, requests=5000, concurrency=4, interval=0.02, measure
             if now - last_progress < 30:
                 return
             last_progress = now
-            record = {"event": "soak_progress", "elapsed_seconds": round(now - started, 3),
-                      "issued": issued, "active": active, "failures": counts["failed_clients"]}
+            record = {
+                "event": "soak_progress",
+                "elapsed_seconds": round(now - started, 3),
+                "issued": issued,
+                "active": active,
+                "failures": counts["failed_clients"],
+            }
         progress(record)
 
     def upstream(request, timeout):
@@ -75,6 +90,7 @@ def run_soak(*, seconds=60, requests=5000, concurrency=4, interval=0.02, measure
             active += 1
             peak = max(peak, active)
         if payload.get("stream"):
+
             def chunk(delta, reason=None, usage=None):
                 value = {"object": "chat.completion.chunk", "model": payload["model"], "choices": [{"index": 0, "delta": delta, "finish_reason": reason}]}
                 if usage:
@@ -86,7 +102,13 @@ def run_soak(*, seconds=60, requests=5000, concurrency=4, interval=0.02, measure
             if index % 7:
                 raw += encode_sse("message", "[DONE]")
         else:
-            raw = json.dumps({"model": payload["model"], "choices": [{"message": {"role": "assistant", "content": text}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 1, "completion_tokens": 1}}).encode()
+            raw = json.dumps(
+                {
+                    "model": payload["model"],
+                    "choices": [{"message": {"role": "assistant", "content": text}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+                }
+            ).encode()
 
         class Response(io.BytesIO):
             def close(self):
@@ -107,8 +129,19 @@ def run_soak(*, seconds=60, requests=5000, concurrency=4, interval=0.02, measure
     with tempfile.TemporaryDirectory(prefix="protoverta-local-soak-") as folder:
         try:
             for provider in range(2):
-                config = GatewayConfig("chat", "https://example.invalid/v1", "synthetic-key-" + str(provider), "local-" + str(provider), messages_usage_policy="deferred", timeout=5, total_timeout=10, progress_timeout=5,
-                                       shared_admission_db=str(Path(folder) / "quota.sqlite"), shared_requests=requests * 2, shared_concurrency=32)
+                config = GatewayConfig(
+                    "chat",
+                    "https://example.invalid/v1",
+                    "synthetic-key-" + str(provider),
+                    "local-" + str(provider),
+                    messages_usage_policy="deferred",
+                    timeout=5,
+                    total_timeout=10,
+                    progress_timeout=5,
+                    shared_admission_db=str(Path(folder) / "quota.sqlite"),
+                    shared_requests=requests * 2,
+                    shared_concurrency=32,
+                )
                 server = GatewayHTTPServer(("127.0.0.1", 0), make_handler(config, upstream_open=upstream, observer=observe))
                 server.daemon_threads = True
                 thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -138,7 +171,10 @@ def run_soak(*, seconds=60, requests=5000, concurrency=4, interval=0.02, measure
                     try:
                         if index % 11 == 0:
                             with socket.create_connection(("127.0.0.1", servers[provider].server_port), timeout=5) as sock:
-                                sock.sendall(f"POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer local-{provider}\r\nContent-Length: {len(data)}\r\n\r\n".encode() + data)
+                                sock.sendall(
+                                    f"POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer local-{provider}\r\nContent-Length: {len(data)}\r\n\r\n".encode()
+                                    + data
+                                )
                             with lock:
                                 counts["cancelled_clients"] += 1
                         else:
@@ -176,11 +212,16 @@ def run_soak(*, seconds=60, requests=5000, concurrency=4, interval=0.02, measure
             for thread in threads:
                 thread.join(timeout=3)
             until = time.monotonic() + 3
-            while time.monotonic() < until and (active or any(
-                thread.name == "protoverta-client-lifetime" and thread.ident not in baseline
-                or thread.name == "protoverta-sse-heartbeat" and thread.ident not in heartbeat_baseline
-                for thread in threading.enumerate()
-            )):
+            while time.monotonic() < until and (
+                active
+                or any(
+                    thread.name == "protoverta-client-lifetime"
+                    and thread.ident not in baseline
+                    or thread.name == "protoverta-sse-heartbeat"
+                    and thread.ident not in heartbeat_baseline
+                    for thread in threading.enumerate()
+                )
+            ):
                 time.sleep(0.01)
     leaked = sum(thread.name == "protoverta-client-lifetime" and thread.ident not in baseline for thread in threading.enumerate())
     heartbeat_leaked = sum(thread.name == "protoverta-sse-heartbeat" and thread.ident not in heartbeat_baseline for thread in threading.enumerate())
@@ -188,13 +229,34 @@ def run_soak(*, seconds=60, requests=5000, concurrency=4, interval=0.02, measure
     if resources is not None:
         resources["cold_baseline"] = cold_resources
         resources["baseline_kind"] = "after explicit 5-second same-workload warmup"
-    return {"passed": not failures and active == 0 and opened == closed and leaked == 0 and heartbeat_leaked == 0 and issued > 0 and (not sustained or duration_reached) and (warmup is None or warmup["passed"]) and (resources is None or resources.get("available") and resources.get("policy_passed")),
-            "mode": "sustained" if sustained else "bounded", "duration_requested_seconds": seconds,
-            "duration_reached": duration_reached, "workload_seconds": round(workload_seconds, 3),
-            "seconds": round(time.monotonic() - started, 3), "issued": issued, "opened": opened, "closed": closed,
-            "active_after": active, "peak_active": peak, "lifetime_threads_after": leaked,
-            "heartbeat_threads_after": heartbeat_leaked,
-            "counts": dict(counts), "failure_types": failures, "local_fixtures_only": True, "resources": resources, "warmup": warmup}
+    return {
+        "passed": not failures
+        and active == 0
+        and opened == closed
+        and leaked == 0
+        and heartbeat_leaked == 0
+        and issued > 0
+        and (not sustained or duration_reached)
+        and (warmup is None or warmup["passed"])
+        and (resources is None or resources.get("available") and resources.get("policy_passed")),
+        "mode": "sustained" if sustained else "bounded",
+        "duration_requested_seconds": seconds,
+        "duration_reached": duration_reached,
+        "workload_seconds": round(workload_seconds, 3),
+        "seconds": round(time.monotonic() - started, 3),
+        "issued": issued,
+        "opened": opened,
+        "closed": closed,
+        "active_after": active,
+        "peak_active": peak,
+        "lifetime_threads_after": leaked,
+        "heartbeat_threads_after": heartbeat_leaked,
+        "counts": dict(counts),
+        "failure_types": failures,
+        "local_fixtures_only": True,
+        "resources": resources,
+        "warmup": warmup,
+    }
 
 
 def main():
@@ -204,7 +266,9 @@ def main():
     parser.add_argument("--concurrency", type=int, default=4)
     parser.add_argument("--interval", type=float, default=0.02)
     parser.add_argument("--installed", action="store_true")
-    parser.add_argument("--measure-resources", action="store_true", help="Requires soak-test extra; fail if process metrics are unavailable or bounded resource policy fails")
+    parser.add_argument(
+        "--measure-resources", action="store_true", help="Requires soak-test extra; fail if process metrics are unavailable or bounded resource policy fails"
+    )
     parser.add_argument("--sustained", action="store_true", help="Allow up to four hours; FAIL if request budget ends before requested duration")
     parser.add_argument("--report", type=Path, help="Write final JSON report (nonzero exit still means failure)")
     args = parser.parse_args()
@@ -216,7 +280,15 @@ def main():
     if not args.installed:
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
     progress = (lambda record: print(json.dumps(record), file=sys.stderr, flush=True)) if args.sustained else None
-    result = run_soak(seconds=args.seconds, requests=args.requests, concurrency=args.concurrency, interval=args.interval, measure_resources=args.measure_resources, sustained=args.sustained, progress=progress)
+    result = run_soak(
+        seconds=args.seconds,
+        requests=args.requests,
+        concurrency=args.concurrency,
+        interval=args.interval,
+        measure_resources=args.measure_resources,
+        sustained=args.sustained,
+        progress=progress,
+    )
     if args.report:
         args.report.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(result))

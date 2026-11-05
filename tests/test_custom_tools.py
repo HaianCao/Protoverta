@@ -12,16 +12,34 @@ from protoverta.tool_names import ToolNameMap
 
 
 def chat_request():
-    return {"model": "m", "messages": [
-        {"role": "user", "content": "run"},
-        {"role": "assistant", "content": None, "tool_calls": [
-            {"id": "c1", "type": "custom", "custom": {"name": "execute", "input": "print('xin chào')\nnot JSON"}},
-            {"id": "c2", "type": "function", "function": {"name": "lookup", "arguments": "{}"}}]},
-        {"role": "tool", "tool_call_id": "c1", "content": "ok"},
-        {"role": "tool", "tool_call_id": "c2", "content": "found"}],
-        "tools": [{"type": "custom", "custom": {"name": "execute", "description": "execute code", "format": {"type": "grammar", "grammar": {"syntax": "lark", "definition": "start: /.+/"}}}},
-                  {"type": "function", "function": {"name": "lookup", "parameters": {"type": "object", "properties": {}}}}],
-        "tool_choice": {"type": "custom", "custom": {"name": "execute"}}}
+    return {
+        "model": "m",
+        "messages": [
+            {"role": "user", "content": "run"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {"id": "c1", "type": "custom", "custom": {"name": "execute", "input": "print('xin chào')\nnot JSON"}},
+                    {"id": "c2", "type": "function", "function": {"name": "lookup", "arguments": "{}"}},
+                ],
+            },
+            {"role": "tool", "tool_call_id": "c1", "content": "ok"},
+            {"role": "tool", "tool_call_id": "c2", "content": "found"},
+        ],
+        "tools": [
+            {
+                "type": "custom",
+                "custom": {
+                    "name": "execute",
+                    "description": "execute code",
+                    "format": {"type": "grammar", "grammar": {"syntax": "lark", "definition": "start: /.+/"}},
+                },
+            },
+            {"type": "function", "function": {"name": "lookup", "parameters": {"type": "object", "properties": {}}}},
+        ],
+        "tool_choice": {"type": "custom", "custom": {"name": "execute"}},
+    }
 
 
 def test_request_round_trip_preserves_raw_input_grammar_identity_and_order():
@@ -29,7 +47,13 @@ def test_request_round_trip_preserves_raw_input_grammar_identity_and_order():
     original = copy.deepcopy(body)
     responses = convert_request(body, "chat", "responses")
     assert responses["tools"][0]["format"] == {"type": "grammar", "syntax": "lark", "definition": "start: /.+/"}
-    assert [item.get("type", "message") for item in responses["input"]] == ["message", "custom_tool_call", "function_call", "custom_tool_call_output", "function_call_output"]
+    assert [item.get("type", "message") for item in responses["input"]] == [
+        "message",
+        "custom_tool_call",
+        "function_call",
+        "custom_tool_call_output",
+        "function_call_output",
+    ]
     restored = convert_request(responses, "responses", "chat")
     assert restored["messages"] == body["messages"]
     assert restored["tools"][0] == body["tools"][0]
@@ -50,7 +74,11 @@ def test_optional_formats_are_preserved(form):
 
 
 def chat_response():
-    return {"model": "m", "choices": [{"index": 0, "message": chat_request()["messages"][1], "finish_reason": "tool_calls"}], "usage": {"prompt_tokens": 3, "completion_tokens": 4}}
+    return {
+        "model": "m",
+        "choices": [{"index": 0, "message": chat_request()["messages"][1], "finish_reason": "tool_calls"}],
+        "usage": {"prompt_tokens": 3, "completion_tokens": 4},
+    }
 
 
 def test_completed_response_round_trip_keeps_custom_and_function_calls():
@@ -76,7 +104,16 @@ def test_messages_and_unverified_custom_streaming_fail_explicitly():
         convert_request(body, "chat", "responses")
 
 
-@pytest.mark.parametrize("form", [{}, {"type": "grammar"}, {"type": "text", "grammar": {}}, {"type": "grammar", "grammar": {"syntax": [], "definition": "a"}}, {"type": "grammar", "grammar": {"syntax": "regex", "definition": "a", "extra": True}}])
+@pytest.mark.parametrize(
+    "form",
+    [
+        {},
+        {"type": "grammar"},
+        {"type": "text", "grammar": {}},
+        {"type": "grammar", "grammar": {"syntax": [], "definition": "a"}},
+        {"type": "grammar", "grammar": {"syntax": "regex", "definition": "a", "extra": True}},
+    ],
+)
 def test_invalid_grammar_is_not_dropped_or_rewritten(form):
     body = chat_request()
     body["tools"][0]["custom"]["format"] = form

@@ -64,11 +64,7 @@ def run_compaction_smoke(
     def open_upstream(request, *, timeout):
         body = json.loads(request.data)
         endpoint = urlsplit(request.full_url).path
-        protocol = (
-            Protocol.CHAT
-            if endpoint.endswith("/chat/completions")
-            else Protocol(endpoint.rsplit("/", 1)[-1])
-        )
+        protocol = Protocol.CHAT if endpoint.endswith("/chat/completions") else Protocol(endpoint.rsplit("/", 1)[-1])
         serialized = json.dumps(body)
         flags = classify_compaction_request(client, serialized)
         summary_replayed = summary_nonce in serialized
@@ -103,11 +99,7 @@ def run_compaction_smoke(
                     Delta("finish", reason="stop", input_tokens=500, output_tokens=20),
                 ]
             else:
-                answer = (
-                    final_marker
-                    if flags["has_compacted_summary"] and summary_replayed
-                    else "COMPACT_SUMMARY_MISSING"
-                )
+                answer = final_marker if flags["has_compacted_summary"] and summary_replayed else "COMPACT_SUMMARY_MISSING"
                 deltas = [
                     Delta("start", model=body["model"], input_tokens=200, output_tokens=0),
                     Delta("text", text=answer),
@@ -143,40 +135,22 @@ def run_compaction_smoke(
                     Delta("start", model=body["model"], input_tokens=500, output_tokens=1),
                     Delta(
                         "text",
-                        text=(
-                            "<analysis>Read two fixture files.</analysis>\n"
-                            f"<summary>Primary Request: Read fixtures ({summary_nonce}) and finish.</summary>"
-                        ),
+                        text=(f"<analysis>Read two fixture files.</analysis>\n<summary>Primary Request: Read fixtures ({summary_nonce}) and finish.</summary>"),
                     ),
                     Delta("finish", reason="stop", input_tokens=500, output_tokens=30),
                 ]
             else:
-                answer = (
-                    final_marker
-                    if flags["has_compacted_summary"] and summary_replayed
-                    else "COMPACT_SUMMARY_MISSING"
-                )
+                answer = final_marker if flags["has_compacted_summary"] and summary_replayed else "COMPACT_SUMMARY_MISSING"
                 deltas = [
                     Delta("start", model=body["model"], input_tokens=200, output_tokens=1),
                     Delta("text", text=answer),
                     Delta("finish", reason="stop", input_tokens=200, output_tokens=10),
                 ]
-        return io.BytesIO(
-            b"".join(
-                encode_sse(event.event, event.data)
-                for delta in deltas
-                for event in encoder.feed(delta)
-            )
-        )
+        return io.BytesIO(b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta)))
 
     with tempfile.TemporaryDirectory(prefix="protoverta-compact-") as directory:
         root = Path(directory)
-        env = {
-            name: value
-            for name, value in os.environ.items()
-            if name.upper()
-            in {"PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP"}
-        }
+        env = {name: value for name, value in os.environ.items() if name.upper() in {"PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP"}}
         env.update(
             {
                 "HOME": directory,
@@ -220,9 +194,7 @@ def run_compaction_smoke(
                 "smoke-local-token",
                 client_profile="codex" if client == "codex" else "claude",
                 default_max_output_tokens=4096,
-                messages_usage_policy="deferred"
-                if client == "claude" and upstream != Protocol.MESSAGES
-                else "strict",
+                messages_usage_policy="deferred" if client == "claude" and upstream != Protocol.MESSAGES else "strict",
             )
             with gateway_session(config) as origin:
                 result = run_client(

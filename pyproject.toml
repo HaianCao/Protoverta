@@ -28,6 +28,10 @@ coverage-test = ["coverage==7.17.0"]
 [tool.hatch.build.targets.wheel]
 packages = ["src/protoverta"]
 
+[tool.ruff]
+# Formatter width; long literals that cannot wrap are left as written.
+line-length = 160
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]

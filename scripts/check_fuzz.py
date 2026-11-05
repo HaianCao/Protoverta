@@ -26,7 +26,22 @@ def main():
     env["PYTHONPATH"] = os.pathsep.join(paths)
     with tempfile.TemporaryDirectory(prefix="protoverta-fuzz-") as folder:
         report = Path(folder) / "report.xml"
-        command = [sys.executable, "-m", "pytest", "-o", "pythonpath=", "-o", "addopts=", "-p", "no:cacheprovider", "-q", "--tb=short", str(root / "fuzz_tests"), "--junitxml", str(report)]
+        command = [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-o",
+            "pythonpath=",
+            "-o",
+            "addopts=",
+            "-p",
+            "no:cacheprovider",
+            "-q",
+            "--tb=short",
+            str(root / "fuzz_tests"),
+            "--junitxml",
+            str(report),
+        ]
         result = subprocess.run(command, env=env, cwd=folder, check=False)
         if result.returncode:
             return result.returncode

@@ -23,9 +23,9 @@ class FakeThread:
 
 
 def monitor(monkeypatch, clock, rss):
-    process = SimpleNamespace(memory_info=lambda: SimpleNamespace(rss=rss(clock[0])),
-                              num_threads=lambda: 3, num_handles=lambda: 10,
-                              net_connections=lambda **kwargs: [])
+    process = SimpleNamespace(
+        memory_info=lambda: SimpleNamespace(rss=rss(clock[0])), num_threads=lambda: 3, num_handles=lambda: 10, net_connections=lambda **kwargs: []
+    )
     monkeypatch.setitem(sys.modules, "psutil", SimpleNamespace(Process=lambda: process))
     monkeypatch.setattr(resource_monitor.threading, "Thread", FakeThread)
     monkeypatch.setattr(resource_monitor.time, "monotonic", lambda: clock[0])
@@ -118,8 +118,7 @@ def test_sustained_loopback_run_reaches_duration_and_reports_progress():
     assert set(progress[0]) == {"event", "elapsed_seconds", "issued", "active", "failures"}
 
 
-@pytest.mark.parametrize("kwargs", [{"seconds": 601}, {"seconds": 14401, "sustained": True},
-                                   {"requests": 100001, "sustained": True}, {"requests": 15001}])
+@pytest.mark.parametrize("kwargs", [{"seconds": 601}, {"seconds": 14401, "sustained": True}, {"requests": 100001, "sustained": True}, {"requests": 15001}])
 def test_extended_limits_are_opt_in_and_still_bounded(kwargs):
     with pytest.raises(ValueError, match="soak limits"):
         run_soak(**kwargs)

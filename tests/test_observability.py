@@ -35,9 +35,12 @@ def observed_server(upstream, observer, **options):
 def post(origin, body=None, *, path="/v1/chat/completions", auth="Bearer local-token", headers=None):
     # Auth rejection precedes body parsing. An unnecessary body can race HTTP/1.0
     # early close on Windows; this fixture tests the 401 envelope, not body drain.
-    data = b"" if auth != "Bearer local-token" else json.dumps(body or {"model": "private-model", "messages": [{"role": "user", "content": "private-prompt"}]}).encode()
-    return urlopen(Request(origin + path, data=data,
-                           headers={"Authorization": auth, **(headers or {})}), timeout=5)
+    data = (
+        b""
+        if auth != "Bearer local-token"
+        else json.dumps(body or {"model": "private-model", "messages": [{"role": "user", "content": "private-prompt"}]}).encode()
+    )
+    return urlopen(Request(origin + path, data=data, headers={"Authorization": auth, **(headers or {})}), timeout=5)
 
 
 def chat_response():
@@ -54,7 +57,26 @@ def test_trace_is_frozen_bounded_and_has_no_payload_fields():
     record = trace.snapshot()
     assert 122 <= record.duration_ms <= 123
     assert re.fullmatch("[0-9a-f]{32}", record.request_id)
-    assert set(asdict(record)) == {"request_id", "protocol", "upstream_protocol", "status", "outcome", "duration_ms", "streaming", "first_payload_ms", "input_tokens", "output_tokens", "cached_input_tokens", "cache_creation_input_tokens", "requested_model_digest", "effective_model_digest", "phase", "feature", "agent_digest", "chain_digest"}
+    assert set(asdict(record)) == {
+        "request_id",
+        "protocol",
+        "upstream_protocol",
+        "status",
+        "outcome",
+        "duration_ms",
+        "streaming",
+        "first_payload_ms",
+        "input_tokens",
+        "output_tokens",
+        "cached_input_tokens",
+        "cache_creation_input_tokens",
+        "requested_model_digest",
+        "effective_model_digest",
+        "phase",
+        "feature",
+        "agent_digest",
+        "chain_digest",
+    }
     assert record.first_payload_ms is record.input_tokens is record.output_tokens is None
     with pytest.raises(FrozenInstanceError):
         record.outcome = "timeout"
@@ -109,16 +131,29 @@ def test_native_success_has_local_id_and_does_not_log_sensitive_fields():
     assert len(records) == 1 and records[0].outcome == "success"
     assert records[0].status == 200 and records[0].request_id == local_id
     serialized = json.dumps(asdict(records[0]))
-    for sentinel in ("private-prompt", "private-answer", "private-model", "private-prefix", "private-query", "secret-key", "local-token", "client-private-id", "upstream-private-id"):
+    for sentinel in (
+        "private-prompt",
+        "private-answer",
+        "private-model",
+        "private-prefix",
+        "private-query",
+        "secret-key",
+        "local-token",
+        "client-private-id",
+        "upstream-private-id",
+    ):
         assert sentinel not in serialized
     assert all("protoverta-request-id" not in key.lower() for key in outbound[0])
 
 
-@pytest.mark.parametrize(("path", "auth", "status", "outcome"), [
-    ("/secret-path", "Bearer local-token", 404, "not_found"),
-    ("/v1/chat/completions", "Bearer wrong-secret", 401, "authentication"),
-    ("/v1/responses", "Bearer local-token", 422, "invalid_request"),
-])
+@pytest.mark.parametrize(
+    ("path", "auth", "status", "outcome"),
+    [
+        ("/secret-path", "Bearer local-token", 404, "not_found"),
+        ("/v1/chat/completions", "Bearer wrong-secret", 401, "authentication"),
+        ("/v1/responses", "Bearer local-token", 422, "invalid_request"),
+    ],
+)
 def test_local_rejections_emit_one_record_without_upstream_io(path, auth, status, outcome):
     records = []
 
@@ -136,12 +171,15 @@ def test_local_rejections_emit_one_record_without_upstream_io(path, auth, status
     assert records[0].protocol == ("unknown" if status == 404 else "responses" if status == 422 else "chat")
 
 
-@pytest.mark.parametrize(("error", "status", "outcome"), [
-    (URLError("private-transport-text"), 502, "upstream_transport"),
-    (TimeoutError("private-timeout-text"), 504, "timeout"),
-    (AdmissionDenied(1), 429, "shared_admission"),
-    (AdmissionStorageError("private-path"), 503, "admission_unavailable"),
-])
+@pytest.mark.parametrize(
+    ("error", "status", "outcome"),
+    [
+        (URLError("private-transport-text"), 502, "upstream_transport"),
+        (TimeoutError("private-timeout-text"), 504, "timeout"),
+        (AdmissionDenied(1), 429, "shared_admission"),
+        (AdmissionStorageError("private-path"), 503, "admission_unavailable"),
+    ],
+)
 def test_runtime_errors_are_fixed_categories(error, status, outcome):
     records = []
 
@@ -182,7 +220,9 @@ class Segments(io.BytesIO):
 
 
 def chat_chunk(delta, finish=None):
-    return encode_sse("message", json.dumps({"object": "chat.completion.chunk", "model": "m", "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]}))
+    return encode_sse(
+        "message", json.dumps({"object": "chat.completion.chunk", "model": "m", "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]})
+    )
 
 
 @pytest.mark.parametrize("visible", [False, True])
@@ -211,7 +251,10 @@ def test_stream_terminal_validation_controls_outcome(complete):
     chunks = [chat_chunk({"role": "assistant", "content": "hello"})]
     if complete:
         chunks += [chat_chunk({}, "stop"), encode_sse("message", "[DONE]")]
-    with observed_server(lambda request, timeout: Segments(chunks), records.append) as origin, post(origin, {"model": "m", "messages": [], "stream": True}) as response:
+    with (
+        observed_server(lambda request, timeout: Segments(chunks), records.append) as origin,
+        post(origin, {"model": "m", "messages": [], "stream": True}) as response,
+    ):
         wire = response.read()
     assert records[0].status == 200 and records[0].streaming
     assert records[0].outcome == ("success" if complete else "invalid_stream")
@@ -221,6 +264,7 @@ def test_stream_terminal_validation_controls_outcome(complete):
 def test_parallel_requests_have_unique_ids_and_observer_failure_does_not_break_response():
     records = []
     with observed_server(lambda request, timeout: chat_response(), records.append) as origin:
+
         def run(_):
             with post(origin) as response:
                 response.read()
@@ -261,6 +305,7 @@ def test_capacity_rejection_and_followup_success_are_separate_records():
         return chat_response()
 
     with observed_server(upstream, records.append, max_concurrent_requests=1) as origin, ThreadPoolExecutor(1) as pool:
+
         def first():
             with post(origin) as response:
                 return response.read()
@@ -358,7 +403,21 @@ def test_standalone_cli_diagnostics_is_explicit_stderr_only(monkeypatch, capsys,
     monkeypatch.setattr(cli, "serve", fake_serve)
     monkeypatch.setenv("TEST_PROTO_KEY", "synthetic-key")
     monkeypatch.setenv("TEST_LOCAL_TOKEN", "synthetic-token")
-    monkeypatch.setattr("sys.argv", ["protoverta", "--upstream-protocol", "chat", "--upstream-base-url", "https://example.test/v1", "--upstream-key-env", "TEST_PROTO_KEY", "--inbound-token-env", "TEST_LOCAL_TOKEN", *(["--diagnostics"] if enabled else [])])
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "protoverta",
+            "--upstream-protocol",
+            "chat",
+            "--upstream-base-url",
+            "https://example.test/v1",
+            "--upstream-key-env",
+            "TEST_PROTO_KEY",
+            "--inbound-token-env",
+            "TEST_LOCAL_TOKEN",
+            *(["--diagnostics"] if enabled else []),
+        ],
+    )
     assert cli.main() == 0
     output = capsys.readouterr()
     assert output.out == "READY http://127.0.0.1:12345\n"

@@ -46,9 +46,12 @@ def selection_status(registry, base_url, protocol, model, *, source_protocol, cl
     policies["tool_names"] = "reject" if client_profile == "strict" else "alias"
     policies.update({key: value for key, value in (overrides or {}).items() if key in POLICY_VALUES})
     features = {"text", "streaming"}
-    reports = [registry.assess(base_url, protocol, model, features),
-               registry.assess_route(base_url, protocol, model, features, source_protocol=source_protocol,
-                                     streaming=True, client_profile=client_profile, policies=policies)]
+    reports = [
+        registry.assess(base_url, protocol, model, features),
+        registry.assess_route(
+            base_url, protocol, model, features, source_protocol=source_protocol, streaming=True, client_profile=client_profile, policies=policies
+        ),
+    ]
     if any(report.unsupported for report in reports):
         return {"status": "unsupported", "message": "Text streaming is unsupported on this route according to configured evidence." + count_note, **meta}
     if freshness_required or any(report.unknown for report in reports):

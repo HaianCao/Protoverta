@@ -50,13 +50,16 @@ def test_penalties_cannot_be_silently_dropped_or_sent_as_unverified_response_ext
         convert_request(body(source, **{key: value}), source, target)
 
 
-@pytest.mark.parametrize("source,target,controls", [
-    ("chat", "responses", {"logprobs": False}),
-    ("chat", "responses", {"top_logprobs": 0}),
-    ("chat", "messages", {"logprobs": False, "top_logprobs": 0}),
-    ("responses", "chat", {"top_logprobs": 0}),
-    ("responses", "messages", {"top_logprobs": 0}),
-])
+@pytest.mark.parametrize(
+    "source,target,controls",
+    [
+        ("chat", "responses", {"logprobs": False}),
+        ("chat", "responses", {"top_logprobs": 0}),
+        ("chat", "messages", {"logprobs": False, "top_logprobs": 0}),
+        ("responses", "chat", {"top_logprobs": 0}),
+        ("responses", "messages", {"top_logprobs": 0}),
+    ],
+)
 def test_explicitly_disabled_logprobs_is_portable_without_enabling_probabilities(source, target, controls):
     output = convert_request(body(source, **controls), source, target)
     if target == "responses":
@@ -68,7 +71,9 @@ def test_explicitly_disabled_logprobs_is_portable_without_enabling_probabilities
 
 
 @pytest.mark.parametrize("source,target", [("chat", "responses"), ("chat", "messages"), ("responses", "chat"), ("responses", "messages")])
-@pytest.mark.parametrize("controls", [{"top_logprobs": 1}, {"top_logprobs": 20}, {"top_logprobs": 21}, {"top_logprobs": -1}, {"top_logprobs": True}, {"top_logprobs": 0.5}])
+@pytest.mark.parametrize(
+    "controls", [{"top_logprobs": 1}, {"top_logprobs": 20}, {"top_logprobs": 21}, {"top_logprobs": -1}, {"top_logprobs": True}, {"top_logprobs": 0.5}]
+)
 def test_enabled_or_malformed_logprobs_stays_rejected(source, target, controls):
     with pytest.raises(ConversionError):
         convert_request(body(source, **controls), source, target)

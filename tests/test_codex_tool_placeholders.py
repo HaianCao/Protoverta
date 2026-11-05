@@ -7,11 +7,14 @@ from protoverta.profiles import prepare_codex_request
 
 
 def request(text):
-    return {"model": "m", "input": [
-        {"type": "function_call", "call_id": "call_1", "name": "get_goal", "arguments": "{}"},
-        {"role": "assistant", "content": [{"type": "output_text", "text": text}]},
-        {"type": "function_call_output", "call_id": "call_1", "output": "No active goal"},
-    ]}
+    return {
+        "model": "m",
+        "input": [
+            {"type": "function_call", "call_id": "call_1", "name": "get_goal", "arguments": "{}"},
+            {"role": "assistant", "content": [{"type": "output_text", "text": text}]},
+            {"type": "function_call_output", "call_id": "call_1", "output": "No active goal"},
+        ],
+    }
 
 
 @pytest.mark.parametrize("text", ["", "\n", " \t\r\n"])

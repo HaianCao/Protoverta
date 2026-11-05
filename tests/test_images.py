@@ -35,7 +35,12 @@ def content(protocol, value=URL, detail=None):
 
 def request(protocol, value=URL, detail=None, role="user"):
     message = {"role": role, "content": content(protocol, value, detail)}
-    return {"model": "vision-fixture", "max_output_tokens" if protocol == "responses" else "max_tokens": 32, "stream": True, "input" if protocol == "responses" else "messages": [message]}
+    return {
+        "model": "vision-fixture",
+        "max_output_tokens" if protocol == "responses" else "max_tokens": 32,
+        "stream": True,
+        "input" if protocol == "responses" else "messages": [message],
+    }
 
 
 @pytest.mark.parametrize("source,target", PAIRS)
@@ -74,7 +79,20 @@ def test_images_are_not_accepted_as_assistant_or_system_content(source, target, 
 
 
 @pytest.mark.parametrize("source", PROTOCOLS)
-@pytest.mark.parametrize("value", ["file:///tmp/a.png", "javascript:alert(1)", "https://user:password@images.test/a.png", "https://images.test/a.png#fragment", "data:image/svg+xml;base64,PHN2Zy8+", "data:image/png;base64,@@@", "data:image/png;base64,", "data:image/png,raw", "https://bad.test:bad/a"])
+@pytest.mark.parametrize(
+    "value",
+    [
+        "file:///tmp/a.png",
+        "javascript:alert(1)",
+        "https://user:password@images.test/a.png",
+        "https://images.test/a.png#fragment",
+        "data:image/svg+xml;base64,PHN2Zy8+",
+        "data:image/png;base64,@@@",
+        "data:image/png;base64,",
+        "data:image/png,raw",
+        "https://bad.test:bad/a",
+    ],
+)
 def test_invalid_or_unportable_image_sources_are_rejected(source, value):
     with pytest.raises(ConversionError):
         convert_request(request(source, value), source, "chat" if source != "chat" else "responses")
@@ -94,9 +112,22 @@ def test_provider_file_ids_and_unknown_fields_are_not_dropped():
 @pytest.mark.parametrize("source", ["messages", "responses"])
 def test_image_tool_results_are_rejected_not_joined_as_empty_text(source):
     if source == "responses":
-        body = {"model": "m", "input": [{"type": "function_call", "call_id": "c", "name": "screenshot", "arguments": "{}"}, {"type": "function_call_output", "call_id": "c", "output": [image(source)]}]}
+        body = {
+            "model": "m",
+            "input": [
+                {"type": "function_call", "call_id": "c", "name": "screenshot", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "c", "output": [image(source)]},
+            ],
+        }
     else:
-        body = {"model": "m", "max_tokens": 32, "messages": [{"role": "assistant", "content": [{"type": "tool_use", "id": "c", "name": "screenshot", "input": {}}]}, {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "c", "content": [image(source)]}]}]}
+        body = {
+            "model": "m",
+            "max_tokens": 32,
+            "messages": [
+                {"role": "assistant", "content": [{"type": "tool_use", "id": "c", "name": "screenshot", "input": {}}]},
+                {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "c", "content": [image(source)]}]},
+            ],
+        }
     with pytest.raises(ConversionError, match="cannot preserve image-bearing tool results"):
         convert_request(body, source, "chat")
 

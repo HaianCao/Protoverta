@@ -39,8 +39,22 @@ def slow_upstream(source, *, tool=False, terminal_before_pause=False, invalid_ta
     release, paused, closed = threading.Event(), threading.Event(), threading.Event()
     first, middle, last = wire(source, tool=tool)
     if unsupported_first:
-        first = encode_sse("message", json.dumps({"object": "chat.completion.chunk", "model": "fixture", "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}]}))
-        last = encode_sse("message", json.dumps({"object": "chat.completion.chunk", "model": "fixture", "choices": [{"index": 0, "delta": {"reasoning_content": "synthetic-private"}, "finish_reason": None}]}))
+        first = encode_sse(
+            "message",
+            json.dumps(
+                {"object": "chat.completion.chunk", "model": "fixture", "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}]}
+            ),
+        )
+        last = encode_sse(
+            "message",
+            json.dumps(
+                {
+                    "object": "chat.completion.chunk",
+                    "model": "fixture",
+                    "choices": [{"index": 0, "delta": {"reasoning_content": "synthetic-private"}, "finish_reason": None}],
+                }
+            ),
+        )
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_args):
@@ -61,7 +75,7 @@ def slow_upstream(source, *, tool=False, terminal_before_pause=False, invalid_ta
                     return
                 if not release.wait(3):
                     return
-                self.wfile.write(b"event: invalid\ndata: {\"invalid\":true}\n\n" if invalid_tail else b"" if terminal_before_pause else last)
+                self.wfile.write(b'event: invalid\ndata: {"invalid":true}\n\n' if invalid_tail else b"" if terminal_before_pause else last)
                 self.wfile.flush()
             except (ConnectionError, OSError):
                 pass
@@ -93,8 +107,7 @@ def connect(origin, target):
         payload.update(messages=[{"role": "user", "content": "hi"}], max_completion_tokens=32)
     from protoverta import convert_request
 
-    definition = {"model": "fixture", "input": "hi", "max_output_tokens": 32,
-                  "tools": [{"type": "function", "name": "work", "parameters": {"type": "object"}}]}
+    definition = {"model": "fixture", "input": "hi", "max_output_tokens": 32, "tools": [{"type": "function", "name": "work", "parameters": {"type": "object"}}]}
     payload["tools"] = convert_request(definition, "responses", target)["tools"]
     path = {"chat": "chat/completions", "messages": "messages", "responses": "responses"}[target]
     connection.request("POST", "/v1/" + path, json.dumps(payload), {"Authorization": "Bearer local", "Content-Type": "application/json"})
@@ -170,9 +183,15 @@ def test_native_forwarding_adds_no_keepalive(monkeypatch, terminal):
 def test_heartbeats_do_not_renew_deadlines_or_produce_completion(monkeypatch, deadline):
     monkeypatch.setattr(gateway, "STREAM_HEARTBEAT_INTERVAL", 0.03, raising=False)
     with slow_upstream("chat") as (base, release, _, _, _):
-        config = GatewayConfig("chat", base, "synthetic", "local", timeout=1,
-                               total_timeout=0.35 if deadline == "total" else 2,
-                               progress_timeout=0.35 if deadline == "progress" else 2)
+        config = GatewayConfig(
+            "chat",
+            base,
+            "synthetic",
+            "local",
+            timeout=1,
+            total_timeout=0.35 if deadline == "total" else 2,
+            progress_timeout=0.35 if deadline == "progress" else 2,
+        )
         with gateway_session(config) as origin:
             connection, response = connect(origin, "responses")
             try:

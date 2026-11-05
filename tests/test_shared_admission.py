@@ -91,6 +91,7 @@ def test_distinct_gateways_cannot_bypass_shared_concurrency(tmp_path):
 
     config = GatewayConfig("chat", "https://example.test/v1", "key", "local", shared_admission_db=str(tmp_path / "budget.sqlite"), shared_concurrency=1)
     with listener(config, upstream) as first, listener(config, upstream) as second, ThreadPoolExecutor(1) as pool:
+
         def run():
             with post(first, {"model": "m", "input": "hi"}) as response:
                 return response.status

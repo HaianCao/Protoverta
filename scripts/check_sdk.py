@@ -20,7 +20,11 @@ EXPECTED_TESTCASES = 29
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--installed", action="store_true", help="Test installed core, disabling pytest's source path")
-    parser.add_argument("--allow-candidate-sdk", action="store_true", help="Evaluate candidate SDK versions in a separate evaluation job without replacing the pinned baseline gate")
+    parser.add_argument(
+        "--allow-candidate-sdk",
+        action="store_true",
+        help="Evaluate candidate SDK versions in a separate evaluation job without replacing the pinned baseline gate",
+    )
     parser.add_argument("--report-dir", type=Path, help="New directory for persistent JUnit and SDK version/verdict evidence")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
@@ -35,11 +39,19 @@ def main():
     env = sanitized_environment()
     if not args.installed:
         env["PYTHONPATH"] = str(root / "src")
-    evidence = {"python": platform.python_version(), "platform": sys.platform,
-                "baseline_sdk": baseline, "actual_sdk": versions,
-                "candidate_mode": args.allow_candidate_sdk,
-                "sdk_version_drift": versions != baseline, "installed": args.installed,
-                "outcome": "FAILED", "testcases": 0, "expected_testcases": EXPECTED_TESTCASES, "provider_requests": 0}
+    evidence = {
+        "python": platform.python_version(),
+        "platform": sys.platform,
+        "baseline_sdk": baseline,
+        "actual_sdk": versions,
+        "candidate_mode": args.allow_candidate_sdk,
+        "sdk_version_drift": versions != baseline,
+        "installed": args.installed,
+        "outcome": "FAILED",
+        "testcases": 0,
+        "expected_testcases": EXPECTED_TESTCASES,
+        "provider_requests": 0,
+    }
     if args.report_dir:
         args.report_dir = args.report_dir.resolve()
         args.report_dir.mkdir(parents=True, exist_ok=False)
@@ -60,11 +72,33 @@ def main():
 
 def run_tests(root, installed, env, report, evidence):
     if installed:
-        verify = [sys.executable, "-B", "-c", "import pathlib,sys,protoverta; p=pathlib.Path(protoverta.__file__).resolve(); assert p.is_relative_to(pathlib.Path(sys.prefix).resolve()) and 'site-packages' in p.parts, 'Installed SDK gate requires a wheel in this environment, not checkout/editable code'; print('SDK core import:',p)"]
+        verify = [
+            sys.executable,
+            "-B",
+            "-c",
+            "import pathlib,sys,protoverta; p=pathlib.Path(protoverta.__file__).resolve(); assert p.is_relative_to(pathlib.Path(sys.prefix).resolve()) and 'site-packages' in p.parts, 'Installed SDK gate requires a wheel in this environment, not checkout/editable code'; print('SDK core import:',p)",
+        ]
         imported = subprocess.run(verify, cwd=report.parent, env=env, check=False)
         if imported.returncode:
             return imported.returncode
-    command = [sys.executable, "-B", "-m", "pytest", "-p", "no:cacheprovider", "-o", "addopts=", "-o", "pythonpath=", "--tb=short", "--show-capture=no", "-q", str(root / "sdk_tests"), "--junitxml", str(report)]
+    command = [
+        sys.executable,
+        "-B",
+        "-m",
+        "pytest",
+        "-p",
+        "no:cacheprovider",
+        "-o",
+        "addopts=",
+        "-o",
+        "pythonpath=",
+        "--tb=short",
+        "--show-capture=no",
+        "-q",
+        str(root / "sdk_tests"),
+        "--junitxml",
+        str(report),
+    ]
     result = subprocess.run(command, cwd=root, env=env, check=False)
     if result.returncode:
         return result.returncode
@@ -74,7 +108,11 @@ def run_tests(root, installed, env, report, evidence):
         print(f"SDK conformance requires all {EXPECTED_TESTCASES} mandatory cases, without skips or failures.", file=sys.stderr)
         return 1
     evidence["outcome"] = "PASSED"
-    print("Independent SDK gate PASS (installed=" + str(installed) + "): inference routes/truncation/usage policies and strict model-list parsing/pagination verified. See docs/development/conformance.md.")
+    print(
+        "Independent SDK gate PASS (installed="
+        + str(installed)
+        + "): inference routes/truncation/usage policies and strict model-list parsing/pagination verified. See docs/development/conformance.md."
+    )
     if evidence["candidate_mode"] and not evidence["sdk_version_drift"]:
         print("Candidate mode used the baseline SDK versions; this is not evidence for newer SDKs.")
     return 0

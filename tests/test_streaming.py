@@ -69,25 +69,57 @@ def test_chat_interleaved_tools_and_usage():
     decoder = StreamDecoder("chat")
     events = [
         chat(choices=[{"index": 0, "delta": {"role": "assistant", "content": "working "}, "finish_reason": None}]),
-        chat(choices=[{"index": 0, "delta": {"tool_calls": [
-            {"index": 0, "id": "call_a", "type": "function", "function": {"name": "one", "arguments": '{"a":'}},
-            {"index": 1, "id": "call_b", "type": "function", "function": {"name": "two", "arguments": '{"b":'}},
-        ]}, "finish_reason": None}]),
-        chat(choices=[{"index": 0, "delta": {"tool_calls": [
-            {"index": 1, "function": {"arguments": "2}"}},
-            {"index": 0, "function": {"arguments": "1}"}},
-        ]}, "finish_reason": None}]),
+        chat(
+            choices=[
+                {
+                    "index": 0,
+                    "delta": {
+                        "tool_calls": [
+                            {"index": 0, "id": "call_a", "type": "function", "function": {"name": "one", "arguments": '{"a":'}},
+                            {"index": 1, "id": "call_b", "type": "function", "function": {"name": "two", "arguments": '{"b":'}},
+                        ]
+                    },
+                    "finish_reason": None,
+                }
+            ]
+        ),
+        chat(
+            choices=[
+                {
+                    "index": 0,
+                    "delta": {
+                        "tool_calls": [
+                            {"index": 1, "function": {"arguments": "2}"}},
+                            {"index": 0, "function": {"arguments": "1}"}},
+                        ]
+                    },
+                    "finish_reason": None,
+                }
+            ]
+        ),
         chat(choices=[{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]),
         chat(choices=[], usage={"prompt_tokens": 12, "completion_tokens": 8}),
         SSEEvent("message", "[DONE]"),
     ]
     deltas = feed_all(decoder, events)
     assert [delta.kind for delta in deltas] == [
-        "start", "text", "tool_start", "tool_delta", "tool_start", "tool_delta",
-        "tool_delta", "tool_delta", "tool_end", "tool_end", "finish",
+        "start",
+        "text",
+        "tool_start",
+        "tool_delta",
+        "tool_start",
+        "tool_delta",
+        "tool_delta",
+        "tool_delta",
+        "tool_end",
+        "tool_end",
+        "finish",
     ]
     assert [(delta.index, delta.text) for delta in deltas if delta.kind == "tool_delta"] == [
-        (0, '{"a":'), (1, '{"b":'), (1, "2}"), (0, "1}"),
+        (0, '{"a":'),
+        (1, '{"b":'),
+        (1, "2}"),
+        (0, "1}"),
     ]
     assert (deltas[-1].reason, deltas[-1].input_tokens, deltas[-1].output_tokens) == ("tool_calls", 12, 8)
 
@@ -114,32 +146,59 @@ def test_messages_text_and_tool_blocks():
 
 def test_responses_text_and_tool():
     decoder = StreamDecoder("responses")
-    final_text = {"id": "msg_1", "type": "message", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "hi", "annotations": [], "logprobs": []}]}
+    final_text = {
+        "id": "msg_1",
+        "type": "message",
+        "role": "assistant",
+        "status": "completed",
+        "content": [{"type": "output_text", "text": "hi", "annotations": [], "logprobs": []}],
+    }
     final_tool = {"id": "fc_1", "type": "function_call", "status": "completed", "call_id": "call_1", "name": "lookup", "arguments": '{"x":1}'}
     events = [
         responses("response.created", 0, response={"model": "example-model"}),
         responses("response.output_item.added", 1, output_index=0, item={"id": "msg_1", "type": "message", "role": "assistant", "content": []}),
-        responses("response.content_part.added", 2, item_id="msg_1", output_index=0, content_index=0, part={"type": "output_text", "text": "", "annotations": [], "logprobs": []}),
+        responses(
+            "response.content_part.added",
+            2,
+            item_id="msg_1",
+            output_index=0,
+            content_index=0,
+            part={"type": "output_text", "text": "", "annotations": [], "logprobs": []},
+        ),
         responses("response.output_text.delta", 3, item_id="msg_1", output_index=0, content_index=0, delta="hi", logprobs=[]),
         responses("response.output_text.done", 4, item_id="msg_1", output_index=0, content_index=0, text="hi", logprobs=[]),
-        responses("response.content_part.done", 5, item_id="msg_1", output_index=0, content_index=0, part={"type": "output_text", "text": "hi", "annotations": [], "logprobs": []}),
+        responses(
+            "response.content_part.done",
+            5,
+            item_id="msg_1",
+            output_index=0,
+            content_index=0,
+            part={"type": "output_text", "text": "hi", "annotations": [], "logprobs": []},
+        ),
         responses("response.output_item.done", 6, output_index=0, item=final_text),
         responses("response.output_item.added", 7, output_index=1, item={"id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "lookup"}),
         responses("response.function_call_arguments.delta", 8, item_id="fc_1", output_index=1, delta='{"x":1}'),
         responses("response.function_call_arguments.done", 9, item_id="fc_1", output_index=1, arguments='{"x":1}'),
         responses("response.output_item.done", 10, output_index=1, item=final_tool),
-        responses("response.completed", 11, response={"model": "example-model", "status": "completed", "output": [final_text, final_tool], "usage": {"input_tokens": 4, "output_tokens": 9}}),
+        responses(
+            "response.completed",
+            11,
+            response={"model": "example-model", "status": "completed", "output": [final_text, final_tool], "usage": {"input_tokens": 4, "output_tokens": 9}},
+        ),
     ]
     deltas = feed_all(decoder, events)
     assert [delta.kind for delta in deltas] == ["start", "text", "tool_start", "tool_delta", "tool_end", "finish"]
     assert (deltas[-1].reason, deltas[-1].input_tokens, deltas[-1].output_tokens) == ("tool_calls", 4, 9)
 
 
-@pytest.mark.parametrize("protocol,partial", [
-    ("chat", [chat(choices=[{"index": 0, "delta": {"content": "hi"}, "finish_reason": None}])]),
-    ("messages", [messages("message_start", message={"model": "example-model", "usage": {"input_tokens": 1}})]),
-    ("responses", [responses("response.created", 0, response={"model": "example-model"})]),
-])
+@pytest.mark.parametrize(
+    "protocol,partial",
+    [
+        ("chat", [chat(choices=[{"index": 0, "delta": {"content": "hi"}, "finish_reason": None}])]),
+        ("messages", [messages("message_start", message={"model": "example-model", "usage": {"input_tokens": 1}})]),
+        ("responses", [responses("response.created", 0, response={"model": "example-model"})]),
+    ],
+)
 def test_interrupted_stream_rejected(protocol, partial):
     decoder = StreamDecoder(protocol)
     for item in partial:
@@ -176,7 +235,11 @@ def test_messages_stream_accepts_direct_tool_caller_only():
     assert decoder.feed(event)[0].kind == "tool_start"
     other = StreamDecoder("messages")
     other.feed(messages("message_start", message={"model": "m", "usage": {"input_tokens": 1}}))
-    event = messages("content_block_start", index=0, content_block={"type": "tool_use", "id": "c1", "name": "add", "input": {}, "caller": {"type": "server_tool", "tool_id": "hosted"}})
+    event = messages(
+        "content_block_start",
+        index=0,
+        content_block={"type": "tool_use", "id": "c1", "name": "add", "input": {}, "caller": {"type": "server_tool", "tool_id": "hosted"}},
+    )
     with pytest.raises(StreamError, match="non-direct"):
         other.feed(event)
 
@@ -239,9 +302,15 @@ def test_messages_target_rejects_interleaved_tool_calls():
 
 def test_transcoder_rejects_interrupted_upstream_after_partial_output():
     pipe = StreamTranscoder("messages", "chat")
-    wire = encode_sse("message_start", json.dumps({
-        "type": "message_start", "message": {"model": "m", "content": [], "usage": {"input_tokens": 1}},
-    }))
+    wire = encode_sse(
+        "message_start",
+        json.dumps(
+            {
+                "type": "message_start",
+                "message": {"model": "m", "content": [], "usage": {"input_tokens": 1}},
+            }
+        ),
+    )
     assert pipe.feed(wire)
     with pytest.raises(StreamError, match="before its terminal"):
         pipe.finish()
@@ -293,11 +362,14 @@ def test_responses_encoder_envelope_has_item_identity_and_only_known_metadata():
             assert body["item_id"] == tool_id
 
 
-@pytest.mark.parametrize("kind,part", [
-    ("response.content_part.added", {"type": "refusal", "refusal": "no"}),
-    ("response.content_part.added", {"type": "output_text", "text": "", "annotations": [{"type": "url_citation"}], "logprobs": []}),
-    ("response.content_part.added", {"type": "output_text", "text": "", "annotations": [], "logprobs": [{"token": "x"}]}),
-])
+@pytest.mark.parametrize(
+    "kind,part",
+    [
+        ("response.content_part.added", {"type": "refusal", "refusal": "no"}),
+        ("response.content_part.added", {"type": "output_text", "text": "", "annotations": [{"type": "url_citation"}], "logprobs": []}),
+        ("response.content_part.added", {"type": "output_text", "text": "", "annotations": [], "logprobs": [{"token": "x"}]}),
+    ],
+)
 def test_responses_rejects_unsupported_content_metadata(kind, part):
     decoder = StreamDecoder("responses")
     decoder.feed(responses("response.created", 0, response={"model": "m"}))
@@ -335,14 +407,35 @@ def test_messages_encoder_preserves_initial_output_usage():
 def test_chat_two_interleaved_tools_transcode_to_responses():
     pipe = StreamTranscoder("chat", "responses")
     upstream = [
-        chat(choices=[{"index": 0, "delta": {"role": "assistant", "tool_calls": [
-            {"index": 0, "id": "call_a", "function": {"name": "a", "arguments": '{"x":'}},
-            {"index": 1, "id": "call_b", "function": {"name": "b", "arguments": '{"y":'}},
-        ]}, "finish_reason": None}]),
-        chat(choices=[{"index": 0, "delta": {"tool_calls": [
-            {"index": 1, "function": {"arguments": "2}"}},
-            {"index": 0, "function": {"arguments": "1}"}},
-        ]}, "finish_reason": None}]),
+        chat(
+            choices=[
+                {
+                    "index": 0,
+                    "delta": {
+                        "role": "assistant",
+                        "tool_calls": [
+                            {"index": 0, "id": "call_a", "function": {"name": "a", "arguments": '{"x":'}},
+                            {"index": 1, "id": "call_b", "function": {"name": "b", "arguments": '{"y":'}},
+                        ],
+                    },
+                    "finish_reason": None,
+                }
+            ]
+        ),
+        chat(
+            choices=[
+                {
+                    "index": 0,
+                    "delta": {
+                        "tool_calls": [
+                            {"index": 1, "function": {"arguments": "2}"}},
+                            {"index": 0, "function": {"arguments": "1}"}},
+                        ]
+                    },
+                    "finish_reason": None,
+                }
+            ]
+        ),
         chat(choices=[{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]),
         chat(choices=[], usage={"prompt_tokens": 8, "completion_tokens": 4}),
         SSEEvent("message", "[DONE]"),
@@ -361,9 +454,17 @@ def test_chat_two_interleaved_tools_transcode_to_responses():
 
 def test_messages_upstream_error_never_generates_successful_terminal_event():
     pipe = StreamTranscoder("messages", "chat")
-    pipe.feed(encode_sse("message_start", json.dumps({
-        "type": "message_start", "message": {"model": "m", "content": [], "usage": {"input_tokens": 1, "output_tokens": 1}},
-    })))
+    pipe.feed(
+        encode_sse(
+            "message_start",
+            json.dumps(
+                {
+                    "type": "message_start",
+                    "message": {"model": "m", "content": [], "usage": {"input_tokens": 1, "output_tokens": 1}},
+                }
+            ),
+        )
+    )
     with pytest.raises(StreamError, match="reported an error"):
         pipe.feed(encode_sse("error", json.dumps({"type": "error", "error": {"type": "overloaded_error"}})))
 
@@ -372,10 +473,18 @@ def test_responses_final_output_cannot_silently_add_items():
     decoder = StreamDecoder("responses")
     decoder.feed(responses("response.created", 0, response={"model": "m"}))
     with pytest.raises(StreamError, match="final output differs"):
-        decoder.feed(responses("response.completed", 1, response={
-            "model": "m", "status": "completed", "output": [{"type": "reasoning", "id": "rs_1"}],
-            "usage": {"input_tokens": 1, "output_tokens": 1},
-        }))
+        decoder.feed(
+            responses(
+                "response.completed",
+                1,
+                response={
+                    "model": "m",
+                    "status": "completed",
+                    "output": [{"type": "reasoning", "id": "rs_1"}],
+                    "usage": {"input_tokens": 1, "output_tokens": 1},
+                },
+            )
+        )
 
 
 def test_terminal_event_withheld_until_verified_eof():

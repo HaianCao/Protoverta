@@ -23,8 +23,7 @@ class ModelMetadataUnavailable(ValueError):
 def _text(value, *, identifier=False):
     if not isinstance(value, str) or not 1 <= len(value) <= 512:
         return False
-    return not any(ord(c) < 32 or ord(c) == 127 or 0xD800 <= ord(c) <= 0xDFFF
-                   or identifier and c.isspace() for c in value)
+    return not any(ord(c) < 32 or ord(c) == 127 or 0xD800 <= ord(c) <= 0xDFFF or identifier and c.isspace() for c in value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,16 +57,19 @@ class SnapshotModel:
             if messages_api_version == "2026-10-21" and self.lifecycle is None:
                 raise ModelMetadataUnavailable("Messages API 2026-10-21 listing requires reported lifecycle; use normalized listing when unknown")
             # The Messages contract explicitly permits epoch for unknown release.
-            result = {"id": self.id, "type": "model", "display_name": self.display_name,
-                      "created_at": (datetime(1970, 1, 1, tzinfo=UTC) + timedelta(seconds=self.created or 0)).isoformat().replace("+00:00", "Z")}
+            result = {
+                "id": self.id,
+                "type": "model",
+                "display_name": self.display_name,
+                "created_at": (datetime(1970, 1, 1, tzinfo=UTC) + timedelta(seconds=self.created or 0)).isoformat().replace("+00:00", "Z"),
+            }
             if self.lifecycle is not None:
                 result["lifecycle"] = self.lifecycle
             if messages_api_version == "2026-10-21":
                 result.update(capabilities=None, line=None, max_input_tokens=None, max_tokens=None, deprecated_at=None, retires_at=None)
             return result
         # No invented created/owned_by/context/effort metadata.
-        return {"id": self.id, "object": "model", "display_name": self.display_name,
-                "capability_status": "unknown"}
+        return {"id": self.id, "object": "model", "display_name": self.display_name, "capability_status": "unknown"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,8 +110,7 @@ class ModelSnapshot:
         if len(query) > 2048 or re.search(r"%(?![0-9a-fA-F]{2})", query):
             raise ValueError("invalid catalog query")
         try:
-            pairs = parse_qsl(query, keep_blank_values=True, strict_parsing=True,
-                              encoding="utf-8", errors="strict", max_num_fields=3)
+            pairs = parse_qsl(query, keep_blank_values=True, strict_parsing=True, encoding="utf-8", errors="strict", max_num_fields=3)
         except (ValueError, UnicodeError):
             raise ValueError("invalid catalog query") from None
         args = dict(pairs)
@@ -136,11 +137,13 @@ class ModelSnapshot:
             else:
                 end = ids.index(cursor)
                 start = max(0, end - int(limit))
-        models = self.models[start:min(end, start + int(limit))]
-        result = {"data": [m.wire(format, messages_api_version=messages_api_version) for m in models],
-                "has_more": start > 0 if "before_id" in args else start + len(models) < end,
-                "first_id": models[0].id if models else None,
-                "last_id": models[-1].id if models else None}
+        models = self.models[start : min(end, start + int(limit))]
+        result = {
+            "data": [m.wire(format, messages_api_version=messages_api_version) for m in models],
+            "has_more": start > 0 if "before_id" in args else start + len(models) < end,
+            "first_id": models[0].id if models else None,
+            "last_id": models[-1].id if models else None,
+        }
         if format != "messages":
             result["object"] = "list"
         if len(encode_json(result)) > MAX_BYTES:

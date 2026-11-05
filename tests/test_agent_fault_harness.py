@@ -28,7 +28,9 @@ def test_fault_prefix_has_real_partial_payload_and_no_success_terminal(harness, 
         decoder.finish()
 
 
-@pytest.mark.parametrize("fault,category,operation", [("timeout", "upstream_timeout", "read"), ("truncated", "invalid_stream", "finish"), ("invalid", "invalid_stream", "feed")])
+@pytest.mark.parametrize(
+    "fault,category,operation", [("timeout", "upstream_timeout", "read"), ("truncated", "invalid_stream", "finish"), ("invalid", "invalid_stream", "feed")]
+)
 def test_trace_gate_requires_failure_at_the_injected_stage(harness, fault, category, operation):
     record = {"stream_error": category, "operation": operation}
     assert harness.verified_trace([record], fault)
@@ -64,10 +66,10 @@ def test_fault_retry_budget_cannot_dispatch_unbounded_child_requests(harness):
 @pytest.mark.parametrize("fault", ["truncated", "invalid", "timeout"])
 def test_fault_reply_never_supplies_a_successful_terminal_and_timeout_needs_eof(harness, streaming, fault):
     state = harness.Scenario("claude", Protocol.CHAT, fault)
-    request = SimpleNamespace(data=json.dumps({"stream": streaming}).encode(),
-                              fixture_connection=SimpleNamespace(settimeout=lambda _: None, recv=lambda _: b""))
-    handler = SimpleNamespace(wfile=io.BytesIO(), send_response=lambda _: None,
-                              send_header=lambda *_: None, end_headers=lambda: None)
+    request = SimpleNamespace(
+        data=json.dumps({"stream": streaming}).encode(), fixture_connection=SimpleNamespace(settimeout=lambda _: None, recv=lambda _: b"")
+    )
+    handler = SimpleNamespace(wfile=io.BytesIO(), send_response=lambda _: None, send_header=lambda *_: None, end_headers=lambda: None)
     harness.FaultReply(state, request).write_to(handler)
     assert state.fault_sent.is_set()
     assert state.timeout_disconnected.is_set() is (fault == "timeout")
@@ -97,19 +99,21 @@ def test_native_partial_handback_needs_explicit_warning_and_correlated_parent_re
         text = "Agent terminated early due to an API error: agent did NOT finish its task"
     elif fault == "false_success":
         text += " " + harness.parallel.FINALS[0]
-    state = SimpleNamespace(native_partial_handback=harness.native_partial_failure(text),
-                            parent_failure_correlated=fault != "wrong_child", expected_failure=lambda _: False)
-    result = {"is_error": False, "permission_denials": ["denied"] if fault == "denied" else [],
-              "subagent_stats": {"spawned": 2, "completed": 2, "failed": False if fault == "boolean_counter" else 0}}
+    state = SimpleNamespace(
+        native_partial_handback=harness.native_partial_failure(text), parent_failure_correlated=fault != "wrong_child", expected_failure=lambda _: False
+    )
+    result = {
+        "is_error": False,
+        "permission_denials": ["denied"] if fault == "denied" else [],
+        "subagent_stats": {"spawned": 2, "completed": 2, "failed": False if fault == "boolean_counter" else 0},
+    }
     assert harness.verified_lifecycle("claude", json.dumps(result), state) is (fault is None)
 
 
 def test_timeout_does_not_claim_upstream_disconnect_when_socket_has_extra_data(harness):
     state = harness.Scenario("claude", Protocol.CHAT, "timeout")
-    request = SimpleNamespace(data=b'{"stream":true}',
-                              fixture_connection=SimpleNamespace(settimeout=lambda _: None, recv=lambda _: b"x"))
-    handler = SimpleNamespace(wfile=io.BytesIO(), send_response=lambda _: None,
-                              send_header=lambda *_: None, end_headers=lambda: None)
+    request = SimpleNamespace(data=b'{"stream":true}', fixture_connection=SimpleNamespace(settimeout=lambda _: None, recv=lambda _: b"x"))
+    handler = SimpleNamespace(wfile=io.BytesIO(), send_response=lambda _: None, send_header=lambda *_: None, end_headers=lambda: None)
     with pytest.raises(ValueError, match="Unexpected data"):
         harness.FaultReply(state, request).write_to(handler)
     assert not state.timeout_disconnected.is_set()

@@ -204,10 +204,26 @@ def test_native_responses_compact_preserves_owner_resource_and_stream_validator(
         "encrypted_content": "opaque-stream-compaction",
     }
     events = [
-        ("response.created", {"type": "response.created", "sequence_number": 0, "response": {"id": "resp_1", "status": "in_progress", "model": "m", "output": []}}),
+        (
+            "response.created",
+            {"type": "response.created", "sequence_number": 0, "response": {"id": "resp_1", "status": "in_progress", "model": "m", "output": []}},
+        ),
         ("response.output_item.added", {"type": "response.output_item.added", "sequence_number": 1, "output_index": 0, "item": compaction_item}),
         ("response.output_item.done", {"type": "response.output_item.done", "sequence_number": 2, "output_index": 0, "item": compaction_item}),
-        ("response.completed", {"type": "response.completed", "sequence_number": 3, "response": {"id": "resp_1", "status": "completed", "model": "m", "output": [compaction_item], "usage": {"input_tokens": 10, "output_tokens": 5}}}),
+        (
+            "response.completed",
+            {
+                "type": "response.completed",
+                "sequence_number": 3,
+                "response": {
+                    "id": "resp_1",
+                    "status": "completed",
+                    "model": "m",
+                    "output": [compaction_item],
+                    "usage": {"input_tokens": 10, "output_tokens": 5},
+                },
+            },
+        ),
     ]
     wire = b"".join(encode_sse(name, json.dumps(payload)) for name, payload in events)
     forwarded = validator.feed(wire) + validator.finish()
@@ -416,10 +432,13 @@ def test_large_tool_output_reserve_count_errors_and_capability_window_smaller_th
 
     # Count HTTP endpoint returns X-Protoverta-Count-Category header
     est_cfg = replace(count_cfg, token_count_mode="estimate")
-    with listener(est_cfg, lambda *_: pytest.fail("no upstream")) as url, post(
-        url.replace("/responses", "/messages/count_tokens"),
-        {"model": "m", "messages": [{"role": "user", "content": "hi"}]},
-    ) as resp:
+    with (
+        listener(est_cfg, lambda *_: pytest.fail("no upstream")) as url,
+        post(
+            url.replace("/responses", "/messages/count_tokens"),
+            {"model": "m", "messages": [{"role": "user", "content": "hi"}]},
+        ) as resp,
+    ):
         assert resp.headers["X-Protoverta-Count-Kind"] == "utf8-json-byte-estimate"
         assert resp.headers["X-Protoverta-Count-Category"] == "estimate"
 
@@ -431,10 +450,13 @@ def test_large_tool_output_reserve_count_errors_and_capability_window_smaller_th
         exact=True,
     )
     op_cfg = replace(count_cfg, token_count_mode="operator", token_counter=exact_counter)
-    with listener(op_cfg, lambda *_: pytest.fail("no upstream")) as url, post(
-        url.replace("/responses", "/messages/count_tokens"),
-        {"model": "m", "messages": [{"role": "user", "content": "hi"}]},
-    ) as resp:
+    with (
+        listener(op_cfg, lambda *_: pytest.fail("no upstream")) as url,
+        post(
+            url.replace("/responses", "/messages/count_tokens"),
+            {"model": "m", "messages": [{"role": "user", "content": "hi"}]},
+        ) as resp,
+    ):
         assert resp.headers["X-Protoverta-Count-Kind"] == "operator-exact"
         assert resp.headers["X-Protoverta-Count-Category"] == "exact"
 

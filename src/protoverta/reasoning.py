@@ -4,7 +4,12 @@ from .errors import ConversionError
 
 
 def response_reasoning(item: dict, *, initial: bool = False) -> str:
-    if set(item) - {"type", "id", "status", "summary", "content", "encrypted_content"} or item.get("encrypted_content") is not None or item.get("type") != "reasoning" or item.get("summary") != []:
+    if (
+        set(item) - {"type", "id", "status", "summary", "content", "encrypted_content"}
+        or item.get("encrypted_content") is not None
+        or item.get("type") != "reasoning"
+        or item.get("summary") != []
+    ):
         raise ConversionError("only unsigned public reasoning text with an empty summary is portable")
     content = item.get("content")
     if initial:

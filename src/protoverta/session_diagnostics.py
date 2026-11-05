@@ -143,7 +143,12 @@ def latest_diagnostics(directory):
                 continue
             with path.open("r", encoding="utf-8") as stream:
                 header = json.loads(stream.readline(512))
-                if not isinstance(header, dict) or set(header) != {"kind", "schema_version"} or header.get("kind") != "protoverta-session" or header.get("schema_version") not in (1, 2):
+                if (
+                    not isinstance(header, dict)
+                    or set(header) != {"kind", "schema_version"}
+                    or header.get("kind") != "protoverta-session"
+                    or header.get("schema_version") not in (1, 2)
+                ):
                     continue
                 schema_version = header["schema_version"]
                 records = []
@@ -152,7 +157,13 @@ def latest_diagnostics(directory):
                     if index >= 1025 or len(line) > 4096:
                         break
                     value = json.loads(line)
-                    if isinstance(value, dict) and set(value) == {"kind", "dropped_records"} and value["kind"] == "protoverta-summary" and type(value["dropped_records"]) is int and value["dropped_records"] >= 0:
+                    if (
+                        isinstance(value, dict)
+                        and set(value) == {"kind", "dropped_records"}
+                        and value["kind"] == "protoverta-summary"
+                        and type(value["dropped_records"]) is int
+                        and value["dropped_records"] >= 0
+                    ):
                         dropped = value["dropped_records"]
                         continue
                     if not isinstance(value, dict) or set(value) - _FIELDS or not (_FIELDS - _OPTIONAL - _DIGESTS - _TRACE_META) <= set(value):
@@ -163,7 +174,9 @@ def latest_diagnostics(directory):
                         value.setdefault(key, None)
                     for key in _TRACE_META:
                         value.setdefault(key, None)
-                    if any(value[key] is not None and (not isinstance(value[key], str) or re.fullmatch(r"[a-f0-9]{64}", value[key]) is None) for key in _DIGESTS):
+                    if any(
+                        value[key] is not None and (not isinstance(value[key], str) or re.fullmatch(r"[a-f0-9]{64}", value[key]) is None) for key in _DIGESTS
+                    ):
                         continue
                     if value["phase"] is not None and value["phase"] not in _PHASES:
                         continue
@@ -171,20 +184,35 @@ def latest_diagnostics(directory):
                         continue
                     if not isinstance(value["request_id"], str) or not re.fullmatch(r"[a-f0-9]{32}", value["request_id"]):
                         continue
-                    if value["protocol"] not in ("chat", "messages", "responses", "models", "unknown") or value["upstream_protocol"] not in ("chat", "messages", "responses", "unknown"):
+                    if value["protocol"] not in ("chat", "messages", "responses", "models", "unknown") or value["upstream_protocol"] not in (
+                        "chat",
+                        "messages",
+                        "responses",
+                        "unknown",
+                    ):
                         continue
                     from typing import get_args
 
                     from .observability import Outcome
 
-                    if value["outcome"] not in get_args(Outcome) or type(value["duration_ms"]) is not int or not 0 <= value["duration_ms"] <= 86400000 or type(value["streaming"]) is not bool:
+                    if (
+                        value["outcome"] not in get_args(Outcome)
+                        or type(value["duration_ms"]) is not int
+                        or not 0 <= value["duration_ms"] <= 86400000
+                        or type(value["streaming"]) is not bool
+                    ):
                         continue
                     if value["status"] is not None and (type(value["status"]) is not int or not 100 <= value["status"] <= 599):
                         continue
                     if any(value[key] is not None and (type(value[key]) is not int or value[key] < 0) for key in _OPTIONAL):
                         continue
                     records.append(value)
-            return {"records": records[-100:], "limited": scan_limited or len(records) >= 100 or dropped > 0, "dropped_records": dropped, "schema_version": schema_version}
+            return {
+                "records": records[-100:],
+                "limited": scan_limited or len(records) >= 100 or dropped > 0,
+                "dropped_records": dropped,
+                "schema_version": schema_version,
+            }
         except (OSError, ValueError, TypeError):
             continue
     return {"records": [], "limited": scan_limited}

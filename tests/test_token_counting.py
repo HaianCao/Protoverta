@@ -117,9 +117,11 @@ def test_count_provider_schema_error_is_not_client_validation_error():
 
 def test_native_counter_timeout_is_504_and_does_not_fallback():
     calls = []
+
     def failed(request, timeout):
         calls.append(request.full_url)
         raise TimeoutError()
+
     with listener(config(), failed) as url:
         with pytest.raises(HTTPError) as error:
             post(url.replace("/responses", "/messages/count_tokens"), {"model": "m", "messages": []})
@@ -131,9 +133,11 @@ def test_native_counter_timeout_is_504_and_does_not_fallback():
 def test_native_count_rate_error_cools_down_other_requests(tmp_path):
     item = replace(config(), shared_admission_db=str(tmp_path / "cooldown.sqlite"))
     calls = []
+
     def failed(request, timeout):
         calls.append(1)
         raise HTTPError(request.full_url, 429, "fixture", {"Retry-After": "7"}, io.BytesIO(b"{}"))
+
     with listener(item, failed) as url:
         for _ in range(2):
             with pytest.raises(HTTPError) as error:

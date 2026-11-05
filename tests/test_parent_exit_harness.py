@@ -16,8 +16,14 @@ def harness(monkeypatch):
 @pytest.mark.parametrize("mode", ["normal", "interrupt"])
 @pytest.mark.parametrize("fault", [None, "after_cleanup", "members_remain", "timeout", "wrong_exit", "boolean_count", "not_owned", "no_signal"])
 def test_cleanup_gate_needs_pre_job_close_evidence_and_real_signal(harness, mode, fault):
-    report = {"timed_out": False, "remaining_before_cleanup": 0, "upstream_closed_before_cleanup": True,
-              "returncode": 130 if mode == "interrupt" else 0, "event_sent": True, "console_owned": True}
+    report = {
+        "timed_out": False,
+        "remaining_before_cleanup": 0,
+        "upstream_closed_before_cleanup": True,
+        "returncode": 130 if mode == "interrupt" else 0,
+        "event_sent": True,
+        "console_owned": True,
+    }
     if fault == "after_cleanup":
         report["upstream_closed_before_cleanup"] = False
     elif fault == "members_remain":
@@ -35,9 +41,17 @@ def test_cleanup_gate_needs_pre_job_close_evidence_and_real_signal(harness, mode
     assert harness.verified_cleanup(report, mode) is (fault is None or mode == "normal" and fault in {"not_owned", "no_signal"})
 
 
-@pytest.mark.parametrize("members,owned,expected", [({10, 20}, {20}, True), ({10, 20, 21}, {20, 21}, True),
-                                                  ({10, 20, 99}, {20}, False), ({20}, {20}, False),
-                                                  ({10}, {20}, False), ({10, 20}, {10, 20}, False)])
+@pytest.mark.parametrize(
+    "members,owned,expected",
+    [
+        ({10, 20}, {20}, True),
+        ({10, 20, 21}, {20, 21}, True),
+        ({10, 20, 99}, {20}, False),
+        ({20}, {20}, False),
+        ({10}, {20}, False),
+        ({10, 20}, {10, 20}, False),
+    ],
+)
 def test_console_event_is_never_sent_into_a_console_with_unowned_processes(harness, members, owned, expected):
     controller = importlib.import_module("probe_console")
     assert controller.console_is_owned(members, owned, 10, 20) is expected
@@ -46,9 +60,12 @@ def test_console_event_is_never_sent_into_a_console_with_unowned_processes(harne
 @pytest.mark.parametrize("mode", ["normal", "interrupt"])
 @pytest.mark.parametrize("fault", [None, "wrong_complete", "boolean_count", "missing_spawn", "denied"])
 def test_claude_lifecycle_distinguishes_background_drain_from_interrupt(harness, mode, fault):
-    result = {"is_error": mode == "interrupt", "terminal_reason": "aborted_streaming" if mode == "interrupt" else "end_turn",
-              "permission_denials": [], "subagent_stats": {"spawned": 1, "started_in_background": 1,
-                                                           "completed": 0 if mode == "interrupt" else 1, "failed": 0}}
+    result = {
+        "is_error": mode == "interrupt",
+        "terminal_reason": "aborted_streaming" if mode == "interrupt" else "end_turn",
+        "permission_denials": [],
+        "subagent_stats": {"spawned": 1, "started_in_background": 1, "completed": 0 if mode == "interrupt" else 1, "failed": 0},
+    }
     if fault == "wrong_complete":
         result["subagent_stats"]["completed"] = 1 if mode == "interrupt" else 0
     elif fault == "boolean_count":
@@ -62,8 +79,10 @@ def test_claude_lifecycle_distinguishes_background_drain_from_interrupt(harness,
 
 @pytest.mark.parametrize("identity", ["child", "other"])
 def test_codex_actual_spawn_event_must_match_returned_child_id(harness, identity):
-    result = {"type": "item.completed", "item": {"type": "collab_tool_call", "tool": "spawn_agent", "status": "completed",
-                                                "prompt": harness.TASK, "receiver_thread_ids": [identity]}}
+    result = {
+        "type": "item.completed",
+        "item": {"type": "collab_tool_call", "tool": "spawn_agent", "status": "completed", "prompt": harness.TASK, "receiver_thread_ids": [identity]},
+    }
     assert harness.verified_lifecycle("codex", json.dumps(result), "child", "normal") is (identity == "child")
     assert not harness.verified_lifecycle("codex", "parent says it spawned", "child", "normal")
 

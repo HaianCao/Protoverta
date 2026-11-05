@@ -22,7 +22,12 @@ def body(protocol, strict):
         return {"model": "m", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 64, "tools": [{"type": "function", "function": fn}]}
     if protocol == "responses":
         return {"model": "m", "input": "hi", "max_output_tokens": 64, "tools": [{"type": "function", **fn}]}
-    return {"model": "m", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 64, "tools": [{"name": "fn", "description": "demo", "input_schema": copy.deepcopy(SCHEMA), "strict": strict}]}
+    return {
+        "model": "m",
+        "messages": [{"role": "user", "content": "hi"}],
+        "max_tokens": 64,
+        "tools": [{"name": "fn", "description": "demo", "input_schema": copy.deepcopy(SCHEMA), "strict": strict}],
+    }
 
 
 @pytest.mark.parametrize("source,target", [("messages", "chat"), ("messages", "responses"), ("chat", "messages"), ("responses", "messages")])
@@ -44,12 +49,15 @@ def test_strict_messages_request_round_trip(source, target, strict, stream):
     assert request == original
 
 
-@pytest.mark.parametrize("schema", [
-    {"type": "object", "properties": {"x": {"type": "integer"}}, "additionalProperties": False},
-    {"type": "object", "properties": {}, "additionalProperties": True},
-    {"type": "object", "properties": {"x": {"$ref": "#/$defs/X"}}, "required": ["x"], "additionalProperties": False},
-    {"type": "object", "properties": {"x": {"type": "integer", "minimum": 0}}, "required": ["x"], "additionalProperties": False},
-])
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {"type": "object", "properties": {"x": {"type": "integer"}}, "additionalProperties": False},
+        {"type": "object", "properties": {}, "additionalProperties": True},
+        {"type": "object", "properties": {"x": {"$ref": "#/$defs/X"}}, "required": ["x"], "additionalProperties": False},
+        {"type": "object", "properties": {"x": {"type": "integer", "minimum": 0}}, "required": ["x"], "additionalProperties": False},
+    ],
+)
 def test_unverified_schema_is_rejected_not_sanitized(schema):
     request = body("messages", True)
     request["tools"][0]["input_schema"] = schema
@@ -62,9 +70,13 @@ def test_gateway_sends_strict_to_messages_and_checks_capability():
 
     def upstream(request, *, timeout):
         captured.append(json.loads(request.data))
-        return io.BytesIO(b'{"model":"m","role":"assistant","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}')
+        return io.BytesIO(
+            b'{"model":"m","role":"assistant","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}'
+        )
 
-    registry = CapabilityRegistry((CapabilityRecord("https://example.test/v1", "messages", "m", {"text": True, "tools": True, "strict_tools": True}, "2026-10-24", "synthetic"),))
+    registry = CapabilityRegistry(
+        (CapabilityRecord("https://example.test/v1", "messages", "m", {"text": True, "tools": True, "strict_tools": True}, "2026-10-24", "synthetic"),)
+    )
     config = GatewayConfig("messages", "https://example.test/v1", "key", "local", capabilities=registry, require_verified_capabilities=True)
     with listener(config, upstream) as url, post(url, body("responses", True)) as response:
         assert response.status == 200

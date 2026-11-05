@@ -69,6 +69,9 @@ class SharedTokenQuota:
             if measured:
                 # Saturation is internal admission accounting only. It still
                 # exhausts every permitted quota; never changes response usage.
-                db.execute("UPDATE token_reservations SET started=?,active_until=0,amount=? WHERE id=? AND scope=?", (storage.clock(), min(_SQLITE_MAX, inputs + outputs), identifier, storage.scope))
+                db.execute(
+                    "UPDATE token_reservations SET started=?,active_until=0,amount=? WHERE id=? AND scope=?",
+                    (storage.clock(), min(_SQLITE_MAX, inputs + outputs), identifier, storage.scope),
+                )
             else:
                 db.execute("UPDATE token_reservations SET started=?,active_until=0 WHERE id=? AND scope=?", (storage.clock(), identifier, storage.scope))

@@ -9,7 +9,18 @@ from test_gateway_capabilities import listener, post
 from protoverta.server import GatewayConfig
 
 
-@pytest.mark.parametrize("options", [{"timeout": float("nan")}, {"timeout": float("inf")}, {"timeout": True}, {"max_body_bytes": True}, {"max_concurrent_requests": True}, {"max_concurrent_requests": 0}, {"max_concurrent_requests": 1.5}])
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"timeout": float("nan")},
+        {"timeout": float("inf")},
+        {"timeout": True},
+        {"max_body_bytes": True},
+        {"max_concurrent_requests": True},
+        {"max_concurrent_requests": 0},
+        {"max_concurrent_requests": 1.5},
+    ],
+)
 def test_invalid_io_limits_are_rejected(options):
     with pytest.raises(ValueError):
         GatewayConfig("chat", "https://example.test/v1", "key", "local", **options)
@@ -28,12 +39,14 @@ def test_capacity_is_bounded_and_slot_is_released_after_upstream_failure():
 
     config = GatewayConfig("chat", "https://example.test/v1", "key", "local", max_concurrent_requests=1)
     with listener(config, upstream) as url, ThreadPoolExecutor(max_workers=1) as pool:
+
         def run():
             with pytest.raises(HTTPError) as caught:
                 post(url, {"model": "m", "input": "Hi"})
             status = caught.value.code
             caught.value.close()
             return status
+
         first = pool.submit(run)
         try:
             assert entered.wait(2)

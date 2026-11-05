@@ -37,7 +37,7 @@ def test_search_stream_uses_only_documented_item_lifecycle(source, chunk_size):
     mapper.prepare(request)
     pipe = StreamTranscoder(source, "responses", delta_transform=mapper.stream_delta)
     upstream = wire(source)
-    pieces = [pipe.feed(upstream[i:i + chunk_size]) for i in range(0, len(upstream), chunk_size)]
+    pieces = [pipe.feed(upstream[i : i + chunk_size]) for i in range(0, len(upstream), chunk_size)]
     before_eof = b"".join(pieces)
     assert b"response.completed" not in before_eof
     output = before_eof + pipe.finish()
@@ -72,7 +72,9 @@ def test_search_arguments_remain_resource_bounded():
 
 def test_native_completed_search_arguments_count_toward_byte_budget():
     limits = StreamLimits(max_argument_bytes=4)
-    event = SSEEvent("response.output_item.added", json.dumps({"type": "response.output_item.added", "item": {"type": "tool_search_call", "arguments": {"goal": "lookup"}}}))
+    event = SSEEvent(
+        "response.output_item.added", json.dumps({"type": "response.output_item.added", "item": {"type": "tool_search_call", "arguments": {"goal": "lookup"}}})
+    )
     with pytest.raises(StreamLimitError):
         limits.observe(event)
 
@@ -92,7 +94,16 @@ def test_gateway_search_sse_round_trip_and_replay(protocol):
         events = [json.loads(event.data) for event in SSEParser().feed(response.read())]
     call = events[-1]["response"]["output"][-1]
     assert call["type"] == "tool_search_call"
-    request["input"] = [call, {"type": "tool_search_output", "status": "completed", "execution": "client", "call_id": call["call_id"], "tools": [{"type": "function", "name": "lookup", "parameters": {"type": "object"}}]}]
+    request["input"] = [
+        call,
+        {
+            "type": "tool_search_output",
+            "status": "completed",
+            "execution": "client",
+            "call_id": call["call_id"],
+            "tools": [{"type": "function", "name": "lookup", "parameters": {"type": "object"}}],
+        },
+    ]
     prepared = ClientToolSearchMap().prepare(request)
     assert prepared["tools"][0]["name"] == "lookup"
     assert len(captured) == 1

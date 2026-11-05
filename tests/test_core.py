@@ -18,9 +18,23 @@ def test_all_six_text_request_edges(source, target):
 @pytest.mark.parametrize("source,target", [(a, b) for a in Protocol for b in Protocol if a != b])
 def test_all_six_text_response_edges(source, target):
     response = {
-        Protocol.CHAT: {"model": "example", "choices": [{"message": {"role": "assistant", "content": "hello"}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 2, "completion_tokens": 1}},
-        Protocol.MESSAGES: {"model": "example", "content": [{"type": "text", "text": "hello"}], "stop_reason": "end_turn", "usage": {"input_tokens": 2, "output_tokens": 1}},
-        Protocol.RESPONSES: {"model": "example", "status": "completed", "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "hello", "annotations": []}]}], "usage": {"input_tokens": 2, "output_tokens": 1}},
+        Protocol.CHAT: {
+            "model": "example",
+            "choices": [{"message": {"role": "assistant", "content": "hello"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 2, "completion_tokens": 1},
+        },
+        Protocol.MESSAGES: {
+            "model": "example",
+            "content": [{"type": "text", "text": "hello"}],
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 2, "output_tokens": 1},
+        },
+        Protocol.RESPONSES: {
+            "model": "example",
+            "status": "completed",
+            "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "hello", "annotations": []}]}],
+            "usage": {"input_tokens": 2, "output_tokens": 1},
+        },
     }[source]
     output = convert_response(response, source, target)
     assert output["model"] == "example"
@@ -32,11 +46,19 @@ def test_all_six_text_response_edges(source, target):
 
 
 def test_tool_call_and_result_chat_to_messages():
-    body = {"model": "m", "max_tokens": 128, "messages": [
-        {"role": "user", "content": "calculate"},
-        {"role": "assistant", "content": None, "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "add", "arguments": '{"a":1,"b":2}'}}]},
-        {"role": "tool", "tool_call_id": "call_1", "content": "3"},
-    ]}
+    body = {
+        "model": "m",
+        "max_tokens": 128,
+        "messages": [
+            {"role": "user", "content": "calculate"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "add", "arguments": '{"a":1,"b":2}'}}],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "3"},
+        ],
+    }
     result = convert_request(body, "chat", "messages")
     assert result["messages"][1]["content"][0]["type"] == "tool_use"
     assert result["messages"][2]["content"][0]["tool_use_id"] == "call_1"
@@ -45,21 +67,37 @@ def test_tool_call_and_result_chat_to_messages():
 @pytest.mark.parametrize("source,target", [(a, b) for a in Protocol for b in Protocol if a != b])
 def test_all_six_function_request_edges(source, target):
     requests = {
-        Protocol.CHAT: {"model": "m", "max_tokens": 64, "messages": [
-            {"role": "user", "content": "calculate"},
-            {"role": "assistant", "content": None, "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "add", "arguments": '{"a":1}'}}]},
-            {"role": "tool", "tool_call_id": "call_1", "content": "2"},
-        ]},
-        Protocol.MESSAGES: {"model": "m", "max_tokens": 64, "messages": [
-            {"role": "user", "content": "calculate"},
-            {"role": "assistant", "content": [{"type": "tool_use", "id": "call_1", "name": "add", "input": {"a": 1}}]},
-            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "call_1", "content": "2"}]},
-        ]},
-        Protocol.RESPONSES: {"model": "m", "max_output_tokens": 64, "input": [
-            {"role": "user", "content": [{"type": "input_text", "text": "calculate"}]},
-            {"type": "function_call", "call_id": "call_1", "name": "add", "arguments": '{"a":1}'},
-            {"type": "function_call_output", "call_id": "call_1", "output": "2"},
-        ]},
+        Protocol.CHAT: {
+            "model": "m",
+            "max_tokens": 64,
+            "messages": [
+                {"role": "user", "content": "calculate"},
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "add", "arguments": '{"a":1}'}}],
+                },
+                {"role": "tool", "tool_call_id": "call_1", "content": "2"},
+            ],
+        },
+        Protocol.MESSAGES: {
+            "model": "m",
+            "max_tokens": 64,
+            "messages": [
+                {"role": "user", "content": "calculate"},
+                {"role": "assistant", "content": [{"type": "tool_use", "id": "call_1", "name": "add", "input": {"a": 1}}]},
+                {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "call_1", "content": "2"}]},
+            ],
+        },
+        Protocol.RESPONSES: {
+            "model": "m",
+            "max_output_tokens": 64,
+            "input": [
+                {"role": "user", "content": [{"type": "input_text", "text": "calculate"}]},
+                {"type": "function_call", "call_id": "call_1", "name": "add", "arguments": '{"a":1}'},
+                {"type": "function_call_output", "call_id": "call_1", "output": "2"},
+            ],
+        },
     }
     converted = convert_request(requests[source], source, target)
     assert "call_1" in str(converted)
@@ -70,9 +108,32 @@ def test_all_six_function_request_edges(source, target):
 @pytest.mark.parametrize("source,target", [(a, b) for a in Protocol for b in Protocol if a != b])
 def test_all_six_function_response_edges(source, target):
     responses = {
-        Protocol.CHAT: {"model": "m", "choices": [{"message": {"role": "assistant", "content": None, "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "add", "arguments": '{"a":1}'}}]}, "finish_reason": "tool_calls"}], "usage": {"prompt_tokens": 5, "completion_tokens": 3}},
-        Protocol.MESSAGES: {"model": "m", "content": [{"type": "tool_use", "id": "call_1", "name": "add", "input": {"a": 1}}], "stop_reason": "tool_use", "usage": {"input_tokens": 5, "output_tokens": 3}},
-        Protocol.RESPONSES: {"model": "m", "status": "completed", "output": [{"type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "add", "arguments": '{"a":1}', "status": "completed"}], "usage": {"input_tokens": 5, "output_tokens": 3}},
+        Protocol.CHAT: {
+            "model": "m",
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "add", "arguments": '{"a":1}'}}],
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 3},
+        },
+        Protocol.MESSAGES: {
+            "model": "m",
+            "content": [{"type": "tool_use", "id": "call_1", "name": "add", "input": {"a": 1}}],
+            "stop_reason": "tool_use",
+            "usage": {"input_tokens": 5, "output_tokens": 3},
+        },
+        Protocol.RESPONSES: {
+            "model": "m",
+            "status": "completed",
+            "output": [{"type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "add", "arguments": '{"a":1}', "status": "completed"}],
+            "usage": {"input_tokens": 5, "output_tokens": 3},
+        },
     }
     converted = convert_response(responses[source], source, target)
     assert "call_1" in str(converted)
@@ -83,7 +144,11 @@ def test_no_fake_reasoning_or_server_state():
     with pytest.raises(ConversionError, match="unsupported fields"):
         convert_request({"model": "m", "input": "hello", "previous_response_id": "resp_old"}, "responses", "chat")
     with pytest.raises(ConversionError, match="unsupported Messages block"):
-        convert_request({"model": "m", "max_tokens": 64, "messages": [{"role": "assistant", "content": [{"type": "thinking", "thinking": "private", "signature": "abc"}]}]}, "messages", "chat")
+        convert_request(
+            {"model": "m", "max_tokens": 64, "messages": [{"role": "assistant", "content": [{"type": "thinking", "thinking": "private", "signature": "abc"}]}]},
+            "messages",
+            "chat",
+        )
 
 
 def test_developer_role_not_silently_rewritten():
@@ -99,7 +164,11 @@ def test_no_fabricated_usage():
 
 
 def test_length_finish_reason_is_preserved():
-    source = {"model": "m", "choices": [{"message": {"role": "assistant", "content": "truncated"}, "finish_reason": "length"}], "usage": {"prompt_tokens": 3, "completion_tokens": 5}}
+    source = {
+        "model": "m",
+        "choices": [{"message": {"role": "assistant", "content": "truncated"}, "finish_reason": "length"}],
+        "usage": {"prompt_tokens": 3, "completion_tokens": 5},
+    }
     assert convert_response(source, "chat", "messages")["stop_reason"] == "max_tokens"
     target = convert_response(source, "chat", "responses")
     assert target["status"] == "incomplete"
@@ -113,28 +182,43 @@ def test_same_protocol_keeps_extensions():
 
 
 def test_invalid_tool_json_rejected():
-    body = {"model": "m", "messages": [{"role": "assistant", "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "f", "arguments": "{"}}]}]}
+    body = {
+        "model": "m",
+        "messages": [{"role": "assistant", "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "f", "arguments": "{"}}]}],
+    }
     with pytest.raises(ConversionError, match="valid JSON"):
         convert_request(body, "chat", "responses")
 
 
 def test_interleaved_text_and_tool_order_is_not_rewritten():
-    response = {"model": "m", "content": [
-        {"type": "tool_use", "id": "call_1", "name": "f", "input": {}},
-        {"type": "text", "text": "after"},
-    ], "stop_reason": "tool_use", "usage": {"input_tokens": 2, "output_tokens": 2}}
+    response = {
+        "model": "m",
+        "content": [
+            {"type": "tool_use", "id": "call_1", "name": "f", "input": {}},
+            {"type": "text", "text": "after"},
+        ],
+        "stop_reason": "tool_use",
+        "usage": {"input_tokens": 2, "output_tokens": 2},
+    }
     with pytest.raises(ConversionError, match="text after a tool call"):
         convert_response(response, "messages", "chat")
 
 
 def test_responses_preserves_tool_result_before_user_text():
-    body = {"model": "m", "max_tokens": 64, "messages": [
-        {"role": "assistant", "content": [{"type": "tool_use", "id": "call_1", "name": "f", "input": {}}]},
-        {"role": "user", "content": [
-            {"type": "tool_result", "tool_use_id": "call_1", "content": "done"},
-            {"type": "text", "text": "continue"},
-        ]},
-    ]}
+    body = {
+        "model": "m",
+        "max_tokens": 64,
+        "messages": [
+            {"role": "assistant", "content": [{"type": "tool_use", "id": "call_1", "name": "f", "input": {}}]},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "tool_result", "tool_use_id": "call_1", "content": "done"},
+                    {"type": "text", "text": "continue"},
+                ],
+            },
+        ],
+    }
     items = convert_request(body, "messages", "responses")["input"]
     assert [item.get("type", "message") for item in items] == ["function_call", "function_call_output", "message"]
 
@@ -146,11 +230,15 @@ def test_mismatched_tool_finish_rejected():
 
 
 def test_assistant_history_is_a_completed_responses_item():
-    chat = {"model": "m", "messages": [
-        {"role": "user", "content": "first"},
-        {"role": "assistant", "content": "reply"},
-        {"role": "user", "content": "second"},
-    ], "max_tokens": 64}
+    chat = {
+        "model": "m",
+        "messages": [
+            {"role": "user", "content": "first"},
+            {"role": "assistant", "content": "reply"},
+            {"role": "user", "content": "second"},
+        ],
+        "max_tokens": 64,
+    }
     converted = convert_request(chat, "chat", "responses")
     assistant = converted["input"][1]
     assert assistant["type"] == "message"

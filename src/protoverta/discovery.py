@@ -43,13 +43,26 @@ class CatalogPolicy:
     def __post_init__(self):
         if self.pagination not in ("none", "after_id", "numbered") or not positive_number(self.timeout) or self.timeout > 120:
             raise ValueError("invalid catalog pagination/deadline")
-        if any(type(value) is not int or not 1 <= value <= maximum for value, maximum in ((self.max_pages, 100), (self.max_models, 100000), (self.max_bytes, 32 * 1024 * 1024))):
+        if any(
+            type(value) is not int or not 1 <= value <= maximum
+            for value, maximum in ((self.max_pages, 100), (self.max_models, 100000), (self.max_bytes, 32 * 1024 * 1024))
+        ):
             raise ValueError("catalog resource limits exceed supported bounds")
         if not isinstance(self.path, str) or not re.fullmatch(r"/(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+", self.path):
             raise ValueError("catalog path must be a simple relative endpoint, without query or host")
         if any(not isinstance(value, str) or not value for value in (self.name_field, self.id_field, self.page_param, self.total_pages_field)):
             raise ValueError("required catalog field paths must be nonempty strings")
-        for field in (self.name_field, self.context_field, self.output_field, self.modalities_field, self.collection_field, self.id_field, self.total_pages_field, self.page_param, self.current_page_field):
+        for field in (
+            self.name_field,
+            self.context_field,
+            self.output_field,
+            self.modalities_field,
+            self.collection_field,
+            self.id_field,
+            self.total_pages_field,
+            self.page_param,
+            self.current_page_field,
+        ):
             if field is not None and (not isinstance(field, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*){0,7}", field)):
                 raise ValueError("invalid explicit catalog metadata field path")
         if type(self.first_page) is not int or not 0 <= self.first_page <= 1:
@@ -58,7 +71,11 @@ class CatalogPolicy:
             raise ValueError("catalog query parameters must be bounded pairs")
         pairs = []
         for pair in self.query_params:
-            if not isinstance(pair, (list, tuple)) or len(pair) != 2 or any(not isinstance(v, str) or len(v) > 256 or any(ord(c) < 32 or ord(c) == 127 for c in v) for v in pair):
+            if (
+                not isinstance(pair, (list, tuple))
+                or len(pair) != 2
+                or any(not isinstance(v, str) or len(v) > 256 or any(ord(c) < 32 or ord(c) == 127 for c in v) for v in pair)
+            ):
                 raise ValueError("invalid catalog query parameter")
             if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", pair[0]) or pair[0] in {"after_id", self.page_param}:
                 raise ValueError("query cannot override pagination")
@@ -75,7 +92,13 @@ class CatalogPolicy:
             raise CatalogError("catalog policy exceeds 64 KiB")
         body = json.loads(raw)
         required = {"schema_version", "base_url", "checked_at", "evidence", "policy"}
-        if not isinstance(body, dict) or set(body) != required or type(body["schema_version"]) is not int or body["schema_version"] != 1 or _prefix(body["base_url"]) != _prefix(base_url):
+        if (
+            not isinstance(body, dict)
+            or set(body) != required
+            or type(body["schema_version"]) is not int
+            or body["schema_version"] != 1
+            or _prefix(body["base_url"]) != _prefix(base_url)
+        ):
             raise CatalogError("catalog policy must match the exact API prefix")
         from datetime import date
 
@@ -125,7 +148,12 @@ def parse_page(body, policy):
         if not isinstance(item, dict):
             raise CatalogError("model catalog entries must be objects")
         identifier = _field(item, policy.id_field)
-        if not isinstance(identifier, str) or not identifier or len(identifier) > 512 or any(c.isspace() or ord(c) < 32 or ord(c) == 127 or _surrogate(c) for c in identifier):
+        if (
+            not isinstance(identifier, str)
+            or not identifier
+            or len(identifier) > 512
+            or any(c.isspace() or ord(c) < 32 or ord(c) == 127 or _surrogate(c) for c in identifier)
+        ):
             raise CatalogError("model catalog contains an invalid model ID")
         name = _field(item, policy.name_field)
         if name is None:
@@ -138,7 +166,11 @@ def parse_page(body, policy):
         modalities = _field(item, policy.modalities_field)
         if modalities is None:
             modalities = []
-        if not isinstance(modalities, list) or len(modalities) > 16 or any(not isinstance(value, str) or not re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", value) for value in modalities):
+        if (
+            not isinstance(modalities, list)
+            or len(modalities) > 16
+            or any(not isinstance(value, str) or not re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", value) for value in modalities)
+        ):
             raise CatalogError("invalid reported input modalities")
         result.append(ModelInfo(identifier, name, *numbers, tuple(dict.fromkeys(modalities))))
     has_more = body.get("has_more", False) if isinstance(body, dict) else False
@@ -147,7 +179,11 @@ def parse_page(body, policy):
     if has_more and policy.pagination not in ("after_id", "numbered"):
         raise CatalogError("catalog requires an explicitly configured pagination policy")
     cursor = body.get("last_id") if has_more and policy.pagination == "after_id" else None
-    if has_more and policy.pagination == "after_id" and (not isinstance(cursor, str) or not cursor or len(cursor) > 512 or any(c.isspace() or _surrogate(c) for c in cursor)):
+    if (
+        has_more
+        and policy.pagination == "after_id"
+        and (not isinstance(cursor, str) or not cursor or len(cursor) > 512 or any(c.isspace() or _surrogate(c) for c in cursor))
+    ):
         raise CatalogError("invalid catalog pagination cursor")
     return result, cursor
 

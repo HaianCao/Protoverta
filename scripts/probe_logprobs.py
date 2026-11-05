@@ -40,11 +40,13 @@ def shape(raw):
         message = message if isinstance(message, dict) else {}
         probability = choice.get("logprobs")
         records = probability.get("content") if isinstance(probability, dict) else None
-        result = {"has_text": bool(message.get("content")),
-                  "has_logprob_records": isinstance(records, list) and bool(records),
-                  "logprob_records": len(records) if isinstance(records, list) else 0,
-                  "has_reasoning": any(bool(message.get(k)) for k in ("reasoning", "reasoning_content", "reasoning_details")),
-                  "finish_reason": choice.get("finish_reason") if choice.get("finish_reason") in ("stop", "length", "tool_calls") else "other"}
+        result = {
+            "has_text": bool(message.get("content")),
+            "has_logprob_records": isinstance(records, list) and bool(records),
+            "logprob_records": len(records) if isinstance(records, list) else 0,
+            "has_reasoning": any(bool(message.get(k)) for k in ("reasoning", "reasoning_content", "reasoning_details")),
+            "finish_reason": choice.get("finish_reason") if choice.get("finish_reason") in ("stop", "length", "tool_calls") else "other",
+        }
         if isinstance(records, list):
             result["missing_byte_records"] = sum(not isinstance(r, dict) or r.get("bytes") is None for r in records)
         return result
@@ -70,13 +72,28 @@ def session(config, upstream_open):
 
 
 def probe(base_url, model, key, *, streaming=False, upstream_open=None, upstream_reasoning="provider_default"):
-    config = GatewayConfig("chat", base_url, key, secrets.token_hex(32), timeout=15,
-                           total_timeout=30, progress_timeout=20, retry_attempts=1,
-                           max_body_bytes=LIMIT, max_stream_bytes=LIMIT, upstream_reasoning=upstream_reasoning)
-    body = {"model": model, "input": "Reply with exactly OK.", "max_output_tokens": 64,
-            "include": ["message.output_text.logprobs"], "top_logprobs": 2, "stream": streaming}
-    result = {"model": model, "upstream": "chat", "streaming": streaming,
-              "passed": False, "requests": 1, "outcome": "not_tested"}
+    config = GatewayConfig(
+        "chat",
+        base_url,
+        key,
+        secrets.token_hex(32),
+        timeout=15,
+        total_timeout=30,
+        progress_timeout=20,
+        retry_attempts=1,
+        max_body_bytes=LIMIT,
+        max_stream_bytes=LIMIT,
+        upstream_reasoning=upstream_reasoning,
+    )
+    body = {
+        "model": model,
+        "input": "Reply with exactly OK.",
+        "max_output_tokens": 64,
+        "include": ["message.output_text.logprobs"],
+        "top_logprobs": 2,
+        "stream": streaming,
+    }
+    result = {"model": model, "upstream": "chat", "streaming": streaming, "passed": False, "requests": 1, "outcome": "not_tested"}
     opener = build_opener(_RedirectBlocker(), DeadlineHTTPHandler(), DeadlineHTTPSHandler())
     transport = upstream_open or opener.open
     attempts = 0
@@ -94,8 +111,9 @@ def probe(base_url, model, key, *, streaming=False, upstream_open=None, upstream
 
     try:
         with session(config, counted) as origin:
-            req = Request(origin + "/v1/responses", json.dumps(body).encode(),
-                          {"Authorization": "Bearer " + config.inbound_token, "Content-Type": "application/json"})
+            req = Request(
+                origin + "/v1/responses", json.dumps(body).encode(), {"Authorization": "Bearer " + config.inbound_token, "Content-Type": "application/json"}
+            )
             with build_opener(ProxyHandler({})).open(req, timeout=40) as response:
                 result["http_status"] = response.status
                 if not streaming:
@@ -107,8 +125,7 @@ def probe(base_url, model, key, *, streaming=False, upstream_open=None, upstream
                     count = len((chat["choices"][0].get("logprobs") or {}).get("content") or [])
                     incomplete = decoded["status"] != "completed"
                 else:
-                    pipe = StreamTranscoder("responses", "chat", text_logprobs=True, max_top_logprobs=2,
-                                            max_stream_bytes=LIMIT)
+                    pipe = StreamTranscoder("responses", "chat", text_logprobs=True, max_top_logprobs=2, max_stream_bytes=LIMIT)
                     parser, count, incomplete = SSEParser(), 0, False
 
                     def consume(raw):
@@ -125,8 +142,11 @@ def probe(base_url, model, key, *, streaming=False, upstream_open=None, upstream
                         consume(pipe.feed(raw))
                     consume(pipe.finish())
                     parser.finish(strict=True)
-                result.update(token_records=count, passed=count > 0 and not incomplete,
-                              outcome="incomplete" if incomplete else "passed" if count else "missing_measurements")
+                result.update(
+                    token_records=count,
+                    passed=count > 0 and not incomplete,
+                    outcome="incomplete" if incomplete else "passed" if count else "missing_measurements",
+                )
     except HTTPError as exc:
         result.update(http_status=exc.code, outcome="http_failure")
         try:

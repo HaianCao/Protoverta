@@ -74,7 +74,14 @@ class Scenario(parallel.Scenario):
                 raise ValueError("Three-stream request limit")
         spawn = single.find_tool(tools, "agent" if self.client == "claude" else "spawn_agent") if role == "parent" else None
         if role == "parent" and self.client == "claude" and stage == 1:
-            return parallel.calls_wire(self.protocol, body["model"], [(spawn, {"prompt": task, "description": "Read own lane fixture", "subagent_type": "p04-worker", "run_in_background": True}, f"spawn_{i}") for i, task in enumerate(parallel.TASKS)])
+            return parallel.calls_wire(
+                self.protocol,
+                body["model"],
+                [
+                    (spawn, {"prompt": task, "description": "Read own lane fixture", "subagent_type": "p04-worker", "run_in_background": True}, f"spawn_{i}")
+                    for i, task in enumerate(parallel.TASKS)
+                ],
+            )
         if role == "parent" and self.client == "codex" and stage <= 2:
             return parallel.calls_wire(self.protocol, body["model"], [(spawn, {"message": parallel.TASKS[stage - 1]}, f"spawn_{stage - 1}")])
         parent_read = 2 if self.client == "claude" else 3
@@ -96,17 +103,23 @@ class Scenario(parallel.Scenario):
                 self.children_done.set()
             return single.encode(self.protocol, body["model"], text=parallel.FINALS[0 if role == "a" else 1])
         if self.client == "claude":
-            self.notifications = all(cancel.notification_evidence(body, identifier, marker)[0] for identifier, marker in zip(self.ids, parallel.FINALS, strict=True))
+            self.notifications = all(
+                cancel.notification_evidence(body, identifier, marker)[0] for identifier, marker in zip(self.ids, parallel.FINALS, strict=True)
+            )
             if self.notifications:
                 return single.encode(self.protocol, body["model"], text=DONE)
             if not self.children_done.wait(6):
                 raise ValueError("Background children did not finish")
-            return parallel.calls_wire(self.protocol, body["model"], [(single.find_tool(tools, "read"), {"file_path": str(self.root / "parent.txt")}, f"notification_{stage}")])
+            return parallel.calls_wire(
+                self.protocol, body["model"], [(single.find_tool(tools, "read"), {"file_path": str(self.root / "parent.txt")}, f"notification_{stage}")]
+            )
         returned = json.dumps(records)
         if all(marker in returned for marker in parallel.FINALS):
             return single.encode(self.protocol, body["model"], text=DONE)
         pending = [identifier for identifier, marker in zip(self.ids, parallel.FINALS, strict=True) if marker not in returned]
-        return parallel.calls_wire(self.protocol, body["model"], [(single.find_tool(tools, "wait_agent"), {"targets": pending, "timeout_ms": 10000}, f"wait_{stage}")])
+        return parallel.calls_wire(
+            self.protocol, body["model"], [(single.find_tool(tools, "wait_agent"), {"targets": pending, "timeout_ms": 10000}, f"wait_{stage}")]
+        )
 
 
 def verified_frames(frames):
@@ -114,8 +127,12 @@ def verified_frames(frames):
     for item in frames:
         rounds.setdefault(item["frame"], []).append(item["lane"])
     indices = [item["frame"] for item in frames]
-    return (len(rounds) >= 3 and sorted(rounds) == list(range(len(rounds))) and indices == sorted(indices)
-            and all(sorted(lanes) == ["a", "b", "parent"] for lanes in rounds.values()))
+    return (
+        len(rounds) >= 3
+        and sorted(rounds) == list(range(len(rounds)))
+        and indices == sorted(indices)
+        and all(sorted(lanes) == ["a", "b", "parent"] for lanes in rounds.values())
+    )
 
 
 def run(client, upstream, source):
@@ -123,13 +140,30 @@ def run(client, upstream, source):
     driver = parallel.drive(state, source, mcp_lanes=True)
     result = state.result
     lifecycle = result is not None and parallel.completed_lifecycle(client, result.stdout)
-    passed = (result is not None and result.returncode == 0 and DONE in result.stdout and lifecycle and verified_frames(state.frames)
-              and state.reads == {"a", "b", "parent"} and state.stages["a"] == state.stages["b"] == 2
-              and not state.errors and (state.audit_count == 3 if client == "codex" else state.notifications))
-    return {"passed": passed, "client": client, "upstream": upstream.value, "cli_version": driver["cli_version"],
-            "lifecycle_verified": lifecycle, "frames": state.frames, "verified_reads": sorted(state.reads),
-            "fixture_errors": state.errors, "mcp_audit_count": state.audit_count,
-            "stdout": result.stdout if result else "", "stderr": result.stderr if result else ""}
+    passed = (
+        result is not None
+        and result.returncode == 0
+        and DONE in result.stdout
+        and lifecycle
+        and verified_frames(state.frames)
+        and state.reads == {"a", "b", "parent"}
+        and state.stages["a"] == state.stages["b"] == 2
+        and not state.errors
+        and (state.audit_count == 3 if client == "codex" else state.notifications)
+    )
+    return {
+        "passed": passed,
+        "client": client,
+        "upstream": upstream.value,
+        "cli_version": driver["cli_version"],
+        "lifecycle_verified": lifecycle,
+        "frames": state.frames,
+        "verified_reads": sorted(state.reads),
+        "fixture_errors": state.errors,
+        "mcp_audit_count": state.audit_count,
+        "stdout": result.stdout if result else "",
+        "stderr": result.stderr if result else "",
+    }
 
 
 def main():

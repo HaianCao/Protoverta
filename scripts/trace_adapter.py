@@ -26,11 +26,46 @@ def summarize(body: dict) -> dict:
         if not isinstance(item, dict) or item.get("role") != "developer":
             continue
         content = item.get("content", "")
-        text = content if isinstance(content, str) else "".join(block["text"] for block in _array(content) if isinstance(block, dict) and isinstance(block.get("text"), str))
+        text = (
+            content
+            if isinstance(content, str)
+            else "".join(block["text"] for block in _array(content) if isinstance(block, dict) and isinstance(block.get("text"), str))
+        )
         messages.append({"index": index, "tags": sorted(set(re.findall(r"</?([a-zA-Z_][a-zA-Z0-9_]*)", text)))})
-    public_reasoning_items = sum(isinstance(item, dict) and item.get("type") == "reasoning" and any(isinstance(part, dict) and part.get("type") == "reasoning_text" and isinstance(part.get("text"), str) for part in _array(item.get("content"))) for item in inputs)
-    reasoning_shapes = [{"known_fields": sorted(set(item) & {"type", "id", "summary", "content", "status", "encrypted_content"}), "unknown_fields": bool(set(item) - {"type", "id", "summary", "content", "status", "encrypted_content"}), "opaque_present": item.get("encrypted_content") is not None, "summary_is_empty": item.get("summary") == [], "content_types": ["reasoning_text" if part.get("type") == "reasoning_text" else "other" for part in _array(item.get("content")) if isinstance(part, dict)]} for item in inputs if isinstance(item, dict) and item.get("type") == "reasoning"]
-    return {"model": body.get("model"), "public_reasoning_items": public_reasoning_items, "reasoning_shapes": reasoning_shapes, "developer_messages": messages, "tools": [{"type": tool.get("type"), "name": tool.get("name"), "child_types": sorted({str(child.get("type")) for child in _array(tool.get("tools")) if isinstance(child, dict)})} for tool in _array(body.get("tools")) if isinstance(tool, dict)]}
+    public_reasoning_items = sum(
+        isinstance(item, dict)
+        and item.get("type") == "reasoning"
+        and any(isinstance(part, dict) and part.get("type") == "reasoning_text" and isinstance(part.get("text"), str) for part in _array(item.get("content")))
+        for item in inputs
+    )
+    reasoning_shapes = [
+        {
+            "known_fields": sorted(set(item) & {"type", "id", "summary", "content", "status", "encrypted_content"}),
+            "unknown_fields": bool(set(item) - {"type", "id", "summary", "content", "status", "encrypted_content"}),
+            "opaque_present": item.get("encrypted_content") is not None,
+            "summary_is_empty": item.get("summary") == [],
+            "content_types": [
+                "reasoning_text" if part.get("type") == "reasoning_text" else "other" for part in _array(item.get("content")) if isinstance(part, dict)
+            ],
+        }
+        for item in inputs
+        if isinstance(item, dict) and item.get("type") == "reasoning"
+    ]
+    return {
+        "model": body.get("model"),
+        "public_reasoning_items": public_reasoning_items,
+        "reasoning_shapes": reasoning_shapes,
+        "developer_messages": messages,
+        "tools": [
+            {
+                "type": tool.get("type"),
+                "name": tool.get("name"),
+                "child_types": sorted({str(child.get("type")) for child in _array(tool.get("tools")) if isinstance(child, dict)}),
+            }
+            for tool in _array(body.get("tools"))
+            if isinstance(tool, dict)
+        ],
+    }
 
 
 def main() -> int:
@@ -61,7 +96,9 @@ def main() -> int:
     finally:
         server.prepare_codex_request = original
         StreamDecoder.feed = original_feed
-        observations.extend({"stream_error": failure["category"], "stage": failure["stage"], "operation": failure["operation"]} for failure in diagnostics.failures)
+        observations.extend(
+            {"stream_error": failure["category"], "stage": failure["stage"], "operation": failure["operation"]} for failure in diagnostics.failures
+        )
         observations.append({"stream_diagnostics": diagnostics.snapshot()})
         Path(output).write_text(json.dumps(observations), encoding="utf-8")
 

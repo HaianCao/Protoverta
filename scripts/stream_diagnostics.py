@@ -80,7 +80,10 @@ def chat_shape(event):
             continue
         reason = choice.get("finish_reason")
         delta = choice.get("delta")
-        item = {"finish_reason": reason if isinstance(reason, str) and reason in _REASONS else "none" if reason is None else "other", "delta": _fields(delta, _DELTA_FIELDS)}
+        item = {
+            "finish_reason": reason if isinstance(reason, str) and reason in _REASONS else "none" if reason is None else "other",
+            "delta": _fields(delta, _DELTA_FIELDS),
+        }
         tools = delta.get("tool_calls") if isinstance(delta, dict) else None
         if isinstance(tools, list):
             item["tools_truncated"] = len(tools) > 4
@@ -189,7 +192,11 @@ class StreamDiagnostics:
                     self.last_usage_frame = self.last_frame
             if stage == "encoder" and operation == "feed":
                 delta = args[0]
-                self.last_delta = {"kind": delta.kind if delta.kind in _KINDS else "other", "input_tokens_present": delta.input_tokens is not None, "output_tokens_present": delta.output_tokens is not None}
+                self.last_delta = {
+                    "kind": delta.kind if delta.kind in _KINDS else "other",
+                    "input_tokens_present": delta.input_tokens is not None,
+                    "output_tokens_present": delta.output_tokens is not None,
+                }
             try:
                 return original(owner, *args, **kwargs)
             except Exception as exc:
@@ -230,7 +237,15 @@ class StreamDiagnostics:
     @contextmanager
     def capture(self, *, observe_transport=True):
         with ExitStack() as stack:
-            for stage, owner in (("parser", SSEParser), ("decoder", StreamDecoder), ("encoder", StreamEncoder), ("ordering", _MessagesOrder), ("native_decoder", _LifecycleValidator), ("pipeline", StreamTranscoder), ("native_pipeline", StreamValidator)):
+            for stage, owner in (
+                ("parser", SSEParser),
+                ("decoder", StreamDecoder),
+                ("encoder", StreamEncoder),
+                ("ordering", _MessagesOrder),
+                ("native_decoder", _LifecycleValidator),
+                ("pipeline", StreamTranscoder),
+                ("native_pipeline", StreamValidator),
+            ):
                 for operation in ("feed", "finish"):
                     if hasattr(owner, operation):
                         stack.enter_context(patch.object(owner, operation, self._method(stage, operation, getattr(owner, operation))))
@@ -245,4 +260,22 @@ class StreamDiagnostics:
             yield self
 
     def snapshot(self):
-        return copy.deepcopy({"requests": self.requests, "max_upstream_requests": self.max_upstream_requests, "http_statuses": self.http_statuses, "retry_after_seconds": self.retry_after, "bytes_read": self.bytes_read, "eof_count": self.eof_count, "calls": [{"stage": stage, "operation": operation, "count": count} for (stage, operation), count in sorted(self.calls.items())], "failures": self.failures, "dropped_failures": self.dropped_failures, "frame_count": self.frame_count, "first_frames": self.frames, "last_frame": self.last_frame, "last_usage_frame": self.last_usage_frame, "last_delta": self.last_delta, "states": self.states})
+        return copy.deepcopy(
+            {
+                "requests": self.requests,
+                "max_upstream_requests": self.max_upstream_requests,
+                "http_statuses": self.http_statuses,
+                "retry_after_seconds": self.retry_after,
+                "bytes_read": self.bytes_read,
+                "eof_count": self.eof_count,
+                "calls": [{"stage": stage, "operation": operation, "count": count} for (stage, operation), count in sorted(self.calls.items())],
+                "failures": self.failures,
+                "dropped_failures": self.dropped_failures,
+                "frame_count": self.frame_count,
+                "first_frames": self.frames,
+                "last_frame": self.last_frame,
+                "last_usage_frame": self.last_usage_frame,
+                "last_delta": self.last_delta,
+                "states": self.states,
+            }
+        )

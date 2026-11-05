@@ -60,11 +60,18 @@ def run(bundle):
 
     if not kernel.SetConsoleCtrlHandler(keep_controller_alive, True):
         raise ctypes.WinError(ctypes.get_last_error())
-    report = {"event_sent": False, "console_owned": False, "timed_out": False,
-              "upstream_closed_before_cleanup": False, "remaining_before_cleanup": None}
-    with windows_probe_process(bundle["args"], cwd=str(root), env=bundle["env"], stdin=subprocess.PIPE,
-                               stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                               text=True, encoding="utf-8", errors="replace") as (process, job):
+    report = {"event_sent": False, "console_owned": False, "timed_out": False, "upstream_closed_before_cleanup": False, "remaining_before_cleanup": None}
+    with windows_probe_process(
+        bundle["args"],
+        cwd=str(root),
+        env=bundle["env"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    ) as (process, job):
         process.stdin.close()
         process.stdin = None
         if bundle["mode"] == "interrupt":

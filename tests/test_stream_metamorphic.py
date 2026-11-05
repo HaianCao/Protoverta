@@ -27,9 +27,12 @@ def semantic_output(raw, protocol):
             calls[delta.index] = [delta.call_id, delta.name, ""]
         elif delta.kind == "tool_delta":
             calls[delta.index][2] += delta.text
-    return {"text": "".join(delta.text for delta in deltas if delta.kind == "text"),
-            "calls": [(identifier, name, json.loads(arguments)) for identifier, name, arguments in calls.values()],
-            "reason": deltas[-1].reason, "usage": (deltas[-1].input_tokens, deltas[-1].output_tokens)}
+    return {
+        "text": "".join(delta.text for delta in deltas if delta.kind == "text"),
+        "calls": [(identifier, name, json.loads(arguments)) for identifier, name, arguments in calls.values()],
+        "reason": deltas[-1].reason,
+        "usage": (deltas[-1].input_tokens, deltas[-1].output_tokens),
+    }
 
 
 @pytest.mark.parametrize(("source", "target"), ROUTES)

@@ -12,15 +12,18 @@ from protoverta.streaming import Delta, StreamDecoder, StreamError
 def events():
     encoder = StreamEncoder("responses")
     result = []
-    for delta in [Delta("start", model="m"),
-                  Delta("tool_start", index=0, call_id="c1", name="execute", tool_type="custom"),
-                  Delta("tool_delta", index=0, text="not JSON: "),
-                  Delta("tool_start", index=1, call_id="c2", name="lookup"),
-                  Delta("tool_delta", index=1, text="{\"q\":\""),
-                  Delta("tool_delta", index=0, text="xin chào\n"),
-                  Delta("tool_delta", index=1, text="x\"}"),
-                  Delta("tool_end", index=1), Delta("tool_end", index=0),
-                  Delta("finish", reason="tool_calls", input_tokens=4, output_tokens=7)]:
+    for delta in [
+        Delta("start", model="m"),
+        Delta("tool_start", index=0, call_id="c1", name="execute", tool_type="custom"),
+        Delta("tool_delta", index=0, text="not JSON: "),
+        Delta("tool_start", index=1, call_id="c2", name="lookup"),
+        Delta("tool_delta", index=1, text='{"q":"'),
+        Delta("tool_delta", index=0, text="xin chào\n"),
+        Delta("tool_delta", index=1, text='x"}'),
+        Delta("tool_end", index=1),
+        Delta("tool_end", index=0),
+        Delta("finish", reason="tool_calls", input_tokens=4, output_tokens=7),
+    ]:
         result.extend(encoder.feed(delta))
     encoder.finish()
     return result
@@ -44,7 +47,7 @@ def decode(data):
 def test_responses_native_custom_streams_preserve_raw_inputs_and_identity(chunk_size):
     data = wire(events())
     validator = StreamValidator("responses")
-    out = b"".join(validator.feed(data[offset:offset + chunk_size]) for offset in range(0, len(data), chunk_size)) + validator.finish()
+    out = b"".join(validator.feed(data[offset : offset + chunk_size]) for offset in range(0, len(data), chunk_size)) + validator.finish()
     assert out == data
     deltas = decode(out)
     assert [(d.call_id, d.tool_type) for d in deltas if d.kind == "tool_start"] == [("c1", "custom"), ("c2", "function")]

@@ -97,8 +97,11 @@ def calls_wire(protocol, model, calls):
     for index, (tool, args, call_id) in enumerate(calls):
         if tool.get("namespace"):
             namespaces[call_id] = tool["namespace"]
-        deltas += [Delta("tool_start", index=index, name=tool["name"], call_id=call_id),
-                   Delta("tool_delta", index=index, text=json.dumps(args)), Delta("tool_end", index=index)]
+        deltas += [
+            Delta("tool_start", index=index, name=tool["name"], call_id=call_id),
+            Delta("tool_delta", index=index, text=json.dumps(args)),
+            Delta("tool_end", index=index),
+        ]
     deltas.append(Delta("finish", reason="tool_calls", input_tokens=1, output_tokens=1))
     wire = []
     for delta in deltas:
@@ -123,10 +126,16 @@ def completed_lifecycle(client, stdout, *, failure=False, failure_match=expected
         if not isinstance(result, dict):
             return False
         stats = result.get("subagent_stats", {})
-        return (isinstance(stats, dict) and all(type(stats.get(key)) is int for key in ("spawned", "completed", "failed"))
-                and result.get("is_error") is False and isinstance(result.get("permission_denials"), list) and not result["permission_denials"]
-                and stats.get("spawned") == 2 and stats.get("completed") == (1 if failure else 2)
-                and stats.get("failed") == (1 if failure else 0))
+        return (
+            isinstance(stats, dict)
+            and all(type(stats.get(key)) is int for key in ("spawned", "completed", "failed"))
+            and result.get("is_error") is False
+            and isinstance(result.get("permission_denials"), list)
+            and not result["permission_denials"]
+            and stats.get("spawned") == 2
+            and stats.get("completed") == (1 if failure else 2)
+            and stats.get("failed") == (1 if failure else 0)
+        )
     children, assigned, waited, failed = set(), {}, {}, set()
     for line in stdout.splitlines():
         try:
@@ -136,7 +145,12 @@ def completed_lifecycle(client, stdout, *, failure=False, failure_match=expected
         if not isinstance(event, dict):
             continue
         item = event.get("item")
-        if not isinstance(item, dict) or event.get("type") != "item.completed" or item.get("type") != "collab_tool_call" or item.get("status") not in ({"completed", "failed"} if failure else {"completed"}):
+        if (
+            not isinstance(item, dict)
+            or event.get("type") != "item.completed"
+            or item.get("type") != "collab_tool_call"
+            or item.get("status") not in ({"completed", "failed"} if failure else {"completed"})
+        ):
             continue
         if item.get("tool") == "spawn_agent":
             receivers = item.get("receiver_thread_ids", [])
@@ -227,9 +241,23 @@ class Scenario:
             raise ValueError("Child failed its independently correlated read round trip")
         spawn = single.find_tool(tools, "agent" if self.client == "claude" else "spawn_agent")
         if self.client == "claude" and stage == 1:
-            return calls_wire(self.protocol, body["model"], [
-                (spawn, {"prompt": task + " Read " + str(self.root / "fixture.txt"), "description": "Read local fixture", "subagent_type": "p04-worker", "run_in_background": False}, f"spawn_{index}")
-                for index, task in enumerate(TASKS)])
+            return calls_wire(
+                self.protocol,
+                body["model"],
+                [
+                    (
+                        spawn,
+                        {
+                            "prompt": task + " Read " + str(self.root / "fixture.txt"),
+                            "description": "Read local fixture",
+                            "subagent_type": "p04-worker",
+                            "run_in_background": False,
+                        },
+                        f"spawn_{index}",
+                    )
+                    for index, task in enumerate(TASKS)
+                ],
+            )
         if self.client == "codex" and stage <= 2:
             return calls_wire(self.protocol, body["model"], [(spawn, {"message": TASKS[stage - 1] + " Read the local fixture"}, f"spawn_{stage - 1}")])
         returned = json.dumps(records)
@@ -238,12 +266,29 @@ class Scenario:
             return single.encode(self.protocol, body["model"], text=DONE)
         if self.client == "codex":
             identifiers = [single.agent_id([records.get(f"spawn_{index}")]) for index in range(2)]
-            pending = [identifier for index, identifier in enumerate(identifiers) if FINALS[index] not in returned and not (self.failure and index == 0 and self.expected_failure(returned))]
-            return calls_wire(self.protocol, body["model"], [(single.find_tool(tools, "wait_agent"), {"targets": pending, "timeout_ms": 10000}, f"wait_{stage}")])
+            pending = [
+                identifier
+                for index, identifier in enumerate(identifiers)
+                if FINALS[index] not in returned and not (self.failure and index == 0 and self.expected_failure(returned))
+            ]
+            return calls_wire(
+                self.protocol, body["model"], [(single.find_tool(tools, "wait_agent"), {"targets": pending, "timeout_ms": 10000}, f"wait_{stage}")]
+            )
         raise ValueError("Parent did not replay both verified child results")
 
 
-def drive(scenario, adapter_source, *, claude_tools=None, claude_agent_tools=None, claude_depth=None, gateway_limits=None, mcp_lanes=False, claude_isolation=None, child_model=None):
+def drive(
+    scenario,
+    adapter_source,
+    *,
+    claude_tools=None,
+    claude_agent_tools=None,
+    claude_depth=None,
+    gateway_limits=None,
+    mcp_lanes=False,
+    claude_isolation=None,
+    child_model=None,
+):
     """Run an isolated scenario; acceptance belongs to the calling gate."""
     client, upstream = scenario.client, scenario.protocol
     original_client = smoke_clients.run_client
@@ -274,8 +319,18 @@ def drive(scenario, adapter_source, *, claude_tools=None, claude_agent_tools=Non
     # Reuse P04's isolated catalog/config/process ownership; replace only its
     # single-child scenario and acceptance. No production monkeypatch or flag.
     with patch.object(smoke_clients, "fixture_server", fixture), patch.object(smoke_clients, "run_client", invoke):
-        driver = single.run(client, upstream, adapter_source=adapter_source, claude_tools=claude_tools,
-                            claude_agent_tools=claude_agent_tools, claude_depth=claude_depth, gateway_limits=gateway_limits, mcp_lanes=mcp_lanes, claude_isolation=claude_isolation, child_model=child_model)
+        driver = single.run(
+            client,
+            upstream,
+            adapter_source=adapter_source,
+            claude_tools=claude_tools,
+            claude_agent_tools=claude_agent_tools,
+            claude_depth=claude_depth,
+            gateway_limits=gateway_limits,
+            mcp_lanes=mcp_lanes,
+            claude_isolation=claude_isolation,
+            child_model=child_model,
+        )
     return driver
 
 
@@ -284,16 +339,34 @@ def run(client, upstream, adapter_source, *, failure=False):
     driver = drive(scenario, adapter_source)
     result = scenario.result
     lifecycle = result is not None and completed_lifecycle(client, result.stdout, failure=failure)
-    passed = (result is not None and result.returncode == 0 and DONE in result.stdout and lifecycle
-              and scenario.peak == 2 and scenario.stages["a"] == (1 if failure else 2) and scenario.stages["b"] == 2
-              and not scenario.errors and scenario.rejections == (1 if failure else 0)
-              and (client != "codex" or scenario.audit_count == (1 if failure else 2)))
-    return {"passed": passed, "client": client, "upstream": upstream.value, "failure": failure,
-            "fixture_errors": scenario.errors, "expected_upstream_rejections": scenario.rejections, "cli_version": driver["cli_version"],
-            "peak_overlapping_child_inference": scenario.peak, "lifecycle_verified": lifecycle,
-            "mcp_audit_count": scenario.audit_count, "observed": scenario.observed,
-            "returncode": result.returncode if result else None,
-            "stdout": result.stdout if result else "", "stderr": result.stderr if result else ""}
+    passed = (
+        result is not None
+        and result.returncode == 0
+        and DONE in result.stdout
+        and lifecycle
+        and scenario.peak == 2
+        and scenario.stages["a"] == (1 if failure else 2)
+        and scenario.stages["b"] == 2
+        and not scenario.errors
+        and scenario.rejections == (1 if failure else 0)
+        and (client != "codex" or scenario.audit_count == (1 if failure else 2))
+    )
+    return {
+        "passed": passed,
+        "client": client,
+        "upstream": upstream.value,
+        "failure": failure,
+        "fixture_errors": scenario.errors,
+        "expected_upstream_rejections": scenario.rejections,
+        "cli_version": driver["cli_version"],
+        "peak_overlapping_child_inference": scenario.peak,
+        "lifecycle_verified": lifecycle,
+        "mcp_audit_count": scenario.audit_count,
+        "observed": scenario.observed,
+        "returncode": result.returncode if result else None,
+        "stdout": result.stdout if result else "",
+        "stderr": result.stderr if result else "",
+    }
 
 
 def main():

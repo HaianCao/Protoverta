@@ -11,7 +11,11 @@ DATA = base64.b64encode(b"%PDF-1.4\nsynthetic fixture, not an executable or pars
 
 @pytest.mark.parametrize("source,target", list(itertools.permutations(("chat", "messages", "responses"), 2)))
 def test_inline_pdf_order_and_bytes_round_trip_all_six_request_routes(source, target):
-    body = {"model": "m", "max_tokens": 100, "messages": [{"role": "user", "content": [{"type": "text", "text": "before"}, PDF(DATA).encode("chat"), {"type": "text", "text": "after"}]}]}
+    body = {
+        "model": "m",
+        "max_tokens": 100,
+        "messages": [{"role": "user", "content": [{"type": "text", "text": "before"}, PDF(DATA).encode("chat"), {"type": "text", "text": "after"}]}],
+    }
     native = convert_request(body, "chat", source)
     translated = convert_request(native, source, target)
     replay = convert_request(translated, target, "chat")

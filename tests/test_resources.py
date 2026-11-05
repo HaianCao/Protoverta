@@ -89,7 +89,15 @@ def test_deadlines_bound_chunked_framing_and_body(framing, deadline):
             self.send_header("Transfer-Encoding", "chunked")
             self.end_headers()
             prefixes = {"chunk_header": b"", "chunk_terminator": b"1\r\nX", "trailer": b"0\r\n", "body": b"100\r\n"}
-            drip = b"1;extension=" + b"a" * 60 if framing == "chunk_header" else b"X-Trailer: " + b"a" * 60 if framing == "trailer" else b"\r\n" if framing == "chunk_terminator" else b"x" * 60
+            drip = (
+                b"1;extension=" + b"a" * 60
+                if framing == "chunk_header"
+                else b"X-Trailer: " + b"a" * 60
+                if framing == "trailer"
+                else b"\r\n"
+                if framing == "chunk_terminator"
+                else b"x" * 60
+            )
             try:
                 self.wfile.write(prefixes[framing])
                 self.wfile.flush()
@@ -139,10 +147,13 @@ def test_heartbeats_and_repeated_function_metadata_are_not_progress():
     assert limits.progress == before
 
 
-@pytest.mark.parametrize("block", [
-    {"type": "tool_use", "input": {"value": "long input"}},
-    {"type": "custom_tool_call", "input": "long input"},
-])
+@pytest.mark.parametrize(
+    "block",
+    [
+        {"type": "tool_use", "input": {"value": "long input"}},
+        {"type": "custom_tool_call", "input": "long input"},
+    ],
+)
 def test_native_initial_tool_inputs_also_count_toward_argument_budget(block):
     limits = StreamLimits(max_argument_bytes=4)
     event = SSEEvent("content_block_start", json.dumps({"type": "content_block_start", "content_block": block}))
@@ -156,7 +167,17 @@ def test_native_and_translated_total_stream_limits(factory):
     with pytest.raises(StreamError, match="total byte"):
         pipe.feed(b"x" * 11)
     pipe = factory(max_tool_argument_bytes=4)
-    body = {"object": "chat.completion.chunk", "model": "m", "choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "id": "a", "type": "function", "function": {"name": "f", "arguments": "12345"}}]}, "finish_reason": None}]}
+    body = {
+        "object": "chat.completion.chunk",
+        "model": "m",
+        "choices": [
+            {
+                "index": 0,
+                "delta": {"tool_calls": [{"index": 0, "id": "a", "type": "function", "function": {"name": "f", "arguments": "12345"}}]},
+                "finish_reason": None,
+            }
+        ],
+    }
     with pytest.raises(StreamError, match="arguments exceed"):
         pipe.feed(encode_sse("message", json.dumps(body)))
     pipe = factory(max_stream_items=1)
@@ -165,7 +186,10 @@ def test_native_and_translated_total_stream_limits(factory):
         pipe.feed(encode_sse("message", json.dumps(body)))
 
 
-@pytest.mark.parametrize("options", [{"total_timeout": float("inf")}, {"progress_timeout": True}, {"max_stream_bytes": 0}, {"max_stream_items": 1.5}, {"max_tool_argument_bytes": False}])
+@pytest.mark.parametrize(
+    "options",
+    [{"total_timeout": float("inf")}, {"progress_timeout": True}, {"max_stream_bytes": 0}, {"max_stream_items": 1.5}, {"max_tool_argument_bytes": False}],
+)
 def test_config_rejects_invalid_resource_budgets(options):
     with pytest.raises(ValueError):
         GatewayConfig("chat", "https://example.test/v1", "key", "local", **options)
@@ -174,6 +198,7 @@ def test_config_rejects_invalid_resource_budgets(options):
 @pytest.mark.parametrize("mode", ["heartbeat", "body", "headers"])
 def test_default_transport_stops_heartbeat_or_slow_drip_body(mode):
     streaming = mode == "heartbeat"
+
     class Upstream(BaseHTTPRequestHandler):
         def log_message(self, *_args):
             pass
@@ -188,7 +213,26 @@ def test_default_transport_stops_heartbeat_or_slow_drip_body(mode):
                     self.wfile.write(b"HTTP/1.1 200 OK\r\nX-Slow: ")
                     self.wfile.flush()
                 if streaming:
-                    self.wfile.write(encode_sse("message_start", json.dumps({"type": "message_start", "message": {"id": "m", "model": "m", "type": "message", "role": "assistant", "content": [], "usage": {"input_tokens": 1, "output_tokens": 0}, "stop_reason": None, "stop_sequence": None}})))
+                    self.wfile.write(
+                        encode_sse(
+                            "message_start",
+                            json.dumps(
+                                {
+                                    "type": "message_start",
+                                    "message": {
+                                        "id": "m",
+                                        "model": "m",
+                                        "type": "message",
+                                        "role": "assistant",
+                                        "content": [],
+                                        "usage": {"input_tokens": 1, "output_tokens": 0},
+                                        "stop_reason": None,
+                                        "stop_sequence": None,
+                                    },
+                                }
+                            ),
+                        )
+                    )
                     self.wfile.flush()
                 for _ in range(30):
                     self.wfile.write(encode_sse("ping", '{"type":"ping"}') if streaming else b" ")
@@ -202,9 +246,20 @@ def test_default_transport_stops_heartbeat_or_slow_drip_body(mode):
     thread = threading.Thread(target=upstream.serve_forever, daemon=True)
     thread.start()
     try:
-        config = GatewayConfig("messages", f"http://127.0.0.1:{upstream.server_port}/v1", "fixture", "local", progress_timeout=0.15 if streaming else 2, total_timeout=2 if streaming else 0.15)
+        config = GatewayConfig(
+            "messages",
+            f"http://127.0.0.1:{upstream.server_port}/v1",
+            "fixture",
+            "local",
+            progress_timeout=0.15 if streaming else 2,
+            total_timeout=2 if streaming else 0.15,
+        )
         with gateway_session(config) as url:
-            request = Request(url + "/v1/responses", data=json.dumps({"model": "m", "input": "hi", "stream": streaming, "max_output_tokens": 64}).encode(), headers={"Authorization": "Bearer local"})
+            request = Request(
+                url + "/v1/responses",
+                data=json.dumps({"model": "m", "input": "hi", "stream": streaming, "max_output_tokens": 64}).encode(),
+                headers={"Authorization": "Bearer local"},
+            )
             with pytest.raises(HTTPError) as caught:
                 urlopen(request, timeout=3)
             assert caught.value.code == 504

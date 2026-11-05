@@ -17,7 +17,9 @@ def test_native_error_preserves_body_and_retry_headers():
     def upstream_open(request, *, timeout):
         raise HTTPError(request.full_url, 400, "Bad Request", {"retry-after": "5", "x-should-retry": "false", "Authorization": "secret"}, io.BytesIO(original))
 
-    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(GatewayConfig("messages", "https://example.com/v1", "key", "local"), upstream_open=upstream_open))
+    server = ThreadingHTTPServer(
+        ("127.0.0.1", 0), make_handler(GatewayConfig("messages", "https://example.com/v1", "key", "local"), upstream_open=upstream_open)
+    )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -73,8 +75,10 @@ def test_native_messages_preserves_beta_query_and_version_with_bearer_auth():
     thread.start()
     try:
         request = Request(
-            f"http://127.0.0.1:{server.server_port}/v1/messages?beta=true", data=b'{"model":"m","stream":false}',
-            headers={"Authorization": "Bearer local", "anthropic-version": "2023-06-01", "anthropic-beta": "fixture-beta"}, method="POST",
+            f"http://127.0.0.1:{server.server_port}/v1/messages?beta=true",
+            data=b'{"model":"m","stream":false}',
+            headers={"Authorization": "Bearer local", "anthropic-version": "2023-06-01", "anthropic-beta": "fixture-beta"},
+            method="POST",
         )
         with urlopen(request, timeout=3) as response:
             assert response.status == 200
@@ -149,9 +153,17 @@ def test_gateway_reports_interrupted_sse_without_done_marker():
     from protoverta.sse import encode_sse
 
     def upstream_open(request, *, timeout):
-        return io.BytesIO(encode_sse("message_start", json.dumps({
-            "type": "message_start", "message": {"model": "m", "content": [], "usage": {"input_tokens": 1}},
-        })))
+        return io.BytesIO(
+            encode_sse(
+                "message_start",
+                json.dumps(
+                    {
+                        "type": "message_start",
+                        "message": {"model": "m", "content": [], "usage": {"input_tokens": 1}},
+                    }
+                ),
+            )
+        )
 
     config = GatewayConfig(Protocol.MESSAGES, "https://example.com/v1", "key", "local", "x-api-key")
     server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(config, upstream_open=upstream_open))
@@ -178,9 +190,13 @@ def test_gateway_validates_interrupted_same_protocol_stream():
     from protoverta.sse import encode_sse
 
     def upstream_open(request, *, timeout):
-        chunk = {"object": "chat.completion.chunk", "model": "m", "choices": [
-            {"index": 0, "delta": {"content": "partial"}, "finish_reason": None},
-        ]}
+        chunk = {
+            "object": "chat.completion.chunk",
+            "model": "m",
+            "choices": [
+                {"index": 0, "delta": {"content": "partial"}, "finish_reason": None},
+            ],
+        }
         return io.BytesIO(encode_sse("message", json.dumps(chunk)))
 
     config = GatewayConfig(Protocol.CHAT, "https://example.com/v1", "key", "local")
@@ -206,12 +222,20 @@ def test_gateway_does_not_forward_done_before_clean_eof():
     from protoverta.sse import encode_sse
 
     def upstream_open(request, *, timeout):
-        first = {"object": "chat.completion.chunk", "model": "m", "choices": [
-            {"index": 0, "delta": {"content": "ok"}, "finish_reason": None},
-        ]}
-        last = {"object": "chat.completion.chunk", "model": "m", "choices": [
-            {"index": 0, "delta": {}, "finish_reason": "stop"},
-        ]}
+        first = {
+            "object": "chat.completion.chunk",
+            "model": "m",
+            "choices": [
+                {"index": 0, "delta": {"content": "ok"}, "finish_reason": None},
+            ],
+        }
+        last = {
+            "object": "chat.completion.chunk",
+            "model": "m",
+            "choices": [
+                {"index": 0, "delta": {}, "finish_reason": "stop"},
+            ],
+        }
         wire = encode_sse("message", json.dumps(first)) + encode_sse("message", json.dumps(last))
         wire += encode_sse("message", "[DONE]") + b"data: truncated"
         return io.BytesIO(wire)
@@ -268,9 +292,15 @@ def test_client_disconnect_stops_upstream_stream_processing(disconnect):
     handler.send_response = lambda status: None
     handler.send_header = lambda name, value: None
     handler.end_headers = lambda: None
-    first = encode_sse("message_start", json.dumps({
-        "type": "message_start", "message": {"model": "m", "content": [], "usage": {"input_tokens": 1, "output_tokens": 1}},
-    }))
+    first = encode_sse(
+        "message_start",
+        json.dumps(
+            {
+                "type": "message_start",
+                "message": {"model": "m", "content": [], "usage": {"input_tokens": 1, "output_tokens": 1}},
+            }
+        ),
+    )
     first += encode_sse("content_block_start", json.dumps({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}))
     first += encode_sse("content_block_delta", json.dumps({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "visible"}}))
     upstream = Upstream(first + b"irrelevant trailing bytes")
@@ -286,11 +316,15 @@ def test_gateway_converts_request_and_response_without_network():
         captured["url"] = request.full_url
         captured["headers"] = dict(request.header_items())
         captured["body"] = json.loads(request.data)
-        return io.BytesIO(json.dumps({
-            "model": "m",
-            "choices": [{"message": {"role": "assistant", "content": "pong"}, "finish_reason": "stop"}],
-            "usage": {"prompt_tokens": 3, "completion_tokens": 1},
-        }).encode())
+        return io.BytesIO(
+            json.dumps(
+                {
+                    "model": "m",
+                    "choices": [{"message": {"role": "assistant", "content": "pong"}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 3, "completion_tokens": 1},
+                }
+            ).encode()
+        )
 
     config = GatewayConfig(Protocol.CHAT, "https://example.com/v1", "upstream-secret", "local-token")
     server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(config, upstream_open=upstream_open))

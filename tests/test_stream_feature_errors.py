@@ -23,7 +23,9 @@ class SegmentedResponse(io.BytesIO):
 @pytest.mark.parametrize("field", ["reasoning_content", "reasoning", "reasoning_details"])
 def test_unsupported_reasoning_is_non_retryable_and_contains_no_upstream_text(target, mode, field):
     def chunk(delta):
-        return encode_sse("message", json.dumps({"object": "chat.completion.chunk", "model": "m", "choices": [{"index": 0, "delta": delta, "finish_reason": None}]}))
+        return encode_sse(
+            "message", json.dumps({"object": "chat.completion.chunk", "model": "m", "choices": [{"index": 0, "delta": delta, "finish_reason": None}]})
+        )
 
     start = chunk({"role": "assistant", "content": "already-visible" if mode == "visible" else ""})
     reasoning = chunk({field: "private-upstream-sentinel"})
@@ -32,7 +34,11 @@ def test_unsupported_reasoning_is_non_retryable_and_contains_no_upstream_text(ta
         return io.BytesIO(start + reasoning) if mode == "combined" else SegmentedResponse([start, reasoning])
 
     config = GatewayConfig("chat", "https://example.test/v1", "upstream-key", "local", messages_usage_policy="deferred" if target == "messages" else "strict")
-    body = {"model": "m", "stream": True, "max_tokens": 32, "messages": [{"role": "user", "content": "Hi"}]} if target == "messages" else {"model": "m", "input": "Hi", "stream": True}
+    body = (
+        {"model": "m", "stream": True, "max_tokens": 32, "messages": [{"role": "user", "content": "Hi"}]}
+        if target == "messages"
+        else {"model": "m", "input": "Hi", "stream": True}
+    )
     with listener(config, upstream) as origin:
         url = origin.removesuffix("responses") + target
         if mode == "visible":
@@ -63,9 +69,14 @@ def test_unsupported_reasoning_is_non_retryable_and_contains_no_upstream_text(ta
 @pytest.mark.parametrize("target", ["messages", "responses"])
 def test_empty_completed_stream_releases_initial_metadata_and_terminal(target):
     def chunk(delta, reason=None):
-        return encode_sse("message", json.dumps({"object": "chat.completion.chunk", "model": "m", "choices": [{"index": 0, "delta": delta, "finish_reason": reason}]}))
+        return encode_sse(
+            "message", json.dumps({"object": "chat.completion.chunk", "model": "m", "choices": [{"index": 0, "delta": delta, "finish_reason": reason}]})
+        )
 
-    usage = encode_sse("message", json.dumps({"object": "chat.completion.chunk", "model": "m", "choices": [], "usage": {"prompt_tokens": 2, "completion_tokens": 0, "total_tokens": 2}}))
+    usage = encode_sse(
+        "message",
+        json.dumps({"object": "chat.completion.chunk", "model": "m", "choices": [], "usage": {"prompt_tokens": 2, "completion_tokens": 0, "total_tokens": 2}}),
+    )
     chunks = [chunk({"role": "assistant"}), chunk({}, "stop"), usage, encode_sse("message", "[DONE]")]
     config = GatewayConfig("chat", "https://example.test/v1", "key", "local", messages_usage_policy="deferred" if target == "messages" else "strict")
     body = {"model": "m", "stream": True, "max_tokens": 32, "messages": []} if target == "messages" else {"model": "m", "input": "Hi", "stream": True}

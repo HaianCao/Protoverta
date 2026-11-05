@@ -192,7 +192,11 @@ class StreamLimits:
         if kind in {"response.output_item.added", "content_block_start"}:
             self.items += 1
             block = body.get("item", body.get("content_block", {}))
-            if isinstance(block, dict) and isinstance(block.get("type"), str) and block["type"] in {"function_call", "tool_use", "custom_tool_call", "server_tool_use", "tool_search_call"}:
+            if (
+                isinstance(block, dict)
+                and isinstance(block.get("type"), str)
+                and block["type"] in {"function_call", "tool_use", "custom_tool_call", "server_tool_use", "tool_search_call"}
+            ):
                 self.progress += 1
                 if block["type"] == "tool_search_call" and isinstance(block.get("arguments"), dict):
                     self._arguments(json.dumps(block["arguments"], ensure_ascii=False))
@@ -221,8 +225,10 @@ class StreamLimits:
                 if not isinstance(tool, dict):
                     continue
                 choice_index, tool_index = choice.get("index"), tool.get("index")
-                key = (choice_index if type(choice_index) is int else None,
-                       tool_index if type(tool_index) is int else tool.get("id") if isinstance(tool.get("id"), str) else None)
+                key = (
+                    choice_index if type(choice_index) is int else None,
+                    tool_index if type(tool_index) is int else tool.get("id") if isinstance(tool.get("id"), str) else None,
+                )
                 new = key not in self.chat_tools
                 if new:
                     self.chat_tools.add(key)

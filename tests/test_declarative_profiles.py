@@ -9,11 +9,15 @@ from protoverta.provider_profiles import ProviderProfile, ProviderProfiles
 
 
 def profile(**extra):
-    return ProviderProfile("https://example.test/v1", "chat", "m", "2026-10-25", "synthetic equivalent wire contract", "max_tokens", "completion_total", **extra)
+    return ProviderProfile(
+        "https://example.test/v1", "chat", "m", "2026-10-25", "synthetic equivalent wire contract", "max_tokens", "completion_total", **extra
+    )
 
 
 def test_reasoning_profile_is_exact_reversible_injective_and_never_clamps():
-    registry = ProviderProfiles((profile(reasoning_field="thinking.level", reasoning_values={"low": 1, "medium": 2, "high": 3}, reasoning_semantics="effort_equivalent"),))
+    registry = ProviderProfiles(
+        (profile(reasoning_field="thinking.level", reasoning_values={"low": 1, "medium": 2, "high": 3}, reasoning_semantics="effort_equivalent"),)
+    )
     body = {"model": "m", "reasoning_effort": "high"}
     original = copy.deepcopy(body)
     assert registry.apply("https://example.test/v1", "chat", body) == {"model": "m", "thinking": {"level": 3}}
@@ -31,10 +35,18 @@ def test_reasoning_profile_is_exact_reversible_injective_and_never_clamps():
 def test_catalog_nested_collection_alternate_id_query_and_numbered_pages():
     requests = []
     policy = CatalogPolicy(collection_field="result.models", id_field="model_id", pagination="numbered", query_params=(("kind", "coding"),), first_page=0)
-    result = fetch_catalog("https://example.test/v1", {}, policy, upstream_open=pages([
-        {"result": {"models": [{"model_id": "a"}]}, "pagination": {"total_pages": 2}},
-        {"result": {"models": [{"model_id": "b"}]}, "pagination": {"total_pages": 2}},
-    ], requests))
+    result = fetch_catalog(
+        "https://example.test/v1",
+        {},
+        policy,
+        upstream_open=pages(
+            [
+                {"result": {"models": [{"model_id": "a"}]}, "pagination": {"total_pages": 2}},
+                {"result": {"models": [{"model_id": "b"}]}, "pagination": {"total_pages": 2}},
+            ],
+            requests,
+        ),
+    )
     assert [item.id for item in result] == ["a", "b"]
     assert requests[0].full_url.endswith("?kind=coding&page=0")
     assert requests[1].full_url.endswith("?kind=coding&page=1")

@@ -50,14 +50,19 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
 
         stack.enter_context(patch.object(web, "ThreadingHTTPServer", side_effect=server))
         stack.enter_context(patch.object(web.webbrowser, "open", side_effect=urls.put))
+
         def fetch(config, provider, **options):
-            names = [{"id": "constructor" if i == 0 else "model-" + str(i), "display_name": "Nineteen <em> model" if i == 19 else "Model " + str(i)} for i in range(20)]
+            names = [
+                {"id": "constructor" if i == 0 else "model-" + str(i), "display_name": "Nineteen <em> model" if i == 19 else "Model " + str(i)}
+                for i in range(20)
+            ]
             models = [item["id"] for item in names] if codex else names
             identity = web._identity(provider, config, token=options["token"]) if codex else web._identity(config, provider, token=options["token"])
             entry = {"identity": identity, "models": models, "model_info": names[1:], "fetched_at" if codex else "saved_at": time.time()}
             if options.get("cache_sink"):
                 options["cache_sink"](entry)
             return models
+
         stack.enter_context(patch.object(web, "fetch_models", side_effect=fetch))
         stack.enter_context(patch.object(web, "preflight"))
         foreground = None
@@ -152,7 +157,10 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
                     page.goto(url)
                     expect(page.locator(select + " option")).to_have_text("Fixture <b>Provider</b>")
                     expect(page.locator(model)).to_have_value("model-19")
-                    page.route("**/api/models**", lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps({"models": [], "stale": False})))
+                    page.route(
+                        "**/api/models**",
+                        lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps({"models": [], "stale": False})),
+                    )
                     page.goto(url)
                     page.locator(model).fill("")
                     expect(page.locator(".empty")).to_contain_text("No model catalog")
@@ -187,12 +195,15 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
                     with page.expect_response(lambda response: "/api/provider" in response.url and response.request.method == "POST") as saved:
                         # Same-task assertions cannot race the HTTP response: both
                         # model entry and Run must stay disabled until save settles.
-                        assert page.evaluate("""codex => {
+                        assert page.evaluate(
+                            """codex => {
                             if (codex) document.querySelector('#saveProvider').click();
                             else document.querySelector('#providerForm').requestSubmit();
                             return document.querySelector(codex ? '#modelInput' : '#model').disabled
                                 && document.querySelector(codex ? '#runBtn' : '#run').disabled;
-                        }""", codex)
+                        }""",
+                            codex,
+                        )
                     assert saved.value.ok
                     expect(page.locator("#agentPolicyHint")).to_contain_text("fixture-worker")
                     page.locator(model).fill("manual-model")
@@ -234,10 +245,16 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
                         assert (root / "child-finished").is_file()
                     restored = config_module.load(config.path).providers["fixture"]
                     saved_config = config_module.load(config.path)
-                    assert (saved_config.defaults.model if codex else saved_config.default_model) == "model-19", "Run must not overwrite an explicitly saved default"
+                    assert (saved_config.defaults.model if codex else saved_config.default_model) == "model-19", (
+                        "Run must not overwrite an explicitly saved default"
+                    )
                     assert restored.auth_mode == "api_key"
                     assert restored.gateway_runtime["retry_attempts"] == 2
-                    assert restored.agent_models == ({"policy": "custom", "default": "fixture-worker", "effort": "low"} if codex else {"policy": "custom", "default": "fixture-worker", "haiku": "fixture-fast"})
+                    assert restored.agent_models == (
+                        {"policy": "custom", "default": "fixture-worker", "effort": "low"}
+                        if codex
+                        else {"policy": "custom", "default": "fixture-worker", "haiku": "fixture-fast"}
+                    )
                     assert not errors, errors
                     return {"package": package, "passed": True, "launch_stubbed": not launch_fixture, "synthetic_foreground_cli": launch_fixture}
                 finally:
@@ -260,7 +277,11 @@ def main():
     parser.add_argument("--screenshots", type=Path, help="Optional synthetic-fixture screenshots directory")
     parser.add_argument("--launch-fixture", action="store_true", help="Exercise real foreground launcher/gateway with a synthetic CLI child")
     args = parser.parse_args()
-    print(json.dumps(run(args.source, args.package, args.browser_executable, installed=args.installed, screenshots=args.screenshots, launch_fixture=args.launch_fixture)))
+    print(
+        json.dumps(
+            run(args.source, args.package, args.browser_executable, installed=args.installed, screenshots=args.screenshots, launch_fixture=args.launch_fixture)
+        )
+    )
 
 
 if __name__ == "__main__":

@@ -12,11 +12,21 @@ from protoverta.streaming import Delta, StreamError
 
 
 def body():
-    return {"model": "m", "max_output_tokens": 128, "input": "Hello", "tools": [
-        {"type": "function", "name": "lookup", "parameters": {"type": "object"}},
-        {"type": "namespace", "name": "crm", "description": "CRM tools", "tools": [{"type": "function", "name": "lookup", "description": "Find contact", "parameters": {"type": "object"}}]},
-        {"type": "namespace", "name": "mail", "tools": [{"type": "function", "name": "lookup", "parameters": {"type": "object"}}]},
-    ]}
+    return {
+        "model": "m",
+        "max_output_tokens": 128,
+        "input": "Hello",
+        "tools": [
+            {"type": "function", "name": "lookup", "parameters": {"type": "object"}},
+            {
+                "type": "namespace",
+                "name": "crm",
+                "description": "CRM tools",
+                "tools": [{"type": "function", "name": "lookup", "description": "Find contact", "parameters": {"type": "object"}}],
+            },
+            {"type": "namespace", "name": "mail", "tools": [{"type": "function", "name": "lookup", "parameters": {"type": "object"}}]},
+        ],
+    }
 
 
 @pytest.mark.parametrize("target", ["chat", "messages"])
@@ -36,10 +46,13 @@ def test_namespaces_are_distinct_and_preserve_descriptions_and_input(target):
 
 def test_history_rebuilds_mapping_even_when_old_tool_definition_is_absent():
     mapper = NamespaceMap()
-    request = {"model": "m", "input": [
-        {"type": "function_call", "name": "lookup", "namespace": "old", "call_id": "c1", "arguments": "{}"},
-        {"type": "function_call_output", "call_id": "c1", "output": "old result"},
-    ]}
+    request = {
+        "model": "m",
+        "input": [
+            {"type": "function_call", "name": "lookup", "namespace": "old", "call_id": "c1", "arguments": "{}"},
+            {"type": "function_call_output", "call_id": "c1", "output": "old result"},
+        ],
+    }
     prepared = mapper.prepare(request)
     converted = convert_request(prepared, "responses", "chat")
     assert converted["messages"][0]["tool_calls"][0]["function"]["name"] == mapper.alias("old", "lookup")
@@ -50,7 +63,19 @@ def test_json_tool_response_restores_only_call_name_not_text_or_arguments():
     mapper = NamespaceMap()
     prepared = mapper.prepare(body())
     alias = prepared["tools"][1]["name"]
-    response = {"model": "m", "choices": [{"finish_reason": "tool_calls", "message": {"role": "assistant", "content": alias, "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": alias, "arguments": json.dumps({"value": alias})}}]}}]}
+    response = {
+        "model": "m",
+        "choices": [
+            {
+                "finish_reason": "tool_calls",
+                "message": {
+                    "role": "assistant",
+                    "content": alias,
+                    "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": alias, "arguments": json.dumps({"value": alias})}}],
+                },
+            }
+        ],
+    }
     restored = mapper.restore(convert_response(response, "chat", "responses"))
     call = next(item for item in restored["output"] if item["type"] == "function_call")
     assert (call["name"], call["namespace"], call["call_id"]) == ("lookup", "crm", "call_1")
@@ -63,10 +88,16 @@ def test_stream_restores_added_done_and_terminal_snapshot(source):
     mapper = NamespaceMap()
     alias = mapper.prepare(body())["tools"][1]["name"]
     encoder = StreamEncoder(source)
-    deltas = [Delta("start", model="m", input_tokens=1, output_tokens=0), Delta("tool_start", index=0, call_id="c1", name=alias), Delta("tool_delta", index=0, text='{"x":1}'), Delta("tool_end", index=0), Delta("finish", reason="tool_calls", input_tokens=1, output_tokens=1)]
+    deltas = [
+        Delta("start", model="m", input_tokens=1, output_tokens=0),
+        Delta("tool_start", index=0, call_id="c1", name=alias),
+        Delta("tool_delta", index=0, text='{"x":1}'),
+        Delta("tool_end", index=0),
+        Delta("finish", reason="tool_calls", input_tokens=1, output_tokens=1),
+    ]
     wire = b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta))
     pipe = StreamTranscoder(source, "responses", response_transform=mapper.restore)
-    output = b"".join(pipe.feed(wire[i:i + 7]) for i in range(0, len(wire), 7))
+    output = b"".join(pipe.feed(wire[i : i + 7]) for i in range(0, len(wire), 7))
     assert b"response.completed" not in output
     output += pipe.finish()
     events = [json.loads(event.data) for event in SSEParser().feed(output)]
@@ -112,7 +143,13 @@ def test_historical_flat_function_cannot_collide_with_generated_alias():
 
 
 def test_messages_direct_caller_is_portable_but_server_caller_is_not():
-    response = {"model": "m", "role": "assistant", "content": [{"type": "tool_use", "id": "c1", "name": "add", "input": {"a": 2, "b": 3}, "caller": {"type": "direct"}}], "stop_reason": "tool_use", "usage": {"input_tokens": 4, "output_tokens": 5}}
+    response = {
+        "model": "m",
+        "role": "assistant",
+        "content": [{"type": "tool_use", "id": "c1", "name": "add", "input": {"a": 2, "b": 3}, "caller": {"type": "direct"}}],
+        "stop_reason": "tool_use",
+        "usage": {"input_tokens": 4, "output_tokens": 5},
+    }
     converted = convert_response(response, "messages", "responses")
     assert converted["output"][0]["name"] == "add"
     response["content"][0]["caller"] = {"type": "server_tool", "tool_id": "hosted"}

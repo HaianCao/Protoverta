@@ -47,7 +47,16 @@ def retry_after(headers: RetryHeaders | None, *, now: float | None = None) -> fl
     return max(0.0, seconds) if math.isfinite(seconds) else None
 
 
-def open_with_retry(opener: UpstreamOpener[ResponseT_co], request: Request, budget: RetryBudget, *, attempts: int = 1, max_wait: float = 5.0, admission: Admission | None = None, sleep: Callable[[float], None] | None = None) -> tuple[ResponseT_co, str | None]:
+def open_with_retry(
+    opener: UpstreamOpener[ResponseT_co],
+    request: Request,
+    budget: RetryBudget,
+    *,
+    attempts: int = 1,
+    max_wait: float = 5.0,
+    admission: Admission | None = None,
+    sleep: Callable[[float], None] | None = None,
+) -> tuple[ResponseT_co, str | None]:
     """Retry only explicit transient HTTP rejection before response/body delivery.
 
     Transport errors are not retried: whether a generation reached upstream is
@@ -73,7 +82,7 @@ def open_with_retry(opener: UpstreamOpener[ResponseT_co], request: Request, budg
                     raise
             if index + 1 >= attempts or exc.code not in (429, 502, 503, 504) or should_retry == "false":
                 raise
-            delay = delay if delay is not None else min(max_wait, 0.25 * 2 ** index)
+            delay = delay if delay is not None else min(max_wait, 0.25 * 2**index)
             try:
                 remaining = budget.remaining()
             except BaseException:

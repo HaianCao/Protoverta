@@ -19,11 +19,13 @@ def test_atomic_reservations_reconcile_unknown_usage_and_policy_conflicts(tmp_pa
     now = [100.0]
     quota = SharedTokenQuota(tmp_path / "quota.sqlite", "synthetic-key-scope", "m", limit=100, lease=10, clock=lambda: now[0])
     with ThreadPoolExecutor(max_workers=8) as pool:
+
         def reserve(_):
             try:
                 return quota.reserve(30)
             except AdmissionDenied:
                 return None
+
         identifiers = list(pool.map(reserve, range(8)))
     accepted = [value for value in identifiers if value]
     assert len(accepted) == 3
@@ -60,14 +62,26 @@ def test_extreme_reported_usage_exhausts_quota_without_sql_overflow(tmp_path):
 
 
 def config(tmp_path):
-    return GatewayConfig("chat", "https://example.invalid/v1", "fixture", "local", shared_admission_db=str(tmp_path / "quota.sqlite"), shared_token_limit=100, token_counter=lambda body, protocol: TokenCount(10, exact=True))
+    return GatewayConfig(
+        "chat",
+        "https://example.invalid/v1",
+        "fixture",
+        "local",
+        shared_admission_db=str(tmp_path / "quota.sqlite"),
+        shared_token_limit=100,
+        token_counter=lambda body, protocol: TokenCount(10, exact=True),
+    )
 
 
 def test_gateway_reconciles_reported_usage_without_modifying_request(tmp_path):
     requests = []
+
     def upstream(request, timeout):
         requests.append(json.loads(request.data))
-        return io.BytesIO(b'{"model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":1}}')
+        return io.BytesIO(
+            b'{"model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":1}}'
+        )
+
     body = {"model": "m", "input": "synthetic", "max_output_tokens": 79}
     with listener(config(tmp_path), upstream) as url:
         for _ in range(2):
@@ -86,9 +100,11 @@ def test_gateway_reconciles_reported_usage_without_modifying_request(tmp_path):
 
 def test_missing_usage_retains_reservation_and_missing_caps_or_estimates_reject_before_call(tmp_path):
     calls = []
+
     def upstream(request, timeout):
         calls.append(1)
         return io.BytesIO(b'{"model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}')
+
     body = {"model": "m", "input": "synthetic", "max_output_tokens": 80}
     item = config(tmp_path)
     with listener(item, upstream) as url:
@@ -109,9 +125,11 @@ def test_missing_usage_retains_reservation_and_missing_caps_or_estimates_reject_
 
 def test_ambiguous_upstream_transport_never_refunds_tokens(tmp_path):
     calls = []
+
     def failed(request, timeout):
         calls.append(1)
         raise OSError("private")
+
     with listener(config(tmp_path), failed) as url:
         for expected in (502, 429):
             with pytest.raises(HTTPError) as error:

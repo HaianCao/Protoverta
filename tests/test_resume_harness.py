@@ -34,7 +34,25 @@ def test_harness_preserves_opt_in_session_and_resume_arguments(harness, monkeypa
     monkeypatch.setattr(harness, "run_process", run)
     config = GatewayConfig("chat", "http://127.0.0.1:1234/v1", "fake-upstream-key", "local")
     identifier = "00000000-0000-4000-8000-000000000001"
-    harness.run_client(client, client + ".exe", "http://127.0.0.1:4321", "http://127.0.0.1:1234", config, {}, str(tmp_path), False, tmp_path, False, harness.Protocol.CHAT, 10, "test-model", persist_session=persist, resume_id=identifier if persist else None, provider_id="alternate", agent_model_policy=agent_policy)
+    harness.run_client(
+        client,
+        client + ".exe",
+        "http://127.0.0.1:4321",
+        "http://127.0.0.1:1234",
+        config,
+        {},
+        str(tmp_path),
+        False,
+        tmp_path,
+        False,
+        harness.Protocol.CHAT,
+        10,
+        "test-model",
+        persist_session=persist,
+        resume_id=identifier if persist else None,
+        provider_id="alternate",
+        agent_model_policy=agent_policy,
+    )
     args = captured["args"]
     raw = tomllib.loads((tmp_path / "adapter.toml").read_text(encoding="utf-8"))
     provider = raw["providers"]["alternate"] if client == "codex" else raw["providers"][0]
@@ -42,13 +60,13 @@ def test_harness_preserves_opt_in_session_and_resume_arguments(harness, monkeypa
     assert args[args.index("-p") + 1] == "alternate"
     if client == "codex":
         assert "alternate" in raw["providers"]
-        root = args[args.index("--") + 1:]
+        root = args[args.index("--") + 1 :]
         assert root.pop(0) == "--no-daemon"
         assert root[:4] == ["-c", "model_providers.alternate.request_max_retries=0", "-c", "model_providers.alternate.stream_max_retries=0"]
         assert root[4:6] == ["-c", "features.daemon_auto_start=false"]
         if persist:
             at = root.index("--sandbox")
-            assert root[at:at + 5] == ["--sandbox", "read-only", "exec", "resume", identifier]
+            assert root[at : at + 5] == ["--sandbox", "read-only", "exec", "resume", identifier]
             assert "run" in args
         assert ("--ephemeral" not in args) == persist
     else:
@@ -83,7 +101,13 @@ def test_resume_tool_fixture_is_a_valid_stream(monkeypatch, protocol):
 def test_trace_records_only_shapes_not_instruction_contents(monkeypatch):
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "scripts"))
     module = importlib.import_module("trace_adapter")
-    result = module.summarize({"model": "synthetic", "input": [{"role": "developer", "content": "<model_switch>private sentinel</model_switch>"}], "tools": [{"type": "namespace", "name": "multi_agent_v1", "tools": [{"type": "function", "parameters": {"secret": "private schema"}}]}]})
+    result = module.summarize(
+        {
+            "model": "synthetic",
+            "input": [{"role": "developer", "content": "<model_switch>private sentinel</model_switch>"}],
+            "tools": [{"type": "namespace", "name": "multi_agent_v1", "tools": [{"type": "function", "parameters": {"secret": "private schema"}}]}],
+        }
+    )
     assert result["developer_messages"] == [{"index": 0, "tags": ["model_switch"]}]
     assert result["tools"][0]["child_types"] == ["function"]
     assert "private" not in json.dumps(result)
@@ -93,7 +117,9 @@ def test_trace_records_only_shapes_not_instruction_contents(monkeypatch):
 def test_trace_handles_opaque_or_malformed_shapes_without_content_leak(monkeypatch, content):
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "scripts"))
     module = importlib.import_module("trace_adapter")
-    result = module.summarize({"input": [{"type": "reasoning", "content": content, "encrypted_content": "private"}, {"role": "developer", "content": None}], "tools": None})
+    result = module.summarize(
+        {"input": [{"type": "reasoning", "content": content, "encrypted_content": "private"}, {"role": "developer", "content": None}], "tools": None}
+    )
     assert result["public_reasoning_items"] == 0
     assert result["reasoning_shapes"][0]["opaque_present"] is True
     assert "private" not in json.dumps(result)

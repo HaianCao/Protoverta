@@ -29,6 +29,7 @@ def test_codex_fixture_settings_and_search_policy_reach_client(harness, monkeypa
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(smoke, "run_process", run)
+
     # This test supplies a synthetic adapter root, not a real source checkout.
     # Version-policy loading has its own tests. Bare mode forwards its result;
     # adapter mode lets the launcher apply the policy itself.
@@ -38,7 +39,22 @@ def test_codex_fixture_settings_and_search_policy_reach_client(harness, monkeypa
 
     monkeypatch.setattr(smoke, "codex_settings", settings)
     config = GatewayConfig("chat", "http://127.0.0.1:1234/v1", "fake-upstream-key", "local", client_tool_search="function")
-    smoke.run_client("codex", "codex.exe", "http://127.0.0.1:4321", config.upstream_base_url.removesuffix("/v1"), config, {}, str(tmp_path), False, tmp_path if adapter else None, False, Protocol.CHAT, 10, "fixture", codex_config={"model_catalog_json": "fixture-models.json"})
+    smoke.run_client(
+        "codex",
+        "codex.exe",
+        "http://127.0.0.1:4321",
+        config.upstream_base_url.removesuffix("/v1"),
+        config,
+        {},
+        str(tmp_path),
+        False,
+        tmp_path if adapter else None,
+        False,
+        Protocol.CHAT,
+        10,
+        "fixture",
+        codex_config={"model_catalog_json": "fixture-models.json"},
+    )
     args = captured["args"]
     assert captured["policy"] == ("codex.exe", tmp_path if adapter else None)
     if not adapter:
@@ -76,13 +92,27 @@ def test_search_fixture_uses_only_advertised_query_schema(harness):
 
 
 def test_native_loaded_namespace_is_read_from_search_history(harness):
-    body = {"input": [{"type": "tool_search_output", "tools": [{"type": "namespace", "name": "mcp__fixture", "tools": [{"type": "function", "name": "fixture_lookup"}]}]}]}
+    body = {
+        "input": [
+            {"type": "tool_search_output", "tools": [{"type": "namespace", "name": "mcp__fixture", "tools": [{"type": "function", "name": "fixture_lookup"}]}]}
+        ]
+    }
     assert list(harness.functions(body, Protocol.RESPONSES)) == [{"type": "function", "name": "fixture_lookup", "namespace": "mcp__fixture"}]
 
 
 @pytest.mark.parametrize("error", [None, {"message": "fixture denied"}])
 def test_actual_mcp_completion_required_for_search_pass(harness, error):
-    event = {"type": "item.completed", "item": {"type": "mcp_tool_call", "server": "fixture", "tool": harness.LOOKUP, "status": "completed", "error": error, "result": {"content": [{"type": "text", "text": harness.VALUE}]}}}
+    event = {
+        "type": "item.completed",
+        "item": {
+            "type": "mcp_tool_call",
+            "server": "fixture",
+            "tool": harness.LOOKUP,
+            "status": "completed",
+            "error": error,
+            "result": {"content": [{"type": "text", "text": harness.VALUE}]},
+        },
+    }
     assert harness.lookup_completed(json.dumps(event)) is (error is None)
     assert not harness.lookup_completed(harness.MARKER)
     assert not harness.lookup_completed('[]\n{"type":"item.completed","item":null}')
@@ -91,8 +121,22 @@ def test_actual_mcp_completion_required_for_search_pass(harness, error):
 
 
 def test_fixture_mcp_lists_and_calls_only_fixed_read_only_tool(harness):
-    messages = [{"id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05"}}, {"method": "notifications/initialized"}, {"id": 2, "method": "tools/list"}, {"id": 3, "method": "tools/call", "params": {"name": harness.LOOKUP, "arguments": {}}}, {"id": 4, "method": "tools/call", "params": {"name": "not_allowed"}}]
-    result = subprocess.run([sys.executable, str(Path(harness.__file__)), "--mcp"], input="\n".join(json.dumps(item) for item in messages) + "\n", capture_output=True, text=True, encoding="utf-8", timeout=10, check=True)
+    messages = [
+        {"id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05"}},
+        {"method": "notifications/initialized"},
+        {"id": 2, "method": "tools/list"},
+        {"id": 3, "method": "tools/call", "params": {"name": harness.LOOKUP, "arguments": {}}},
+        {"id": 4, "method": "tools/call", "params": {"name": "not_allowed"}},
+    ]
+    result = subprocess.run(
+        [sys.executable, str(Path(harness.__file__)), "--mcp"],
+        input="\n".join(json.dumps(item) for item in messages) + "\n",
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=10,
+        check=True,
+    )
     responses = [json.loads(line) for line in result.stdout.splitlines()]
     assert len(responses) == 4
     assert responses[1]["result"]["tools"][0]["annotations"]["readOnlyHint"] is True

@@ -86,7 +86,25 @@ class StreamTranscoder:
     Calling code must not emit a successful terminal event after an exception.
     """
 
-    def __init__(self, source: Protocol | str, target: Protocol | str, *, messages_usage_policy: str = "strict", max_pending_bytes: int = 8 * 1024 * 1024, response_transform: Callable[[dict], dict] | None = None, public_reasoning: bool = False, tool_name_transform: Callable[[str], str] | None = None, max_stream_bytes=32 * 1024 * 1024, max_stream_items=1024, max_tool_argument_bytes=8 * 1024 * 1024, delta_transform: Callable[[Delta], Delta] | None = None, request_context: dict | None = None, tool_policy=None, text_logprobs: bool = False, max_top_logprobs=None) -> None:
+    def __init__(
+        self,
+        source: Protocol | str,
+        target: Protocol | str,
+        *,
+        messages_usage_policy: str = "strict",
+        max_pending_bytes: int = 8 * 1024 * 1024,
+        response_transform: Callable[[dict], dict] | None = None,
+        public_reasoning: bool = False,
+        tool_name_transform: Callable[[str], str] | None = None,
+        max_stream_bytes=32 * 1024 * 1024,
+        max_stream_items=1024,
+        max_tool_argument_bytes=8 * 1024 * 1024,
+        delta_transform: Callable[[Delta], Delta] | None = None,
+        request_context: dict | None = None,
+        tool_policy=None,
+        text_logprobs: bool = False,
+        max_top_logprobs=None,
+    ) -> None:
         self.source = Protocol(source)
         self.target = Protocol(target)
         if messages_usage_policy not in {"strict", "deferred"}:
@@ -102,7 +120,9 @@ class StreamTranscoder:
         self.decoder = StreamDecoder(self.source, public_reasoning=public_reasoning, text_logprobs=text_logprobs, max_top_logprobs=limit)
         if request_context is not None and self.source == self.target:
             raise ValueError("request_context requires translated Responses output")
-        self.encoder = StreamEncoder(self.target, response_transform=response_transform, public_reasoning=public_reasoning, request_context=request_context, text_logprobs=text_logprobs)
+        self.encoder = StreamEncoder(
+            self.target, response_transform=response_transform, public_reasoning=public_reasoning, request_context=request_context, text_logprobs=text_logprobs
+        )
         self.tool_name_transform = tool_name_transform
         self.delta_transform = delta_transform
         self.tool_policy = tool_policy
@@ -146,7 +166,13 @@ class StreamTranscoder:
                         deltas = [delta]
                     for item in deltas:
                         for encoded in self.encoder.feed(item):
-                            if item.kind in {"tool_start", "reasoning_text"} or item.kind == "text" and bool(item.text) or encoded.event == "response.output_item.added" and item.kind == "tool_end":
+                            if (
+                                item.kind in {"tool_start", "reasoning_text"}
+                                or item.kind == "text"
+                                and bool(item.text)
+                                or encoded.event == "response.output_item.added"
+                                and item.kind == "tool_end"
+                            ):
                                 self.has_payload = True
                             wire = encode_sse(encoded.event, encoded.data, id=encoded.id)
                             if item.kind == "finish":
@@ -221,10 +247,15 @@ class _LifecycleValidator:
                 index = self._index(choice, "index")
                 if index in self.finished_choices:
                     delta = choice.get("delta")
-                    if (isinstance(delta, dict) and set(delta) <= {"role", "content"}
-                            and delta.get("role") in (None, "assistant") and delta.get("content") in (None, "")
-                            and choice.get("finish_reason") == self.finish_reasons[index]
-                            and isinstance(body.get("usage"), dict) and index not in self.usage_postludes):
+                    if (
+                        isinstance(delta, dict)
+                        and set(delta) <= {"role", "content"}
+                        and delta.get("role") in (None, "assistant")
+                        and delta.get("content") in (None, "")
+                        and choice.get("finish_reason") == self.finish_reasons[index]
+                        and isinstance(body.get("usage"), dict)
+                        and index not in self.usage_postludes
+                    ):
                         self.usage_postludes.add(index)
                         continue
                     raise StreamError("Chat delta after choice completion")
@@ -299,7 +330,11 @@ class _LifecycleValidator:
             expected = "completed" if kind == "response.completed" else "incomplete"
             if self.open_items or not isinstance(response, dict) or response.get("status") != expected:
                 raise StreamError("Responses terminal event disagrees with lifecycle")
-            if kind == "response.incomplete" and isinstance(response.get("incomplete_details"), dict) and response["incomplete_details"].get("reason") == "max_output_tokens":
+            if (
+                kind == "response.incomplete"
+                and isinstance(response.get("incomplete_details"), dict)
+                and response["incomplete_details"].get("reason") == "max_output_tokens"
+            ):
                 self.truncated = True
             self.ended = True
         elif kind == "response.failed":
@@ -317,7 +352,9 @@ class StreamValidator:
     multimodal and hosted-tool events without interpreting their contents.
     """
 
-    def __init__(self, protocol: Protocol | str, *, max_stream_bytes=32 * 1024 * 1024, max_stream_items=1024, max_tool_argument_bytes=8 * 1024 * 1024, event_guard=None) -> None:
+    def __init__(
+        self, protocol: Protocol | str, *, max_stream_bytes=32 * 1024 * 1024, max_stream_items=1024, max_tool_argument_bytes=8 * 1024 * 1024, event_guard=None
+    ) -> None:
         self.parser = SSEParser()
         self.decoder = _LifecycleValidator(protocol)
         self.limits = StreamLimits(max_stream_bytes, max_stream_items, max_tool_argument_bytes)

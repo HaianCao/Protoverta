@@ -19,25 +19,48 @@ def fragments(raw, seed):
     offset = 0
     while offset < len(raw):
         size = randomizer.randint(1, 37)
-        yield raw[offset:offset + size]
+        yield raw[offset : offset + size]
         offset += size
 
 
 def response_snapshot(output, *, status="completed", reason=None):
-    return {"id": "resp_fixture", "object": "response", "created_at": 1, "model": MODEL,
-            "status": status, "error": None, "incomplete_details": {"reason": reason} if reason else None,
-            "output": output, "parallel_tool_calls": True, "tools": [], "tool_choice": "auto",
-            "metadata": {}, "temperature": None, "top_p": None,
-            "usage": {"input_tokens": 19, "output_tokens": 7, "total_tokens": 26,
-                      "input_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0}, "output_tokens_details": {"reasoning_tokens": 0}}}
+    return {
+        "id": "resp_fixture",
+        "object": "response",
+        "created_at": 1,
+        "model": MODEL,
+        "status": status,
+        "error": None,
+        "incomplete_details": {"reason": reason} if reason else None,
+        "output": output,
+        "parallel_tool_calls": True,
+        "tools": [],
+        "tool_choice": "auto",
+        "metadata": {},
+        "temperature": None,
+        "top_p": None,
+        "usage": {
+            "input_tokens": 19,
+            "output_tokens": 7,
+            "total_tokens": 26,
+            "input_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
+            "output_tokens_details": {"reasoning_tokens": 0},
+        },
+    }
 
 
 def source_wire(protocol, *, tools=True, length=False):
     finish = "length" if length else "tool_calls" if tools else "stop"
     if protocol == "chat":
+
         def chunk(delta, reason=None, usage=None):
-            body = {"id": "chatcmpl_fixture", "created": 1, "object": "chat.completion.chunk", "model": MODEL,
-                    "choices": [{"index": 0, "delta": delta, "finish_reason": reason, "logprobs": None}]}
+            body = {
+                "id": "chatcmpl_fixture",
+                "created": 1,
+                "object": "chat.completion.chunk",
+                "model": MODEL,
+                "choices": [{"index": 0, "delta": delta, "finish_reason": reason, "logprobs": None}],
+            }
             if usage is not None:
                 body.update(choices=[], usage=usage)
             return event("message", body)
@@ -45,41 +68,90 @@ def source_wire(protocol, *, tools=True, length=False):
         # The opening chunk deliberately carries text AND complete arguments.
         delta = {"role": "assistant", "content": TEXT}
         if tools:
-            delta["tool_calls"] = [{"index": index, "id": identifier, "type": "function", "function": {"name": name, "arguments": json.dumps(arguments, ensure_ascii=False)}}
-                                   for index, (identifier, name, arguments) in zip((31, 2), CALLS, strict=True)]
-        return chunk(delta) + chunk({}, finish) + chunk({}, usage={"prompt_tokens": 19, "completion_tokens": 7, "total_tokens": 26, "prompt_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0}, "completion_tokens_details": {"reasoning_tokens": 0}}) + event("message", "[DONE]")
+            delta["tool_calls"] = [
+                {"index": index, "id": identifier, "type": "function", "function": {"name": name, "arguments": json.dumps(arguments, ensure_ascii=False)}}
+                for index, (identifier, name, arguments) in zip((31, 2), CALLS, strict=True)
+            ]
+        return (
+            chunk(delta)
+            + chunk({}, finish)
+            + chunk(
+                {},
+                usage={
+                    "prompt_tokens": 19,
+                    "completion_tokens": 7,
+                    "total_tokens": 26,
+                    "prompt_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
+                    "completion_tokens_details": {"reasoning_tokens": 0},
+                },
+            )
+            + event("message", "[DONE]")
+        )
     if protocol == "messages":
-        values = [("message_start", {"message": {"id": "msg_fixture", "type": "message", "role": "assistant", "model": MODEL, "content": [], "stop_reason": None, "stop_sequence": None, "usage": {"input_tokens": 19, "output_tokens": 0, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}}),
-                  ("content_block_start", {"index": 0, "content_block": {"type": "text", "text": ""}}),
-                  ("content_block_delta", {"index": 0, "delta": {"type": "text_delta", "text": TEXT}}),
-                  ("content_block_stop", {"index": 0})]
+        values = [
+            (
+                "message_start",
+                {
+                    "message": {
+                        "id": "msg_fixture",
+                        "type": "message",
+                        "role": "assistant",
+                        "model": MODEL,
+                        "content": [],
+                        "stop_reason": None,
+                        "stop_sequence": None,
+                        "usage": {"input_tokens": 19, "output_tokens": 0, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
+                    }
+                },
+            ),
+            ("content_block_start", {"index": 0, "content_block": {"type": "text", "text": ""}}),
+            ("content_block_delta", {"index": 0, "delta": {"type": "text_delta", "text": TEXT}}),
+            ("content_block_stop", {"index": 0}),
+        ]
         if tools:
             for index, (identifier, name, arguments) in enumerate(CALLS, 1):
-                values += [("content_block_start", {"index": index, "content_block": {"type": "tool_use", "id": identifier, "name": name, "input": {}}}),
-                           ("content_block_delta", {"index": index, "delta": {"type": "input_json_delta", "partial_json": json.dumps(arguments, ensure_ascii=False)}}),
-                           ("content_block_stop", {"index": index})]
-        values += [("message_delta", {"delta": {"stop_reason": {"stop": "end_turn", "tool_calls": "tool_use", "length": "max_tokens"}[finish], "stop_sequence": None}, "usage": {"output_tokens": 7}}), ("message_stop", {})]
+                values += [
+                    ("content_block_start", {"index": index, "content_block": {"type": "tool_use", "id": identifier, "name": name, "input": {}}}),
+                    ("content_block_delta", {"index": index, "delta": {"type": "input_json_delta", "partial_json": json.dumps(arguments, ensure_ascii=False)}}),
+                    ("content_block_stop", {"index": index}),
+                ]
+        values += [
+            (
+                "message_delta",
+                {
+                    "delta": {"stop_reason": {"stop": "end_turn", "tool_calls": "tool_use", "length": "max_tokens"}[finish], "stop_sequence": None},
+                    "usage": {"output_tokens": 7},
+                },
+            ),
+            ("message_stop", {}),
+        ]
         return b"".join(event(kind, {"type": kind, **body}) for kind, body in values)
     parts = [{"type": "output_text", "text": TEXT, "annotations": [], "logprobs": []}]
     message = {"id": "msg_fixture", "type": "message", "role": "assistant", "status": "incomplete" if length else "completed", "content": parts}
-    values = [("response.created", {"response": response_snapshot([], status="in_progress")}),
-              ("response.output_item.added", {"output_index": 0, "item": {**message, "status": "in_progress", "content": []}}),
-              ("response.content_part.added", {"item_id": "msg_fixture", "output_index": 0, "content_index": 0, "part": {**parts[0], "text": ""}}),
-              ("response.output_text.delta", {"item_id": "msg_fixture", "output_index": 0, "content_index": 0, "delta": TEXT, "logprobs": []}),
-              ("response.output_text.done", {"item_id": "msg_fixture", "output_index": 0, "content_index": 0, "text": TEXT, "logprobs": []}),
-              ("response.content_part.done", {"item_id": "msg_fixture", "output_index": 0, "content_index": 0, "part": parts[0]}),
-              ("response.output_item.done", {"output_index": 0, "item": message})]
+    values = [
+        ("response.created", {"response": response_snapshot([], status="in_progress")}),
+        ("response.output_item.added", {"output_index": 0, "item": {**message, "status": "in_progress", "content": []}}),
+        ("response.content_part.added", {"item_id": "msg_fixture", "output_index": 0, "content_index": 0, "part": {**parts[0], "text": ""}}),
+        ("response.output_text.delta", {"item_id": "msg_fixture", "output_index": 0, "content_index": 0, "delta": TEXT, "logprobs": []}),
+        ("response.output_text.done", {"item_id": "msg_fixture", "output_index": 0, "content_index": 0, "text": TEXT, "logprobs": []}),
+        ("response.content_part.done", {"item_id": "msg_fixture", "output_index": 0, "content_index": 0, "part": parts[0]}),
+        ("response.output_item.done", {"output_index": 0, "item": message}),
+    ]
     output = [message]
     if tools:
         for index, (identifier, name, arguments) in enumerate(CALLS, 1):
             raw = json.dumps(arguments, ensure_ascii=False)
             item = {"id": f"fc_{index}", "type": "function_call", "call_id": identifier, "name": name, "arguments": raw, "status": "completed"}
             identity = {"output_index": index, "item_id": item["id"]}
-            values += [("response.output_item.added", {"output_index": index, "item": {**item, "arguments": "", "status": "in_progress"}}),
-                       ("response.function_call_arguments.delta", {**identity, "delta": raw}),
-                       ("response.function_call_arguments.done", {**identity, "arguments": raw}),
-                       ("response.output_item.done", {"output_index": index, "item": item})]
+            values += [
+                ("response.output_item.added", {"output_index": index, "item": {**item, "arguments": "", "status": "in_progress"}}),
+                ("response.function_call_arguments.delta", {**identity, "delta": raw}),
+                ("response.function_call_arguments.done", {**identity, "arguments": raw}),
+                ("response.output_item.done", {"output_index": index, "item": item}),
+            ]
             output.append(item)
     terminal = "response.incomplete" if length else "response.completed"
-    values.append((terminal, {"response": response_snapshot(output, status="incomplete" if length else "completed", reason="max_output_tokens" if length else None)}))
+    values.append(
+        (terminal, {"response": response_snapshot(output, status="incomplete" if length else "completed", reason="max_output_tokens" if length else None)})
+    )
     return b"".join(event(kind, {"type": kind, "sequence_number": sequence, **body}) for sequence, (kind, body) in enumerate(values))

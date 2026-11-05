@@ -17,11 +17,38 @@ def harness(monkeypatch):
 
 
 def good_result():
-    flags = ["distinct_gateways", "cross_tokens_rejected", "first_completed", "first_gateway_closed", "second_survived", "second_completed", "second_gateway_closed", "diagnostics_isolated"]
+    flags = [
+        "distinct_gateways",
+        "cross_tokens_rejected",
+        "first_completed",
+        "first_gateway_closed",
+        "second_survived",
+        "second_completed",
+        "second_gateway_closed",
+        "diagnostics_isolated",
+    ]
     return {**dict.fromkeys(flags, True), "upstream_counts": [1, 1], "fixture_errors": [[], []], "errors": []}
 
 
-@pytest.mark.parametrize("fault", [None, "distinct_gateways", "cross_tokens_rejected", "first_completed", "first_gateway_closed", "second_survived", "second_completed", "second_gateway_closed", "diagnostics_isolated", "extra_dispatch", "boolean_count", "fixture_error", "controller_error", "truthy_flag"])
+@pytest.mark.parametrize(
+    "fault",
+    [
+        None,
+        "distinct_gateways",
+        "cross_tokens_rejected",
+        "first_completed",
+        "first_gateway_closed",
+        "second_survived",
+        "second_completed",
+        "second_gateway_closed",
+        "diagnostics_isolated",
+        "extra_dispatch",
+        "boolean_count",
+        "fixture_error",
+        "controller_error",
+        "truthy_flag",
+    ],
+)
 def test_two_launcher_gate_cannot_pass_from_output_markers_or_partial_isolation(harness, fault):
     result = good_result()
     if fault in result and isinstance(result[fault], bool):
@@ -63,16 +90,24 @@ def test_cross_session_auth_is_rejected_before_invalid_json_or_upstream_dispatch
 
 @pytest.mark.parametrize("fault", [None, "shared_id", "wrong_protocol", "no_success", "key_leak"])
 def test_journal_gate_rejects_cross_provider_records_and_secret_leaks(harness, monkeypatch, tmp_path, fault):
-    specs = [{"provider": name, "protocol": protocol, "model": "model-" + name, "key": "key-" + name, "answer": "answer-" + name}
-             for name, protocol in [("alpha", "chat"), ("beta", "messages")]]
+    specs = [
+        {"provider": name, "protocol": protocol, "model": "model-" + name, "key": "key-" + name, "answer": "answer-" + name}
+        for name, protocol in [("alpha", "chat"), ("beta", "messages")]
+    ]
     records = {}
     for spec in specs:
         path = tmp_path / spec["provider"]
         path.mkdir()
         (path / ("session-" + "a" * 32 + ".jsonl")).write_text(spec["key"] if fault == "key_leak" else "synthetic", encoding="utf-8")
-        records[spec["provider"]] = {"records": [{"request_id": "same" if fault == "shared_id" else spec["provider"],
-                                                "upstream_protocol": "responses" if fault == "wrong_protocol" else spec["protocol"],
-                                                "outcome": "authentication" if fault == "no_success" else "success"}]}
+        records[spec["provider"]] = {
+            "records": [
+                {
+                    "request_id": "same" if fault == "shared_id" else spec["provider"],
+                    "upstream_protocol": "responses" if fault == "wrong_protocol" else spec["protocol"],
+                    "outcome": "authentication" if fault == "no_success" else "success",
+                }
+            ]
+        }
     monkeypatch.setattr(harness, "latest_diagnostics", lambda path: records[path.name])
     assert harness.diagnostics(tmp_path, specs) is (fault is None)
 

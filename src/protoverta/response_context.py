@@ -6,9 +6,19 @@ import copy
 from collections.abc import Callable
 
 POLICY_FIELDS = ("parallel_tool_calls", "tools", "tool_choice")
-CONTEXT_FIELDS = ("instructions", "max_output_tokens", "tools", "tool_choice",
-                  "parallel_tool_calls", "text", "temperature", "top_p",
-                  "frequency_penalty", "presence_penalty", "top_logprobs")
+CONTEXT_FIELDS = (
+    "instructions",
+    "max_output_tokens",
+    "tools",
+    "tool_choice",
+    "parallel_tool_calls",
+    "text",
+    "temperature",
+    "top_p",
+    "frequency_penalty",
+    "presence_penalty",
+    "top_logprobs",
+)
 
 
 def generated_response_metadata() -> dict:
@@ -19,9 +29,15 @@ def generated_response_metadata() -> dict:
     Request context may supply validated, explicitly known settings afterward.
     """
     return {
-        "instructions": None, "max_output_tokens": None, "max_tool_calls": None,
-        "previous_response_id": None, "reasoning": None, "store": False,
-        "background": False, "safety_identifier": None, "prompt_cache_key": None,
+        "instructions": None,
+        "max_output_tokens": None,
+        "max_tool_calls": None,
+        "previous_response_id": None,
+        "reasoning": None,
+        "store": False,
+        "background": False,
+        "safety_identifier": None,
+        "prompt_cache_key": None,
         "truncation": "disabled",
     }
 

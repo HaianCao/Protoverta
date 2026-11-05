@@ -64,7 +64,9 @@ class NativeTokenCounter:
             payload.pop(key, None)
         endpoint = "/messages/count_tokens" if protocol == Protocol.MESSAGES else "/responses/input_tokens"
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
-        headers["x-api-key" if config.auth_style == "x-api-key" else "Authorization"] = config.upstream_api_key if config.auth_style == "x-api-key" else "Bearer " + config.upstream_api_key
+        headers["x-api-key" if config.auth_style == "x-api-key" else "Authorization"] = (
+            config.upstream_api_key if config.auth_style == "x-api-key" else "Bearer " + config.upstream_api_key
+        )
         if protocol == Protocol.MESSAGES:
             headers["anthropic-version"] = "2023-06-01"
         budget = budget or RequestBudget(min(config.timeout, 10), min(config.total_timeout, 30), min(config.progress_timeout, 30))

@@ -31,21 +31,30 @@ from protoverta.namespaces import NamespaceMap
 from protoverta.server import GatewayConfig
 from protoverta.session_diagnostics import latest_diagnostics
 
-PAIRS = [("codex", "responses", "codex", "chat"), ("codex", "messages", "codex", "responses"),
-         ("claude", "messages", "claude", "chat"), ("claude", "responses", "claude", "messages"),
-         ("codex", "chat", "claude", "responses"), ("claude", "chat", "codex", "messages")]
+PAIRS = [
+    ("codex", "responses", "codex", "chat"),
+    ("codex", "messages", "codex", "responses"),
+    ("claude", "messages", "claude", "chat"),
+    ("claude", "responses", "claude", "messages"),
+    ("codex", "chat", "claude", "responses"),
+    ("claude", "chat", "codex", "messages"),
+]
 
 
 def environment(root):
-    env = {key: value for key, value in os.environ.items() if key.upper() in
-           {"PATH", "PATHEXT", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC"}}
+    env = {key: value for key, value in os.environ.items() if key.upper() in {"PATH", "PATHEXT", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC"}}
     for key in ("HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "TEMP", "TMP"):
         path = root / key
         path.mkdir(parents=True)
         env[key] = str(path)
-    env.update(CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1", CLAUDE_CODE_DISABLE_AUTO_MEMORY="1",
-               CLAUDE_CODE_MAX_RETRIES="0", GIT_ALLOW_PROTOCOL="file", GIT_TERMINAL_PROMPT="0",
-               NO_PROXY="127.0.0.1,localhost")
+    env.update(
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1",
+        CLAUDE_CODE_DISABLE_AUTO_MEMORY="1",
+        CLAUDE_CODE_MAX_RETRIES="0",
+        GIT_ALLOW_PROTOCOL="file",
+        GIT_TERMINAL_PROMPT="0",
+        NO_PROXY="127.0.0.1,localhost",
+    )
     return env
 
 
@@ -69,28 +78,42 @@ def worker(bundle_path):
         marker = 'execution_mode = "gateway"\n'
         if content.count(marker) != 1:
             raise ValueError("Expected exactly one owned fixture provider")
-        runtime = 'gateway_runtime = { diagnostics_dir = ' + json.dumps(bundle["diagnostics"]) + ' }\n'
+        runtime = "gateway_runtime = { diagnostics_dir = " + json.dumps(bundle["diagnostics"]) + " }\n"
         path.write_text(content.replace(marker, marker + runtime), encoding="utf-8")
         at = args.index("-m")
         module = args[at + 1]
-        args[at:at + 2] = [str(Path(__file__).with_name("probe_gateway_context.py")), module, str(root / "gateway.json")]
+        args[at : at + 2] = [str(Path(__file__).with_name("probe_gateway_context.py")), module, str(root / "gateway.json")]
         return original(args, **kwargs)
 
     config = GatewayConfig(protocol, bundle["origin"] + "/v1", bundle["key"], "p05-worker-token")
     options = {}
     if bundle.get("worktrees") and client == "codex":
-        options = {"mcp_servers.worktree.command": sys.executable,
-                   "mcp_servers.worktree.args": [str(Path(__file__).resolve()), "--read-mcp"],
-                   "mcp_servers.worktree.required": True}
+        options = {
+            "mcp_servers.worktree.command": sys.executable,
+            "mcp_servers.worktree.args": [str(Path(__file__).resolve()), "--read-mcp"],
+            "mcp_servers.worktree.required": True,
+        }
     with patch.object(smoke_clients, "run_process", observe):
-        result = smoke_clients.run_client(client, executable, "http://127.0.0.1:0", bundle["origin"], config,
-                                         env, str(root), bundle.get("worktrees", False), Path(bundle["source"]), False, protocol, 30,
-                                         bundle["model"], provider_id=bundle["provider"],
-                                         codex_config=options,
-                                         prompt="Return the synthetic fixture answer. Do not use tools.")
+        result = smoke_clients.run_client(
+            client,
+            executable,
+            "http://127.0.0.1:0",
+            bundle["origin"],
+            config,
+            env,
+            str(root),
+            bundle.get("worktrees", False),
+            Path(bundle["source"]),
+            False,
+            protocol,
+            30,
+            bundle["model"],
+            provider_id=bundle["provider"],
+            codex_config=options,
+            prompt="Return the synthetic fixture answer. Do not use tools.",
+        )
     passed = result.returncode == 0 and bundle["answer"] in result.stdout and bundle["other_answer"] not in result.stdout
-    report = {"passed": passed, "returncode": result.returncode, "cli_version": version.stdout.strip(),
-              "stdout": result.stdout, "stderr": result.stderr}
+    report = {"passed": passed, "returncode": result.returncode, "cli_version": version.stdout.strip(), "stdout": result.stdout, "stderr": result.stderr}
     (root / "worker-result.json").write_text(json.dumps(report), encoding="utf-8")
     return 0 if passed else 1
 
@@ -198,21 +221,38 @@ def diagnostics(root, specs):
         report = latest_diagnostics(root / spec["provider"])
         records = report["records"]
         raw = "\n".join(path.read_text(encoding="utf-8") for path in paths)
-        valid &= (len(paths) == 1 and any(record["outcome"] == "success" for record in records)
-                  and all(record["upstream_protocol"] == spec["protocol"] for record in records)
-                  and all(other[field] not in raw for other in specs for field in ("key", "model", "answer")))
+        valid &= (
+            len(paths) == 1
+            and any(record["outcome"] == "success" for record in records)
+            and all(record["upstream_protocol"] == spec["protocol"] for record in records)
+            and all(other[field] not in raw for other in specs for field in ("key", "model", "answer"))
+        )
         identifiers.append({record["request_id"] for record in records})
     return bool(valid and all(identifiers) and not identifiers[0] & identifiers[1])
 
 
 def accepted(results):
-    flags = ["distinct_gateways", "cross_tokens_rejected", "first_completed", "first_gateway_closed", "second_survived", "second_completed", "second_gateway_closed", "diagnostics_isolated"]
+    flags = [
+        "distinct_gateways",
+        "cross_tokens_rejected",
+        "first_completed",
+        "first_gateway_closed",
+        "second_survived",
+        "second_completed",
+        "second_gateway_closed",
+        "diagnostics_isolated",
+    ]
     counts = results.get("upstream_counts")
     if results.get("worktrees"):
         flags += ["worktree_reads_verified", "worktree_cwd_verified", "main_checkout_unchanged"]
-    return (all(results.get(key) is True for key in flags) and isinstance(counts, list) and len(counts) == 2
-            and all(type(count) is int and count == (2 if results.get("worktrees") else 1) for count in counts)
-            and results.get("fixture_errors") == [[], []] and results.get("errors") == [])
+    return (
+        all(results.get(key) is True for key in flags)
+        and isinstance(counts, list)
+        and len(counts) == 2
+        and all(type(count) is int and count == (2 if results.get("worktrees") else 1) for count in counts)
+        and results.get("fixture_errors") == [[], []]
+        and results.get("errors") == []
+    )
 
 
 def create_worktrees(root):
@@ -220,10 +260,12 @@ def create_worktrees(root):
     env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
     main = root / "main"
     main.mkdir()
+
     def git(*args):
         result = run_process(["git", *args], cwd=str(main), env=env, text=True, encoding="utf-8", errors="replace", timeout=5)
         if result.returncode:
             raise RuntimeError("Temporary worktree Git command failed")
+
     git("init", "--initial-branch=main")
     (main / "fixture.txt").write_text("P05_MAIN_CHECKOUT_DO_NOT_USE", encoding="utf-8")
     git("add", "fixture.txt")
@@ -248,22 +290,44 @@ def run(pair, codex_source, claude_source, *, worktrees=False):
                 provider = ("alpha", "beta")[index]
                 task = root / provider
                 task.mkdir(exist_ok=worktrees)
-                spec = {"client": client, "protocol": protocol, "provider": provider, "model": "p05-model-" + provider,
-                        "key": "p05-synthetic-key-" + provider, "answer": "P05_SESSION_" + provider.upper(),
-                        "other_answer": "P05_SESSION_" + ("BETA" if index == 0 else "ALPHA"),
-                        "diagnostics": str(root / "diagnostics"),
-                        "source": str((codex_source if client == "codex" else claude_source).resolve()), "worktrees": worktrees}
-                upstream = Upstream(Protocol(protocol), spec["model"], spec["key"], spec["answer"], client=client,
-                                    read_value="P05_WORKTREE_" + provider.upper() if worktrees else None)
+                spec = {
+                    "client": client,
+                    "protocol": protocol,
+                    "provider": provider,
+                    "model": "p05-model-" + provider,
+                    "key": "p05-synthetic-key-" + provider,
+                    "answer": "P05_SESSION_" + provider.upper(),
+                    "other_answer": "P05_SESSION_" + ("BETA" if index == 0 else "ALPHA"),
+                    "diagnostics": str(root / "diagnostics"),
+                    "source": str((codex_source if client == "codex" else claude_source).resolve()),
+                    "worktrees": worktrees,
+                }
+                upstream = Upstream(
+                    Protocol(protocol),
+                    spec["model"],
+                    spec["key"],
+                    spec["answer"],
+                    client=client,
+                    read_value="P05_WORKTREE_" + provider.upper() if worktrees else None,
+                )
                 spec["origin"] = stack.enter_context(upstream.serve())
                 path = task / "worker.json"
                 path.write_text(json.dumps(spec), encoding="utf-8")
                 specs.append(spec)
                 upstreams.append(upstream)
-                process, _job = stack.enter_context(_start([sys.executable, str(Path(__file__).resolve()), "--worker", str(path)],
-                                                          cwd=str(task), env=environment(task / "controller-state"),
-                                                          stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                                          text=True, encoding="utf-8", errors="replace"))
+                process, _job = stack.enter_context(
+                    _start(
+                        [sys.executable, str(Path(__file__).resolve()), "--worker", str(path)],
+                        cwd=str(task),
+                        env=environment(task / "controller-state"),
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                    )
+                )
                 processes.append(process)
             deadline = time.monotonic() + 18
             for upstream in upstreams:
@@ -271,7 +335,9 @@ def run(pair, codex_source, claude_source, *, worktrees=False):
                     raise RuntimeError("Two launcher inference requests did not overlap")
             contexts = [json.loads((root / spec["provider"] / "gateway.json").read_text(encoding="utf-8")) for spec in specs]
             results["distinct_gateways"] = contexts[0]["origin"] != contexts[1]["origin"] and contexts[0]["token"] != contexts[1]["token"]
-            results["cross_tokens_rejected"] = all(auth_status(contexts[index], spec["client"], contexts[1 - index]["token"]) == 401 for index, spec in enumerate(specs))
+            results["cross_tokens_rejected"] = all(
+                auth_status(contexts[index], spec["client"], contexts[1 - index]["token"]) == 401 for index, spec in enumerate(specs)
+            )
             upstreams[0].release.set()
             _stdout, _stderr = processes[0].communicate(timeout=12)
             first = json.loads((root / "alpha" / "worker-result.json").read_text(encoding="utf-8"))
@@ -290,7 +356,10 @@ def run(pair, codex_source, claude_source, *, worktrees=False):
             results["cli_versions"] = [first["cli_version"], second["cli_version"]]
             if worktrees:
                 results["worktree_reads_verified"] = all(upstream.read_verified for upstream in upstreams)
-                results["worktree_cwd_verified"] = all(Path(context["cwd"]) == (root / spec["provider"]).resolve() and (root / spec["provider"] / ".git").is_file() for context, spec in zip(contexts, specs, strict=True))
+                results["worktree_cwd_verified"] = all(
+                    Path(context["cwd"]) == (root / spec["provider"]).resolve() and (root / spec["provider"] / ".git").is_file()
+                    for context, spec in zip(contexts, specs, strict=True)
+                )
                 results["main_checkout_unchanged"] = (root / "main" / "fixture.txt").read_text(encoding="utf-8") == "P05_MAIN_CHECKOUT_DO_NOT_USE"
             results["passed"] = accepted(results)
         except Exception as exc:  # noqa: BLE001 -- synthetic fixture diagnostics, no credentials/payloads

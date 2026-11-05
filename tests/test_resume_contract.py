@@ -8,13 +8,17 @@ from protoverta.profiles import prepare_codex_request
 
 
 def history():
-    return {"model": "model-new", "max_output_tokens": 256, "input": [
-        {"role": "user", "content": "Original question"},
-        {"type": "function_call", "name": "lookup", "call_id": "old_call", "arguments": '{"x":1}'},
-        {"type": "function_call_output", "call_id": "old_call", "output": "Original tool result"},
-        {"role": "assistant", "content": "Original answer"},
-        {"role": "user", "content": "Follow-up question"},
-    ]}
+    return {
+        "model": "model-new",
+        "max_output_tokens": 256,
+        "input": [
+            {"role": "user", "content": "Original question"},
+            {"type": "function_call", "name": "lookup", "call_id": "old_call", "arguments": '{"x":1}'},
+            {"type": "function_call_output", "call_id": "old_call", "output": "Original tool result"},
+            {"role": "assistant", "content": "Original answer"},
+            {"role": "user", "content": "Follow-up question"},
+        ],
+    }
 
 
 @pytest.mark.parametrize("source,target", [(a, b) for a in Protocol for b in Protocol if a != b])
@@ -45,7 +49,11 @@ def test_encrypted_reasoning_history_is_not_silently_replayed(target):
 
 
 def test_messages_signed_thinking_history_is_not_silently_replayed():
-    body = {"model": "m", "max_tokens": 128, "messages": [{"role": "assistant", "content": [{"type": "thinking", "thinking": "private", "signature": "opaque-signature"}]}]}
+    body = {
+        "model": "m",
+        "max_tokens": 128,
+        "messages": [{"role": "assistant", "content": [{"type": "thinking", "thinking": "private", "signature": "opaque-signature"}]}],
+    }
     with pytest.raises(ConversionError):
         convert_request(body, "messages", "chat")
 

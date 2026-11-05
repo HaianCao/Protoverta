@@ -15,8 +15,9 @@ def harness(monkeypatch):
     return importlib.import_module("smoke_agent_cancel")
 
 
-@pytest.mark.parametrize("value", ['{"agent_id":"child-a"}', "agentId: child-a (internal metadata)",
-                                  [{"type": "text", "text": "agentId: child-a\noutput_file: C:/synthetic"}]])
+@pytest.mark.parametrize(
+    "value", ['{"agent_id":"child-a"}', "agentId: child-a (internal metadata)", [{"type": "text", "text": "agentId: child-a\noutput_file: C:/synthetic"}]]
+)
 def test_cancel_target_comes_from_actual_spawn_metadata(harness, value):
     assert harness.task_identifier(value) == "child-a"
 
@@ -45,14 +46,20 @@ def test_top_level_instruction_notification_is_recognized_without_rewriting_it(h
 
 
 def scenario():
-    return SimpleNamespace(cancel_target="child-a", sibling_target="child-b", notification_seen=True,
-                           parent_results=[{"cancel_a": json.dumps({"task_id": "child-a", "task_type": "local_agent", "message": "Successfully stopped task: child-a"})}])
+    return SimpleNamespace(
+        cancel_target="child-a",
+        sibling_target="child-b",
+        notification_seen=True,
+        parent_results=[{"cancel_a": json.dumps({"task_id": "child-a", "task_type": "local_agent", "message": "Successfully stopped task: child-a"})}],
+    )
 
 
 def claude_result():
-    return {"is_error": False, "permission_denials": [], "subagent_stats": {
-        "spawned": 2, "completed": 1, "failed": 0, "started_in_background": 2,
-        "killed": {"parent": 1, "user": 0, "system": 0}}}
+    return {
+        "is_error": False,
+        "permission_denials": [],
+        "subagent_stats": {"spawned": 2, "completed": 1, "failed": 0, "started_in_background": 2, "killed": {"parent": 1, "user": 0, "system": 0}},
+    }
 
 
 @pytest.mark.parametrize("fault", [None, "missing_notification", "wrong_target", "no_stop", "failed_sibling", "boolean_kill"])
@@ -75,8 +82,10 @@ def test_claude_cancellation_gate_requires_real_stop_notification_and_sibling_co
 def test_codex_cancellation_gate_correlates_task_close_and_successful_sibling(harness, fault):
     tasks = harness.parallel.TASKS
     items = [{"tool": "spawn_agent", "prompt": tasks[index], "receiver_thread_ids": [f"child-{label}"]} for index, label in enumerate(("a", "b"))]
-    items += [{"tool": "close_agent", "receiver_thread_ids": ["child-b" if fault == "wrong_stop" else "child-a"]},
-              {"tool": "wait", "agents_states": {"child-a" if fault == "wrong_wait" else "child-b": {"status": "completed", "message": harness.parallel.FINALS[1]}}}]
+    items += [
+        {"tool": "close_agent", "receiver_thread_ids": ["child-b" if fault == "wrong_stop" else "child-a"]},
+        {"tool": "wait", "agents_states": {"child-a" if fault == "wrong_wait" else "child-b": {"status": "completed", "message": harness.parallel.FINALS[1]}}},
+    ]
     if fault == "extra_spawn":
         items.append({"tool": "spawn_agent", "prompt": "unknown", "receiver_thread_ids": ["extra"]})
     raw = "\n".join(json.dumps({"type": "item.completed", "item": {"type": "collab_tool_call", "status": "completed", **item}}) for item in items)

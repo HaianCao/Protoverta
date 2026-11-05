@@ -43,18 +43,35 @@ def test_tool_result_keeps_its_call_id_and_messages_errors_are_not_success(harne
     elif protocol == Protocol.CHAT:
         body = {"messages": [{"role": "tool", "tool_call_id": "p04_read", "content": "value"}]}
     else:
-        body = {"messages": [{"role": "user", "content": [{"type": "tool_result", "tool_use_id": "p04_read", "content": "value"},
-                                                           {"type": "tool_result", "tool_use_id": "denied", "content": "error", "is_error": True}]}]}
+        body = {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "tool_result", "tool_use_id": "p04_read", "content": "value"},
+                        {"type": "tool_result", "tool_use_id": "denied", "content": "error", "is_error": True},
+                    ],
+                }
+            ]
+        }
     assert harness.tool_records(body, protocol) == [("p04_read", "value")]
 
 
 def test_mcp_fixture_reads_only_the_fixed_file_and_audits_only_real_calls(harness, tmp_path):
     fixture, audit = tmp_path / "fixture.txt", tmp_path / "audit.txt"
     fixture.write_text("fixed-test-value", encoding="utf-8")
-    requests = [{"id": 1, "method": "tools/call", "params": {"name": "not-p04"}},
-                {"id": 2, "method": "tools/call", "params": {"name": "p04_read_fixture", "arguments": {}}}]
-    result = subprocess.run([sys.executable, harness.__file__, "--mcp", "--fixture-file", str(fixture), "--audit-file", str(audit)],
-                            input="\n".join(map(json.dumps, requests)) + "\n", capture_output=True, text=True, timeout=10, check=True)
+    requests = [
+        {"id": 1, "method": "tools/call", "params": {"name": "not-p04"}},
+        {"id": 2, "method": "tools/call", "params": {"name": "p04_read_fixture", "arguments": {}}},
+    ]
+    result = subprocess.run(
+        [sys.executable, harness.__file__, "--mcp", "--fixture-file", str(fixture), "--audit-file", str(audit)],
+        input="\n".join(map(json.dumps, requests)) + "\n",
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=True,
+    )
     responses = [json.loads(line) for line in result.stdout.splitlines()]
     assert responses[0]["error"]["code"] == -32601
     assert responses[1]["result"] == {"content": [{"type": "text", "text": "fixed-test-value"}], "isError": False}
@@ -69,14 +86,22 @@ def test_claimed_completion_without_real_lifecycle_never_passes(harness, client,
 
 @pytest.mark.parametrize("failed,denied", [(0, False), (1, False), (0, True)])
 def test_claude_requires_exactly_one_completed_child_and_no_permission_denials(harness, failed, denied):
-    result = {"is_error": False, "permission_denials": ["fixture denied"] if denied else [],
-              "subagent_stats": {"spawned": 1, "completed": 1, "failed": failed}}
+    result = {"is_error": False, "permission_denials": ["fixture denied"] if denied else [], "subagent_stats": {"spawned": 1, "completed": 1, "failed": failed}}
     assert harness.lifecycle_verified("claude", json.dumps(result)) is (failed == 0 and not denied)
 
 
 @pytest.mark.parametrize("status,child", [("completed", "child"), ("errored", "child"), ("completed", "other")])
 def test_codex_wait_must_confirm_the_actual_spawned_child(harness, status, child):
-    events = [{"type": "item.completed", "item": {"type": "collab_tool_call", "status": "completed", "tool": "spawn_agent", "receiver_thread_ids": ["child"]}},
-              {"type": "item.completed", "item": {"type": "collab_tool_call", "status": "completed", "tool": "wait",
-                                                   "agents_states": {child: {"status": status, "message": harness.CHILD_DONE}}}}]
+    events = [
+        {"type": "item.completed", "item": {"type": "collab_tool_call", "status": "completed", "tool": "spawn_agent", "receiver_thread_ids": ["child"]}},
+        {
+            "type": "item.completed",
+            "item": {
+                "type": "collab_tool_call",
+                "status": "completed",
+                "tool": "wait",
+                "agents_states": {child: {"status": status, "message": harness.CHILD_DONE}},
+            },
+        },
+    ]
     assert harness.lifecycle_verified("codex", "\n".join(map(json.dumps, events))) is (status == "completed" and child == "child")

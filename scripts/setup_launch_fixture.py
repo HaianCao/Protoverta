@@ -9,7 +9,7 @@ from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
 
-CHILD = r'''
+CHILD = r"""
 import json, os, sys, time
 from pathlib import Path
 from urllib.request import Request, ProxyHandler, build_opener
@@ -35,7 +35,7 @@ while not (root / "release-child").exists():
     time.sleep(0.01)
 (root / "child-finished").write_text("ok", encoding="utf-8")
 raise SystemExit(7)
-'''
+"""
 
 
 class SetupLaunchFixture:
@@ -55,7 +55,11 @@ class SetupLaunchFixture:
 
         self.calls.append(True)
         original_handler = server.make_handler
-        response = {"model": "manual-model", "choices": [{"message": {"role": "assistant", "content": "fixture-answer"}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 2, "completion_tokens": 1}}
+        response = {
+            "model": "manual-model",
+            "choices": [{"message": {"role": "assistant", "content": "fixture-answer"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 2, "completion_tokens": 1},
+        }
 
         def make_handler(config, *, observer=None, upstream_open=None):
             return original_handler(config, upstream_open=lambda *_args, **_kwargs: io.BytesIO(json.dumps(response).encode()), observer=observer)

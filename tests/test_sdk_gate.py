@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-VALID_XML = '<testsuites><testsuite>' + ''.join(f'<testcase name="sdk_{i}"/>' for i in range(29)) + '</testsuite></testsuites>'
+VALID_XML = "<testsuites><testsuite>" + "".join(f'<testcase name="sdk_{i}"/>' for i in range(29)) + "</testsuite></testsuites>"
 
 
 def gate_module(monkeypatch):
@@ -14,15 +14,18 @@ def gate_module(monkeypatch):
 
 
 @pytest.mark.parametrize("installed", [False, True])
-@pytest.mark.parametrize(("returncode", "xml", "expected"), [
-    (0, VALID_XML, 0),
-    (0, '<testsuites><testsuite><testcase name="incomplete"/></testsuite></testsuites>', 1),
-    (0, '<testsuites><testsuite><testcase><skipped/></testcase></testsuite></testsuites>', 1),
-    (0, '<testsuites><testsuite/></testsuites>', 1),
-    (0, '<testsuites><testsuite><testcase><failure/></testcase></testsuite></testsuites>', 1),
-    (0, '<testsuites><testsuite><testcase><error/></testcase></testsuite></testsuites>', 1),
-    (1, '', 1),
-])
+@pytest.mark.parametrize(
+    ("returncode", "xml", "expected"),
+    [
+        (0, VALID_XML, 0),
+        (0, '<testsuites><testsuite><testcase name="incomplete"/></testsuite></testsuites>', 1),
+        (0, "<testsuites><testsuite><testcase><skipped/></testcase></testsuite></testsuites>", 1),
+        (0, "<testsuites><testsuite/></testsuites>", 1),
+        (0, "<testsuites><testsuite><testcase><failure/></testcase></testsuite></testsuites>", 1),
+        (0, "<testsuites><testsuite><testcase><error/></testcase></testsuite></testsuites>", 1),
+        (1, "", 1),
+    ],
+)
 def test_sdk_gate_rejects_skips_empty_suites_and_cleans_inherited_pythonpath(monkeypatch, installed, returncode, xml, expected):
     gate = gate_module(monkeypatch)
     monkeypatch.setattr(gate.importlib.metadata, "version", lambda name: {"openai": "3.37.0", "anthropic": "2.3.0"}[name])

@@ -23,6 +23,7 @@ from .transport import DeadlineHTTPHandler
 class _IncompleteCheck(ValueError):
     pass
 
+
 CASES = ("text", "streaming", "tools", "streaming_tools", "tool_result", "history_replay")
 
 
@@ -78,7 +79,11 @@ def check_route(config, model, source_protocol, *, cases=CASES, allow_live=False
                     raise ValueError("probe request budget exceeded")
                 value = convert_request(value, Protocol.CHAT, source)
                 suffix = {Protocol.CHAT: "/chat/completions", Protocol.MESSAGES: "/messages", Protocol.RESPONSES: "/responses"}[source]
-                request = Request(base + "/v1" + suffix, data=json.dumps(value).encode(), headers={"Authorization": "Bearer " + config.inbound_token, "Content-Type": "application/json"})
+                request = Request(
+                    base + "/v1" + suffix,
+                    data=json.dumps(value).encode(),
+                    headers={"Authorization": "Bearer " + config.inbound_token, "Content-Type": "application/json"},
+                )
                 budget = RequestBudget(10, 30, 15)
                 request.protoverta_budget = budget
                 with opener.open(request, timeout=budget.remaining()) as response:
@@ -109,7 +114,16 @@ def check_route(config, model, source_protocol, *, cases=CASES, allow_live=False
                 if case == "streaming":
                     send(body | {"stream": True})
                 elif case in ("tools", "tool_result", "streaming_tools"):
-                    body["tools"] = [{"type": "function", "function": {"name": "fixture_nonce", "description": "Return a synthetic nonce", "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}}]
+                    body["tools"] = [
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "fixture_nonce",
+                                "description": "Return a synthetic nonce",
+                                "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+                            },
+                        }
+                    ]
                     body["tool_choice"] = {"type": "function", "function": {"name": "fixture_nonce"}}
                     body["messages"][0]["content"] = "Call fixture_nonce with {}. Then return its result exactly."
                     if case == "streaming_tools":
@@ -126,7 +140,14 @@ def check_route(config, model, source_protocol, *, cases=CASES, allow_live=False
                     if case == "tool_result":
                         call = calls[0]
                         body.pop("tool_choice")
-                        body["messages"] += [{"role": "assistant", "content": None, "tool_calls": [{"id": call.call_id, "type": "function", "function": {"name": call.name, "arguments": call.arguments}}]}, {"role": "tool", "tool_call_id": call.call_id, "content": nonce}]
+                        body["messages"] += [
+                            {
+                                "role": "assistant",
+                                "content": None,
+                                "tool_calls": [{"id": call.call_id, "type": "function", "function": {"name": call.name, "arguments": call.arguments}}],
+                            },
+                            {"role": "tool", "tool_call_id": call.call_id, "content": nonce},
+                        ]
                         result = send(body)
                         if nonce not in "".join(part.text for part in result.parts if part.kind == "text"):
                             raise ValueError("tool result was not used")
@@ -168,7 +189,20 @@ def evidence_report(config, model, source_protocol, results, *, verified_with):
             if item["case"] in ("tools", "tool_result", "streaming_tools"):
                 features.update(tools=True, forced_tool_choice=True)
         if features:
-            routes.append({"base_url": config.upstream_base_url, "protocol": config.upstream_protocol.value, "model": model, "source_protocol": Protocol(source_protocol).value,
-                           "streaming": streaming, "client_profile": config.client_profile, "policies": route_policies(config), "features": features,
-                           "checked_at": date.today().isoformat(), "evidence": "bounded synthetic route checks; history_replay does not certify CLI resume", "verified_with": verified_with, "identity": route_identity(config)})
+            routes.append(
+                {
+                    "base_url": config.upstream_base_url,
+                    "protocol": config.upstream_protocol.value,
+                    "model": model,
+                    "source_protocol": Protocol(source_protocol).value,
+                    "streaming": streaming,
+                    "client_profile": config.client_profile,
+                    "policies": route_policies(config),
+                    "features": features,
+                    "checked_at": date.today().isoformat(),
+                    "evidence": "bounded synthetic route checks; history_replay does not certify CLI resume",
+                    "verified_with": verified_with,
+                    "identity": route_identity(config),
+                }
+            )
     return {"schema_version": 3, "models": [], "routes": routes}

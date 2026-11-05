@@ -23,7 +23,12 @@ def test_capabilities_are_exact_and_unknown_is_distinct_from_unsupported():
     assert report.unknown == ("streaming",)
     with pytest.raises(ConversionError, match="unsupported=tools"):
         report.require()
-    for prefix, protocol, model in (("https://other.test/api/v1", "chat", "model-a"), ("https://example.test/api", "chat", "model-a"), ("https://example.test/api/v1", "messages", "model-a"), ("https://example.test/api/v1", "chat", "model-a:free")):
+    for prefix, protocol, model in (
+        ("https://other.test/api/v1", "chat", "model-a"),
+        ("https://example.test/api", "chat", "model-a"),
+        ("https://example.test/api/v1", "messages", "model-a"),
+        ("https://example.test/api/v1", "chat", "model-a:free"),
+    ):
         assert records.assess(prefix, protocol, model, {"text"}).unknown == ("text",)
 
 
@@ -55,7 +60,19 @@ def test_record_is_immutable_and_requires_evidence():
 
 
 def test_registry_load_round_trip_and_invalid_fields(tmp_path):
-    body = {"schema_version": 1, "models": [{"base_url": "https://example.test/v1", "protocol": "messages", "model": "m", "features": {"text": True, "json_schema": False}, "checked_at": "2026-10-23", "evidence": "probe"}]}
+    body = {
+        "schema_version": 1,
+        "models": [
+            {
+                "base_url": "https://example.test/v1",
+                "protocol": "messages",
+                "model": "m",
+                "features": {"text": True, "json_schema": False},
+                "checked_at": "2026-10-23",
+                "evidence": "probe",
+            }
+        ],
+    }
     path = tmp_path / "capabilities.json"
     path.write_text(json.dumps(body), encoding="utf-8")
     report = CapabilityRegistry.load(path).assess("https://example.test/v1", "messages", "m", {"text", "json_schema"})
@@ -72,11 +89,32 @@ def test_registry_invalid_types_are_reported_explicitly():
         CapabilityRegistry(({},))
 
 
-@pytest.mark.parametrize("protocol,body,expected", [
-    ("chat", {"model": "m", "stream": True, "tools": [{"type": "function"}], "tool_choice": {"type": "function", "function": {"name": "add"}}, "response_format": {"type": "json_schema", "json_schema": {"strict": True}}}, {"text", "streaming", "tools", "forced_tool_choice", "json_schema", "strict_json_schema"}),
-    ("responses", {"model": "m", "reasoning": {"effort": "low"}, "text": {"format": {"type": "json_object"}}}, {"text", "reasoning_effort", "json_object"}),
-    ("messages", {"model": "m", "messages": [{"role": "user", "content": [{"type": "image"}]}, {"role": "system", "content": "new"}], "output_config": {"format": {"type": "json_schema"}}}, {"text", "images", "mid_conversation_system", "json_schema", "strict_json_schema"}),
-])
+@pytest.mark.parametrize(
+    "protocol,body,expected",
+    [
+        (
+            "chat",
+            {
+                "model": "m",
+                "stream": True,
+                "tools": [{"type": "function"}],
+                "tool_choice": {"type": "function", "function": {"name": "add"}},
+                "response_format": {"type": "json_schema", "json_schema": {"strict": True}},
+            },
+            {"text", "streaming", "tools", "forced_tool_choice", "json_schema", "strict_json_schema"},
+        ),
+        ("responses", {"model": "m", "reasoning": {"effort": "low"}, "text": {"format": {"type": "json_object"}}}, {"text", "reasoning_effort", "json_object"}),
+        (
+            "messages",
+            {
+                "model": "m",
+                "messages": [{"role": "user", "content": [{"type": "image"}]}, {"role": "system", "content": "new"}],
+                "output_config": {"format": {"type": "json_schema"}},
+            },
+            {"text", "images", "mid_conversation_system", "json_schema", "strict_json_schema"},
+        ),
+    ],
+)
 def test_outbound_feature_detection(protocol, body, expected):
     assert request_features(body, protocol) == expected
 
@@ -85,7 +123,9 @@ def test_image_schema_property_is_not_a_multimodal_request():
     assert "images" not in request_features({"tools": [{"parameters": {"properties": {"type": "image"}}}]}, "chat")
 
 
-@pytest.mark.parametrize("url", ["https://user:password@example.test/v1", "https://example.test/v1?key=secret", "http://example.test/v1", "https://example.test/v1/responses"])
+@pytest.mark.parametrize(
+    "url", ["https://user:password@example.test/v1", "https://example.test/v1?key=secret", "http://example.test/v1", "https://example.test/v1/responses"]
+)
 def test_registry_rejects_credential_urls_and_endpoint_suffixes(url):
     with pytest.raises(ValueError):
         CapabilityRecord(url, "chat", "m", {}, "2026-10-23", "probe")

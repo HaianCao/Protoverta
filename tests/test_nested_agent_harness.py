@@ -13,8 +13,11 @@ def harness(monkeypatch):
 @pytest.mark.parametrize("depth", [1, 2])
 @pytest.mark.parametrize("fault", [None, "wrong_depth", "wrong_spawn_origin", "failed", "boolean_count", "denied"])
 def test_nested_lifecycle_requires_depth_origin_and_completion_evidence(harness, depth, fault):
-    output = {"is_error": False, "permission_denials": [], "subagent_stats": {
-        "spawned": depth, "completed": depth, "failed": 0, "max_depth": depth, "spawned_by_subagents": depth - 1}}
+    output = {
+        "is_error": False,
+        "permission_denials": [],
+        "subagent_stats": {"spawned": depth, "completed": depth, "failed": 0, "max_depth": depth, "spawned_by_subagents": depth - 1},
+    }
     stats = output["subagent_stats"]
     if fault == "wrong_depth":
         stats["max_depth"] = depth + 1

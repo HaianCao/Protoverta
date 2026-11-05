@@ -21,12 +21,27 @@ def probe(source: Protocol, upstream: Protocol, model: str, base_url: str, key: 
     if source == upstream:
         raise ValueError("Choose different source and upstream protocols")
     schema = {"type": "object", "properties": {"value": {"type": "integer", "enum": [5]}}, "required": ["value"], "additionalProperties": False}
-    template = {"model": model, "messages": [{"role": "user", "content": "Return only a JSON object with value equal to the integer 5."}], "max_completion_tokens": 256, "stream": stream, "response_format": {"type": "json_schema", "json_schema": {"name": "probe_result", "strict": True, "schema": schema}}}
+    template = {
+        "model": model,
+        "messages": [{"role": "user", "content": "Return only a JSON object with value equal to the integer 5."}],
+        "max_completion_tokens": 256,
+        "stream": stream,
+        "response_format": {"type": "json_schema", "json_schema": {"name": "probe_result", "strict": True, "schema": schema}},
+    }
     body = convert_request(template, "chat", source)
-    config = GatewayConfig(upstream, base_url, key, "isolated-probe", upstream_reasoning="openrouter_disabled", messages_usage_policy="deferred" if source == Protocol.MESSAGES else "strict")
+    config = GatewayConfig(
+        upstream,
+        base_url,
+        key,
+        "isolated-probe",
+        upstream_reasoning="openrouter_disabled",
+        messages_usage_policy="deferred" if source == Protocol.MESSAGES else "strict",
+    )
     endpoint = {Protocol.CHAT: "/v1/chat/completions", Protocol.MESSAGES: "/v1/messages", Protocol.RESPONSES: "/v1/responses"}[source]
     with gateway_session(config) as origin:
-        request = Request(origin + endpoint, json.dumps(body).encode(), {"Authorization": "Bearer isolated-probe", "Content-Type": "application/json"}, method="POST")
+        request = Request(
+            origin + endpoint, json.dumps(body).encode(), {"Authorization": "Bearer isolated-probe", "Content-Type": "application/json"}, method="POST"
+        )
         try:
             with urlopen(request, timeout=120) as response:
                 if stream:

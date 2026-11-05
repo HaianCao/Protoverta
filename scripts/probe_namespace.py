@@ -16,14 +16,38 @@ from protoverta.server import GatewayConfig, gateway_session
 
 
 def probe(protocol: Protocol, base_url: str, key: str, model: str, *, force_function: bool = False) -> dict:
-    config = GatewayConfig(protocol, base_url, key, "isolated-probe", namespace_tools="flatten", upstream_reasoning="openrouter_disabled", default_max_output_tokens=512)
-    tool = {"type": "namespace", "name": "calculator", "tools": [{"type": "function", "name": "add", "description": "Add two integer arguments", "parameters": {"type": "object", "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}}, "required": ["a", "b"]}}]}
-    first_request = {"model": model, "input": [{"role": "user", "content": "Use calculator.add exactly once to add 2 and 3, then report the result."}], "tools": [tool], "tool_choice": "required", "max_output_tokens": 512}
+    config = GatewayConfig(
+        protocol, base_url, key, "isolated-probe", namespace_tools="flatten", upstream_reasoning="openrouter_disabled", default_max_output_tokens=512
+    )
+    tool = {
+        "type": "namespace",
+        "name": "calculator",
+        "tools": [
+            {
+                "type": "function",
+                "name": "add",
+                "description": "Add two integer arguments",
+                "parameters": {"type": "object", "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}}, "required": ["a", "b"]},
+            }
+        ],
+    }
+    first_request = {
+        "model": model,
+        "input": [{"role": "user", "content": "Use calculator.add exactly once to add 2 and 3, then report the result."}],
+        "tools": [tool],
+        "tool_choice": "required",
+        "max_output_tokens": 512,
+    }
     if force_function:
         first_request["tool_choice"] = {"type": "function", "namespace": "calculator", "name": "add"}
 
     def post(origin: str, payload: dict) -> dict:
-        request = Request(origin + "/v1/responses", json.dumps(payload).encode(), {"Authorization": "Bearer isolated-probe", "Content-Type": "application/json"}, method="POST")
+        request = Request(
+            origin + "/v1/responses",
+            json.dumps(payload).encode(),
+            {"Authorization": "Bearer isolated-probe", "Content-Type": "application/json"},
+            method="POST",
+        )
         try:
             with urlopen(request, timeout=120) as response:
                 return json.load(response)
@@ -45,11 +69,29 @@ def probe(protocol: Protocol, base_url: str, key: str, model: str, *, force_func
         arguments = json.loads(call["arguments"])
         if arguments != {"a": 2, "b": 3}:
             return {"passed": False, "upstream": protocol.value, "stage": "arguments", "namespace_restored": True, "arguments_match": False}
-        followup = {"model": model, "input": [*first_request["input"], *first["output"], {"type": "function_call_output", "call_id": call["call_id"], "output": "5"}], "tools": [tool], "max_output_tokens": 512}
+        followup = {
+            "model": model,
+            "input": [*first_request["input"], *first["output"], {"type": "function_call_output", "call_id": call["call_id"], "output": "5"}],
+            "tools": [tool],
+            "max_output_tokens": 512,
+        }
         second = post(origin, followup)
-        output = " ".join(part.get("text", "") for item in second.get("output", []) if item.get("type") == "message" for part in item.get("content", []) if part.get("type") == "output_text")
+        output = " ".join(
+            part.get("text", "")
+            for item in second.get("output", [])
+            if item.get("type") == "message"
+            for part in item.get("content", [])
+            if part.get("type") == "output_text"
+        )
         passed = "5" in output
-        return {"passed": passed, "upstream": protocol.value, "namespace_restored": True, "forced_function": force_function, "arguments_match": True, "result_replayed": passed}
+        return {
+            "passed": passed,
+            "upstream": protocol.value,
+            "namespace_restored": True,
+            "forced_function": force_function,
+            "arguments_match": True,
+            "result_replayed": passed,
+        }
 
 
 def main() -> int:
@@ -59,7 +101,9 @@ def main() -> int:
     parser.add_argument("--model", required=True)
     parser.add_argument("--key-env", required=True)
     parser.add_argument("--allow-live", action="store_true")
-    parser.add_argument("--force-function", action="store_true", help="Force the declared namespaced function through Protoverta's explicit selection extension")
+    parser.add_argument(
+        "--force-function", action="store_true", help="Force the declared namespaced function through Protoverta's explicit selection extension"
+    )
     args = parser.parse_args()
     if not args.allow_live:
         parser.error("Live API calls require --allow-live")

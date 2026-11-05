@@ -52,11 +52,18 @@ def tool_results(body, protocol):
 
 def tool_records(body, protocol):
     if protocol == Protocol.RESPONSES:
-        return [(item.get("call_id"), item.get("output")) for item in body.get("input", []) if isinstance(item, dict) and item.get("type") == "function_call_output"]
+        return [
+            (item.get("call_id"), item.get("output")) for item in body.get("input", []) if isinstance(item, dict) and item.get("type") == "function_call_output"
+        ]
     if protocol == Protocol.CHAT:
         return [(item.get("tool_call_id"), item.get("content")) for item in body.get("messages", []) if item.get("role") == "tool"]
-    return [(block.get("tool_use_id"), block.get("content")) for item in body.get("messages", []) if isinstance(item.get("content"), list)
-            for block in item["content"] if isinstance(block, dict) and block.get("type") == "tool_result" and not block.get("is_error")]
+    return [
+        (block.get("tool_use_id"), block.get("content"))
+        for item in body.get("messages", [])
+        if isinstance(item.get("content"), list)
+        for block in item["content"]
+        if isinstance(block, dict) and block.get("type") == "tool_result" and not block.get("is_error")
+    ]
 
 
 def agent_id(results):
@@ -85,8 +92,13 @@ def lifecycle_verified(client, stdout):
         if not isinstance(result, dict):
             return False
         stats = result.get("subagent_stats", {})
-        return (isinstance(stats, dict) and result.get("is_error") is False and not result.get("permission_denials")
-                and stats.get("spawned") == stats.get("completed") == 1 and stats.get("failed") == 0)
+        return (
+            isinstance(stats, dict)
+            and result.get("is_error") is False
+            and not result.get("permission_denials")
+            and stats.get("spawned") == stats.get("completed") == 1
+            and stats.get("failed") == 0
+        )
     children = set()
     waited = set()
     for line in stdout.splitlines():
@@ -106,8 +118,11 @@ def lifecycle_verified(client, stdout):
         if item.get("tool") == "wait":
             states = item.get("agents_states", {})
             if isinstance(states, dict):
-                waited.update(key for key, value in states.items()
-                              if isinstance(value, dict) and value.get("status") == "completed" and value.get("message") == CHILD_DONE)
+                waited.update(
+                    key
+                    for key, value in states.items()
+                    if isinstance(value, dict) and value.get("status") == "completed" and value.get("message") == CHILD_DONE
+                )
     return len(children) == 1 and children == waited
 
 
@@ -115,8 +130,11 @@ def encode(protocol, model, *, text=None, tool=None, arguments=None, call_id="p0
     encoder = StreamEncoder(protocol)
     deltas = [Delta("start", model=model, input_tokens=1, output_tokens=0)]
     if tool:
-        deltas += [Delta("tool_start", index=0, name=tool["name"], call_id=call_id),
-                   Delta("tool_delta", index=0, text=json.dumps(arguments)), Delta("tool_end", index=0)]
+        deltas += [
+            Delta("tool_start", index=0, name=tool["name"], call_id=call_id),
+            Delta("tool_delta", index=0, text=json.dumps(arguments)),
+            Delta("tool_end", index=0),
+        ]
     else:
         deltas.append(Delta("text", text=text))
     deltas.append(Delta("finish", reason="tool_calls" if tool else "stop", input_tokens=1, output_tokens=1))
@@ -134,13 +152,28 @@ def encode(protocol, model, *, text=None, tool=None, arguments=None, call_id="p0
     return io.BytesIO(b"".join(wire))
 
 
-def run(client, upstream, *, inspect_only=False, adapter_source=None, claude_tools=None, claude_agent_tools=None, claude_depth=None, gateway_limits=None, mcp_lanes=False, claude_isolation=None, child_model=None):
+def run(
+    client,
+    upstream,
+    *,
+    inspect_only=False,
+    adapter_source=None,
+    claude_tools=None,
+    claude_agent_tools=None,
+    claude_depth=None,
+    gateway_limits=None,
+    mcp_lanes=False,
+    claude_isolation=None,
+    child_model=None,
+):
     if claude_isolation not in {None, "worktree"}:
         raise ValueError("Fixture isolation must be worktree or unset")
     if claude_depth is not None and (type(claude_depth) is not int or not 1 <= claude_depth <= 3):
         raise ValueError("Fixture Claude depth must be an integer from 1 to 3")
     limits = dict(gateway_limits or {})
-    if set(limits) - {"timeout", "progress_timeout", "total_timeout"} or any(isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value) or value <= 0 for value in limits.values()):
+    if set(limits) - {"timeout", "progress_timeout", "total_timeout"} or any(
+        isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value) or value <= 0 for value in limits.values()
+    ):
         raise ValueError("Fixture gateway timeouts must be finite positive numbers")
     executable = shutil.which(client)
     if executable is None:
@@ -156,8 +189,11 @@ def run(client, upstream, *, inspect_only=False, adapter_source=None, claude_too
         fixture = root / "fixture.txt"
         fixture.write_text(VALUE, encoding="utf-8")
         audit = root / "mcp-audit.txt"
-        env = {key: value for key, value in os.environ.items() if key.upper() in
-               {"PATH", "PATHEXT", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "TEMP", "TMP"}}
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if key.upper() in {"PATH", "PATHEXT", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "TEMP", "TMP"}
+        }
         for key in ("HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "CODEX_HOME", "CLAUDE_CONFIG_DIR"):
             path = root / key
             path.mkdir()
@@ -165,36 +201,56 @@ def run(client, upstream, *, inspect_only=False, adapter_source=None, claude_too
         runtime_temp = root / "runtime-temp"
         runtime_temp.mkdir()
         env.update(TEMP=str(runtime_temp), TMP=str(runtime_temp))
-        env.update(CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1", CLAUDE_CODE_DISABLE_AUTO_MEMORY="1",
-                   GIT_ALLOW_PROTOCOL="file", GIT_TERMINAL_PROMPT="0", NO_PROXY="127.0.0.1,localhost",
-                   PROTOVERTA_SMOKE_TOKEN="p04-local-token")
-        version = original_process([executable, "--version"], cwd=directory, env=env,
-                                   text=True, encoding="utf-8", errors="replace", timeout=3)
+        env.update(
+            CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1",
+            CLAUDE_CODE_DISABLE_AUTO_MEMORY="1",
+            GIT_ALLOW_PROTOCOL="file",
+            GIT_TERMINAL_PROMPT="0",
+            NO_PROXY="127.0.0.1,localhost",
+            PROTOVERTA_SMOKE_TOKEN="p04-local-token",
+        )
+        version = original_process([executable, "--version"], cwd=directory, env=env, text=True, encoding="utf-8", errors="replace", timeout=3)
         cli_version = version.stdout.strip()
         expected = "codex-cli 0.166.0" if client == "codex" else "2.1.308 (Claude Code)"
         if version.returncode or (not inspect_only and cli_version != expected):
             raise ValueError("Subagent fixture requires the documented CLI version; inspect a new version separately")
-        codex_options = {"agents.enabled": True, "features.multi_agent": True,
-                         "agents.default_subagent_model": model, "agents.max_concurrent_threads_per_session": 1}
+        codex_options = {
+            "agents.enabled": True,
+            "features.multi_agent": True,
+            "agents.default_subagent_model": model,
+            "agents.max_concurrent_threads_per_session": 1,
+        }
         if client == "codex":
-            bundled = original_process([executable, "debug", "models", "--bundled"], cwd=directory, env=env,
-                                       text=True, encoding="utf-8", errors="replace", timeout=15)
+            bundled = original_process(
+                [executable, "debug", "models", "--bundled"], cwd=directory, env=env, text=True, encoding="utf-8", errors="replace", timeout=15
+            )
             if bundled.returncode:
                 raise ValueError("Could not read bundled CLI model metadata")
             catalog = json.loads(bundled.stdout)
             entries = catalog["models"] if isinstance(catalog, dict) else catalog
             metadata = dict(next(item for item in entries if item["slug"] == "gpt-5.5"))
-            metadata.update(slug=model, display_name="Synthetic subagent fixture", support_verbosity=False,
-                            apply_patch_tool_type=None, tool_mode=None, experimental_supported_tools=[], supports_search_tool=False)
+            metadata.update(
+                slug=model,
+                display_name="Synthetic subagent fixture",
+                support_verbosity=False,
+                apply_patch_tool_type=None,
+                tool_mode=None,
+                experimental_supported_tools=[],
+                supports_search_tool=False,
+            )
             catalog_path = root / "models.json"
             models = [metadata]
             if child_model:
                 models.append({**metadata, "slug": child_model, "display_name": "Synthetic child fixture"})
             catalog_path.write_text(json.dumps({"models": models}), encoding="utf-8")
             codex_options["model_catalog_json"] = str(catalog_path)
-            codex_options.update({"mcp_servers.p04.command": sys.executable,
-                                  "mcp_servers.p04.args": [str(Path(__file__).resolve()), "--mcp", "--fixture-file", str(fixture), "--audit-file", str(audit)],
-                                  "mcp_servers.p04.required": True})
+            codex_options.update(
+                {
+                    "mcp_servers.p04.command": sys.executable,
+                    "mcp_servers.p04.args": [str(Path(__file__).resolve()), "--mcp", "--fixture-file", str(fixture), "--audit-file", str(audit)],
+                    "mcp_servers.p04.required": True,
+                }
+            )
             if mcp_lanes:
                 codex_options["mcp_servers.p04.args"].append("--mcp-lanes")
             if adapter_source is not None:
@@ -215,7 +271,19 @@ def run(client, upstream, *, inspect_only=False, adapter_source=None, claude_too
             if client == "claude":
                 args[args.index("--tools") + 1] = claude_tools or "Agent,Read"
                 args[args.index("--allowedTools") + 1] = claude_tools or "Agent,Read"
-                args += ["--agents", json.dumps({"p04-worker": {"description": "Read the synthetic local fixture", "prompt": "Read only the requested fixture file and return its value.", "tools": claude_agent_tools or ["Read"], "model": "inherit"}})]
+                args += [
+                    "--agents",
+                    json.dumps(
+                        {
+                            "p04-worker": {
+                                "description": "Read the synthetic local fixture",
+                                "prompt": "Read only the requested fixture file and return its value.",
+                                "tools": claude_agent_tools or ["Read"],
+                                "model": "inherit",
+                            }
+                        }
+                    ),
+                ]
                 if child_model:
                     definition = json.loads(args[-1])
                     definition["p04-worker"].pop("model")
@@ -266,35 +334,78 @@ def run(client, upstream, *, inspect_only=False, adapter_source=None, claude_too
                 raise ValueError("Child did not replay the successful read result")
             if stage == 1:
                 tool = find_tool(tools, "agent" if client == "claude" else "spawn_agent")
-                args = {"prompt": TASK + " Read " + str(fixture), "description": "Read local fixture", "subagent_type": "p04-worker", "run_in_background": False} if client == "claude" else {"message": TASK + " Read fixture.txt"}
+                args = (
+                    {"prompt": TASK + " Read " + str(fixture), "description": "Read local fixture", "subagent_type": "p04-worker", "run_in_background": False}
+                    if client == "claude"
+                    else {"message": TASK + " Read fixture.txt"}
+                )
                 return encode(upstream, body["model"], tool=tool, arguments=args, call_id="p04_spawn")
             if CHILD_DONE in json.dumps(records.get("p04_wait" if client == "codex" else "p04_spawn")):
                 return encode(upstream, body["model"], text=DONE)
             if client == "codex" and stage == 2:
-                return encode(upstream, body["model"], tool=find_tool(tools, "wait_agent"),
-                              arguments={"targets": [agent_id(results)], "timeout_ms": 10000}, call_id="p04_wait")
+                return encode(
+                    upstream,
+                    body["model"],
+                    tool=find_tool(tools, "wait_agent"),
+                    arguments={"targets": [agent_id(results)], "timeout_ms": 10000},
+                    call_id="p04_wait",
+                )
             raise ValueError("Parent did not replay completed child result")
 
         with smoke_clients.fixture_server(open_upstream) as upstream_origin:
-            config = GatewayConfig(upstream, upstream_origin + "/v1", "fake-upstream-key", "p04-local-token",
-                                   client_profile="codex" if client == "codex" else "claude",
-                                   namespace_tools="flatten", messages_usage_policy="deferred" if client == "claude" and upstream != Protocol.MESSAGES else "strict",
-                                   default_max_output_tokens=4096, **limits)
+            config = GatewayConfig(
+                upstream,
+                upstream_origin + "/v1",
+                "fake-upstream-key",
+                "p04-local-token",
+                client_profile="codex" if client == "codex" else "claude",
+                namespace_tools="flatten",
+                messages_usage_policy="deferred" if client == "claude" and upstream != Protocol.MESSAGES else "strict",
+                default_max_output_tokens=4096,
+                **limits,
+            )
             with gateway_session(config) as origin, patch.object(smoke_clients, "run_process", process):
-                result = smoke_clients.run_client(client, executable, origin, upstream_origin, config, env, directory,
-                                                 True, adapter_source, False, upstream, 45, model,
-                                                 prompt="Delegate one local read-only task to a subagent, wait for its result, then summarize.",
-                                                 codex_config=codex_options,
-                                                 agent_model_policy=("custom" if child_model else "selected") if adapter_source is not None else None,
-                                                 agent_model_id=child_model)
+                result = smoke_clients.run_client(
+                    client,
+                    executable,
+                    origin,
+                    upstream_origin,
+                    config,
+                    env,
+                    directory,
+                    True,
+                    adapter_source,
+                    False,
+                    upstream,
+                    45,
+                    model,
+                    prompt="Delegate one local read-only task to a subagent, wait for its result, then summarize.",
+                    codex_config=codex_options,
+                    agent_model_policy=("custom" if child_model else "selected") if adapter_source is not None else None,
+                    agent_model_id=child_model,
+                )
         audited = audit.exists() and audit.read_text(encoding="utf-8").splitlines() == ["read"]
         lifecycle = lifecycle_verified(client, result.stdout)
-        passed = result.returncode == 0 and DONE in result.stdout and (inspect_only or state["child"] == 2 and state["parent"] == (3 if client == "codex" else 2) and (client != "codex" or audited) and lifecycle)
-        return {"passed": passed, "inspect_only": inspect_only, "client": client, "upstream": upstream.value,
-                "observed": observed, "schemas": schemas, "mcp_read_audited": audited,
-                "lifecycle_verified": lifecycle, "cli_version": cli_version,
-                "adapter_source": str(adapter_source) if adapter_source else None, "returncode": result.returncode,
-                "stdout": result.stdout[-4000:], "stderr": result.stderr[-3000:]}
+        passed = (
+            result.returncode == 0
+            and DONE in result.stdout
+            and (inspect_only or state["child"] == 2 and state["parent"] == (3 if client == "codex" else 2) and (client != "codex" or audited) and lifecycle)
+        )
+        return {
+            "passed": passed,
+            "inspect_only": inspect_only,
+            "client": client,
+            "upstream": upstream.value,
+            "observed": observed,
+            "schemas": schemas,
+            "mcp_read_audited": audited,
+            "lifecycle_verified": lifecycle,
+            "cli_version": cli_version,
+            "adapter_source": str(adapter_source) if adapter_source else None,
+            "returncode": result.returncode,
+            "stdout": result.stdout[-4000:],
+            "stderr": result.stderr[-3000:],
+        }
 
 
 def main():

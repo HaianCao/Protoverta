@@ -23,7 +23,11 @@ def test_route_doctor_checks_real_local_gateway_all_protocol_pairs(source, upstr
         nonce = re.search(r"nonce_[a-f0-9]+", json.dumps(body)).group() if "nonce_" in json.dumps(body) else "unused"
         forced = isinstance(body.get("tool_choice"), dict)
         if forced:
-            message = {"role": "assistant", "content": None, "tool_calls": [{"id": "call_fixture", "type": "function", "function": {"name": "fixture_nonce", "arguments": "{}"}}]}
+            message = {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{"id": "call_fixture", "type": "function", "function": {"name": "fixture_nonce", "arguments": "{}"}}],
+            }
             finish = "tool_calls"
         else:
             message, finish = {"role": "assistant", "content": nonce}, "stop"
@@ -31,7 +35,11 @@ def test_route_doctor_checks_real_local_gateway_all_protocol_pairs(source, upstr
             encoder = StreamEncoder(upstream_protocol)
             deltas = [Delta("start", model="m", input_tokens=1, output_tokens=0)]
             if forced:
-                deltas += [Delta("tool_start", index=0, call_id="call_fixture", name="fixture_nonce"), Delta("tool_delta", index=0, text="{}"), Delta("tool_end", index=0)]
+                deltas += [
+                    Delta("tool_start", index=0, call_id="call_fixture", name="fixture_nonce"),
+                    Delta("tool_delta", index=0, text="{}"),
+                    Delta("tool_end", index=0),
+                ]
             else:
                 deltas += [Delta("text", index=0, text=nonce)]
             deltas += [Delta("finish", reason=finish, input_tokens=1, output_tokens=1)]
@@ -52,8 +60,10 @@ def test_route_doctor_requires_explicit_live_opt_in_and_failed_checks_certify_no
     config = GatewayConfig("chat", "https://example.invalid/v1", "fixture", "local")
     with pytest.raises(ValueError, match="allow_live"):
         check_route(config, "m", "messages")
+
     def failed(request, timeout):
         raise OSError("private provider/key details")
+
     result = check_route(config, "m", "responses", cases=("text",), upstream_open=failed)
     assert result[0]["passed"] is False
     assert "private" not in json.dumps(result)
@@ -69,9 +79,21 @@ def test_truncated_outputs_never_certify_success(source, streaming):
         nonce = re.search(r"nonce_[a-f0-9]+", request.data.decode()).group()
         if streaming:
             encoder = StreamEncoder("chat")
-            deltas = [Delta("start", model="m", input_tokens=1, output_tokens=0), Delta("text", index=0, text=nonce), Delta("finish", reason="length", input_tokens=1, output_tokens=1)]
+            deltas = [
+                Delta("start", model="m", input_tokens=1, output_tokens=0),
+                Delta("text", index=0, text=nonce),
+                Delta("finish", reason="length", input_tokens=1, output_tokens=1),
+            ]
             return io.BytesIO(b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta)))
-        return io.BytesIO(json.dumps({"model": "m", "choices": [{"message": {"role": "assistant", "content": nonce}, "finish_reason": "length"}], "usage": {"prompt_tokens": 1, "completion_tokens": 1}}).encode())
+        return io.BytesIO(
+            json.dumps(
+                {
+                    "model": "m",
+                    "choices": [{"message": {"role": "assistant", "content": nonce}, "finish_reason": "length"}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+                }
+            ).encode()
+        )
 
     report = check_route(config, "m", source, cases=("streaming" if streaming else "text",), upstream_open=upstream)
     assert report[0]["passed"] is False
@@ -89,9 +111,23 @@ def test_doctor_obeys_public_reasoning_policy_without_certifying_reasoning(sourc
         nonce = re.search(r"nonce_[a-f0-9]+", request.data.decode()).group()
         if streaming:
             encoder = StreamEncoder("chat", public_reasoning=True)
-            deltas = [Delta("start", model="m", input_tokens=1, output_tokens=0), Delta("reasoning_text", index=0, text="synthetic public reasoning"), Delta("text", index=0, text=nonce), Delta("finish", reason="stop", input_tokens=1, output_tokens=1)]
+            deltas = [
+                Delta("start", model="m", input_tokens=1, output_tokens=0),
+                Delta("reasoning_text", index=0, text="synthetic public reasoning"),
+                Delta("text", index=0, text=nonce),
+                Delta("finish", reason="stop", input_tokens=1, output_tokens=1),
+            ]
             return io.BytesIO(b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta)))
-        return io.BytesIO(json.dumps({"model": "m", "choices": [{"message": {"role": "assistant", "content": nonce, "reasoning_content": "synthetic public reasoning"}, "finish_reason": "stop"}]}).encode())
+        return io.BytesIO(
+            json.dumps(
+                {
+                    "model": "m",
+                    "choices": [
+                        {"message": {"role": "assistant", "content": nonce, "reasoning_content": "synthetic public reasoning"}, "finish_reason": "stop"}
+                    ],
+                }
+            ).encode()
+        )
 
     report = check_route(config, "m", source, cases=("streaming" if streaming else "text",), upstream_open=upstream)
     assert report[0]["passed"] is enabled
@@ -104,9 +140,18 @@ def test_public_reasoning_doctor_still_rejects_opaque_reasoning():
 
     def upstream(request, timeout):
         nonce = re.search(r"nonce_[a-f0-9]+", request.data.decode()).group()
-        return io.BytesIO(json.dumps({"model": "m", "status": "completed", "output": [
-            {"id": "rs_fixture", "type": "reasoning", "summary": [], "encrypted_content": "opaque-fixture"},
-            {"type": "message", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": nonce}]}]}).encode())
+        return io.BytesIO(
+            json.dumps(
+                {
+                    "model": "m",
+                    "status": "completed",
+                    "output": [
+                        {"id": "rs_fixture", "type": "reasoning", "summary": [], "encrypted_content": "opaque-fixture"},
+                        {"type": "message", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": nonce}]},
+                    ],
+                }
+            ).encode()
+        )
 
     report = check_route(config, "m", "responses", cases=("text",), upstream_open=upstream)
     assert report[0]["passed"] is False

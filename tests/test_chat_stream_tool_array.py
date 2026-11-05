@@ -17,8 +17,7 @@ INVALID = [True, False, 1, 0, 0.5, "", "fixture", {}, {"index": 0}]
 
 
 def chunk(delta, reason=None):
-    return json.dumps({"object": "chat.completion.chunk", "model": "m",
-        "choices": [{"index": 0, "delta": delta, "finish_reason": reason}]})
+    return json.dumps({"object": "chat.completion.chunk", "model": "m", "choices": [{"index": 0, "delta": delta, "finish_reason": reason}]})
 
 
 @pytest.mark.parametrize("value", INVALID)
@@ -31,11 +30,13 @@ def test_non_array_tool_calls_raises_declared_stream_error(value):
 @pytest.mark.parametrize("delta", [{}, {"tool_calls": None}, {"tool_calls": []}])
 def test_optional_tool_array_preserves_later_fragmented_function_call(delta):
     decoder = StreamDecoder("chat")
-    frames = [chunk({"role": "assistant", **delta}),
-        chunk({"tool_calls": [{"index": 0, "id": "opaque:/+=", "type": "function",
-            "function": {"name": "fixture", "arguments": '{"x":'}}]}),
+    frames = [
+        chunk({"role": "assistant", **delta}),
+        chunk({"tool_calls": [{"index": 0, "id": "opaque:/+=", "type": "function", "function": {"name": "fixture", "arguments": '{"x":'}}]}),
         chunk({"tool_calls": [{"index": 0, "function": {"arguments": "1}"}}]}),
-        chunk({}, "tool_calls"), "[DONE]"]
+        chunk({}, "tool_calls"),
+        "[DONE]",
+    ]
     deltas = [part for frame in frames for part in decoder.feed(SSEEvent("message", frame))]
     decoder.finish()
     assert [part.call_id for part in deltas if part.kind == "tool_start"] == ["opaque:/+="]
@@ -66,14 +67,20 @@ def listener(chunks):
         calls.append(req)
         if len(calls) == 1:
             return Fragmented(chunks)
-        usage = {"object": "chat.completion.chunk", "model": "m", "choices": [],
-            "usage": {"prompt_tokens": 2, "completion_tokens": 1}}
-        return Fragmented([encode_sse("message", chunk({"role": "assistant", "content": "recovered"})),
-            encode_sse("message", chunk({}, "stop")), encode_sse("message", json.dumps(usage)),
-            encode_sse("message", "[DONE]")])
+        usage = {"object": "chat.completion.chunk", "model": "m", "choices": [], "usage": {"prompt_tokens": 2, "completion_tokens": 1}}
+        return Fragmented(
+            [
+                encode_sse("message", chunk({"role": "assistant", "content": "recovered"})),
+                encode_sse("message", chunk({}, "stop")),
+                encode_sse("message", json.dumps(usage)),
+                encode_sse("message", "[DONE]"),
+            ]
+        )
 
-    server = CheckedServer(("127.0.0.1", 0), make_handler(GatewayConfig(
-        "chat", "https://example.invalid/v1", "fixture", "local", messages_usage_policy="deferred"), upstream_open=upstream))
+    server = CheckedServer(
+        ("127.0.0.1", 0),
+        make_handler(GatewayConfig("chat", "https://example.invalid/v1", "fixture", "local", messages_usage_policy="deferred"), upstream_open=upstream),
+    )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -89,14 +96,13 @@ def listener(chunks):
 @pytest.mark.parametrize("target", ["messages", "responses"])
 @pytest.mark.parametrize("after_payload", [False, True])
 def test_bad_tool_array_returns_http_or_sse_error_without_handler_crash(value, target, after_payload):
-    chunks = ([encode_sse("message", chunk({"role": "assistant", "content": "synthetic partial"}))]
-        if after_payload else [])
+    chunks = [encode_sse("message", chunk({"role": "assistant", "content": "synthetic partial"}))] if after_payload else []
     chunks.append(encode_sse("message", chunk({"tool_calls": value})))
-    body = convert_request({"model": "m", "max_tokens": 20, "stream": True,
-        "messages": [{"role": "user", "content": "synthetic"}]}, "chat", target)
+    body = convert_request({"model": "m", "max_tokens": 20, "stream": True, "messages": [{"role": "user", "content": "synthetic"}]}, "chat", target)
     with listener(chunks) as (origin, calls):
-        request = Request(origin + "/v1/" + target, data=json.dumps(body).encode(),
-            headers={"Authorization": "Bearer local", "Content-Type": "application/json"})
+        request = Request(
+            origin + "/v1/" + target, data=json.dumps(body).encode(), headers={"Authorization": "Bearer local", "Content-Type": "application/json"}
+        )
         if after_payload:
             with urlopen(request, timeout=3) as response:
                 assert response.status == 200

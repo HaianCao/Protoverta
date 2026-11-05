@@ -80,17 +80,24 @@ def test_concurrent_truncated_stream_churn_keeps_isolation_and_closes_resources(
         body = json.loads(request.data)
         index = int(body["model"].split("-")[-1])
         encoder = StreamEncoder("chat")
-        deltas = [Delta("start", model=body["model"], input_tokens=1, output_tokens=0), Delta("text", text="reply-" + str(index)), Delta("finish", reason="stop", input_tokens=1, output_tokens=1)]
+        deltas = [
+            Delta("start", model=body["model"], input_tokens=1, output_tokens=0),
+            Delta("text", text="reply-" + str(index)),
+            Delta("finish", reason="stop", input_tokens=1, output_tokens=1),
+        ]
         wire = b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta))
         if index % 5 == 0:
-            wire = wire[:wire.index(b'[DONE]')]  # no successful upstream EOF marker
+            wire = wire[: wire.index(b"[DONE]")]  # no successful upstream EOF marker
         with lock:
             opened.append(1)
             active.append(1)
         return Response(wire)
 
-    config = GatewayConfig("chat", "https://example.test/v1", "key", "local", shared_admission_db=str(tmp_path / "quota.sqlite"), shared_requests=128, shared_concurrency=16)
+    config = GatewayConfig(
+        "chat", "https://example.test/v1", "key", "local", shared_admission_db=str(tmp_path / "quota.sqlite"), shared_requests=128, shared_concurrency=16
+    )
     with listener(config, upstream) as url:
+
         def run(index):
             with post(url, {"model": "m-" + str(index), "input": "hi", "stream": True}) as response:
                 events = [json.loads(event.data) for event in SSEParser().feed(response.read()) if event.data != "[DONE]"]

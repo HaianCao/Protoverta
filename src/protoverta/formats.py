@@ -45,7 +45,14 @@ def _portable_schema(schema, *, root=True, depth=0):
     if "object" in types:
         properties = node.get("properties", {})
         required = node.get("required", [])
-        if not isinstance(properties, dict) or not isinstance(required, list) or any(not isinstance(name, str) for name in required) or len(required) != len(set(required)) or set(required) != set(properties) or node.get("additionalProperties") is not False:
+        if (
+            not isinstance(properties, dict)
+            or not isinstance(required, list)
+            or any(not isinstance(name, str) for name in required)
+            or len(required) != len(set(required))
+            or set(required) != set(properties)
+            or node.get("additionalProperties") is not False
+        ):
             raise ConversionError("portable strict objects require every property and additionalProperties=false")
         for child in properties.values():
             _portable_schema(child, root=False, depth=depth + 1)

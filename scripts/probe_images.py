@@ -26,12 +26,34 @@ def synthetic_png() -> str:
 
 
 def probe(source: Protocol, upstream: Protocol, base_url: str, model: str, key: str, *, stream: bool, public_reasoning: bool = False) -> dict:
-    template = {"model": model, "max_tokens": 1024, "stream": stream, "messages": [{"role": "user", "content": [{"type": "text", "text": "Name the dominant color on the LEFT, then on the RIGHT of this image. Reply with those two color names only."}, {"type": "image_url", "image_url": {"url": synthetic_png()}}]}]}
+    template = {
+        "model": model,
+        "max_tokens": 1024,
+        "stream": stream,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Name the dominant color on the LEFT, then on the RIGHT of this image. Reply with those two color names only."},
+                    {"type": "image_url", "image_url": {"url": synthetic_png()}},
+                ],
+            }
+        ],
+    }
     body = convert_request(template, "chat", source)
-    config = GatewayConfig(upstream, base_url, key, "synthetic-vision-probe", public_reasoning=public_reasoning, messages_usage_policy="deferred" if source == Protocol.MESSAGES else "strict")
+    config = GatewayConfig(
+        upstream,
+        base_url,
+        key,
+        "synthetic-vision-probe",
+        public_reasoning=public_reasoning,
+        messages_usage_policy="deferred" if source == Protocol.MESSAGES else "strict",
+    )
     endpoint = {Protocol.CHAT: "/v1/chat/completions", Protocol.MESSAGES: "/v1/messages", Protocol.RESPONSES: "/v1/responses"}[source]
     with gateway_session(config) as origin:
-        request = Request(origin + endpoint, json.dumps(body).encode(), {"Authorization": "Bearer synthetic-vision-probe", "Content-Type": "application/json"}, method="POST")
+        request = Request(
+            origin + endpoint, json.dumps(body).encode(), {"Authorization": "Bearer synthetic-vision-probe", "Content-Type": "application/json"}, method="POST"
+        )
         try:
             with urlopen(request, timeout=120) as response:
                 if stream:

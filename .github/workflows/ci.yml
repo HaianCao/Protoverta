@@ -39,6 +39,8 @@ jobs:
         run: python -m pytest --junitxml=source-tests.xml
       - name: Lint
         run: python -m ruff check src tests sdk_tests scripts fuzz_tests
+      - name: Formatting
+        run: python -m ruff format --check src tests sdk_tests scripts fuzz_tests
       - name: Strict runtime boundary types
         run: python scripts/check_types.py
       - name: Build wheel

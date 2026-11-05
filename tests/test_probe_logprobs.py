@@ -45,8 +45,9 @@ def test_probe_never_retries_or_copies_provider_errors(probe_module, status):
 
 
 def test_shape_observations_do_not_copy_reasoning_text_or_error_values(probe_module):
-    raw = json.dumps({"choices": [{"message": {"content": "private answer", "reasoning_content": "private reasoning"},
-                                  "logprobs": None, "finish_reason": "length"}]}).encode()
+    raw = json.dumps(
+        {"choices": [{"message": {"content": "private answer", "reasoning_content": "private reasoning"}, "logprobs": None, "finish_reason": "length"}]}
+    ).encode()
     result = probe_module.shape(raw)
     assert result["has_reasoning"] and result["finish_reason"] == "length"
     assert result["has_logprob_records"] is False

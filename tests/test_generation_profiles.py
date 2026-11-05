@@ -29,8 +29,19 @@ def record(protocol, defaults=None, **extra):
 
 
 @pytest.mark.parametrize("protocol", ["chat", "messages", "responses"])
-@pytest.mark.parametrize("defaults", [{}, {"temperature": None}, {"temperature": True}, {"temperature": float("nan")},
-                                      {"temperature": float("inf")}, {"top_p": 2}, {"top_p": "1"}, {"frequency_penalty": 0}])
+@pytest.mark.parametrize(
+    "defaults",
+    [
+        {},
+        {"temperature": None},
+        {"temperature": True},
+        {"temperature": float("nan")},
+        {"temperature": float("inf")},
+        {"top_p": 2},
+        {"top_p": "1"},
+        {"frequency_penalty": 0},
+    ],
+)
 def test_invalid_default_contracts_fail_before_use(protocol, defaults):
     with pytest.raises(ValueError):
         record(protocol, defaults)
@@ -76,10 +87,25 @@ def test_response_dialect_cannot_apply_to_other_protocols(protocol):
 
 
 def test_file_schema_preserves_legacy_records_and_fingerprints_new_contract(tmp_path):
-    legacy = {"base_url": BASE, "protocol": "chat", "model": "old", "checked_at": "2026-11-04", "evidence": "synthetic legacy",
-              "chat_token_field": "max_tokens", "token_budget_semantics": "completion_total"}
-    new = {"kind": "generation", "base_url": BASE, "protocol": "responses", "model": "m", "checked_at": "2026-11-04",
-           "evidence": "synthetic response dialect", "responses_penalties": True, "sampling_defaults": {"temperature": 0.7}}
+    legacy = {
+        "base_url": BASE,
+        "protocol": "chat",
+        "model": "old",
+        "checked_at": "2026-11-04",
+        "evidence": "synthetic legacy",
+        "chat_token_field": "max_tokens",
+        "token_budget_semantics": "completion_total",
+    }
+    new = {
+        "kind": "generation",
+        "base_url": BASE,
+        "protocol": "responses",
+        "model": "m",
+        "checked_at": "2026-11-04",
+        "evidence": "synthetic response dialect",
+        "responses_penalties": True,
+        "sampling_defaults": {"temperature": 0.7},
+    }
     path = tmp_path / "profiles.json"
     path.write_text(json.dumps({"schema_version": 1, "profiles": [legacy, new]}))
     loaded = ProviderProfiles.load(path)

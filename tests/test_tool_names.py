@@ -22,8 +22,18 @@ def request_body(name, protocol="messages"):
     if protocol == "messages":
         return dict(common, tools=[{"name": name, "input_schema": {"type": "object"}}], tool_choice={"type": "tool", "name": name})
     if protocol == "chat":
-        return dict(common, tools=[{"type": "function", "function": {"name": name, "parameters": {"type": "object"}}}], tool_choice={"type": "function", "function": {"name": name}})
-    return {"model": "m", "input": "Hi", "max_output_tokens": 32, "tools": [{"type": "function", "name": name, "parameters": {"type": "object"}}], "tool_choice": {"type": "function", "name": name}}
+        return dict(
+            common,
+            tools=[{"type": "function", "function": {"name": name, "parameters": {"type": "object"}}}],
+            tool_choice={"type": "function", "function": {"name": name}},
+        )
+    return {
+        "model": "m",
+        "input": "Hi",
+        "max_output_tokens": 32,
+        "tools": [{"type": "function", "name": name, "parameters": {"type": "object"}}],
+        "tool_choice": {"type": "function", "name": name},
+    }
 
 
 @pytest.mark.parametrize("protocol", ["chat", "messages", "responses"])
@@ -43,7 +53,10 @@ def test_aliases_are_deterministic_reversible_and_request_local(protocol, name):
 def test_history_forced_choice_and_collision_are_preserved_without_string_replacement():
     name = "x" * 102
     original = request_body(name, "responses")
-    original["input"] = [{"type": "function_call", "name": name, "call_id": "c", "arguments": json.dumps({"name": name})}, {"type": "function_call_output", "call_id": "c", "output": name}]
+    original["input"] = [
+        {"type": "function_call", "name": name, "call_id": "c", "arguments": json.dumps({"name": name})},
+        {"type": "function_call_output", "call_id": "c", "output": name},
+    ]
     first = ToolNameMap()
     alias = first.prepare(original, "responses")["tools"][0]["name"]
     original["tools"].append({"type": "function", "name": alias})
@@ -69,7 +82,12 @@ def test_strict_conversion_rejects_long_names_before_upstream():
 
 @pytest.mark.parametrize("target", ["chat", "responses"])
 def test_strict_json_and_stream_responses_reject_nonportable_upstream_names(target):
-    body = {"model": "m", "content": [{"type": "tool_use", "id": "c", "name": "x" * 102, "input": {}}], "stop_reason": "tool_use", "usage": {"input_tokens": 1, "output_tokens": 1}}
+    body = {
+        "model": "m",
+        "content": [{"type": "tool_use", "id": "c", "name": "x" * 102, "input": {}}],
+        "stop_reason": "tool_use",
+        "usage": {"input_tokens": 1, "output_tokens": 1},
+    }
     with pytest.raises(ConversionError, match="function names"):
         convert_response(body, "messages", target)
     encoder = StreamEncoder("messages")
@@ -93,12 +111,36 @@ def test_gateway_alias_json_stream_and_concurrent_isolation(stream):
         assert outbound["tool_choice"]["function"]["name"] == name
         if stream:
             encoder = StreamEncoder("chat")
-            deltas = [Delta("start", model="m"), Delta("tool_start", index=0, call_id="c", name=name), Delta("tool_delta", index=0, text="{}"), Delta("tool_end", index=0), Delta("finish", reason="tool_calls", input_tokens=2, output_tokens=3)]
+            deltas = [
+                Delta("start", model="m"),
+                Delta("tool_start", index=0, call_id="c", name=name),
+                Delta("tool_delta", index=0, text="{}"),
+                Delta("tool_end", index=0),
+                Delta("finish", reason="tool_calls", input_tokens=2, output_tokens=3),
+            ]
             return io.BytesIO(b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta)))
-        return io.BytesIO(json.dumps({"model": "m", "choices": [{"finish_reason": "tool_calls", "message": {"role": "assistant", "content": None, "tool_calls": [{"id": "c", "type": "function", "function": {"name": name, "arguments": "{}"}}]}}], "usage": {"prompt_tokens": 2, "completion_tokens": 3}}).encode())
+        return io.BytesIO(
+            json.dumps(
+                {
+                    "model": "m",
+                    "choices": [
+                        {
+                            "finish_reason": "tool_calls",
+                            "message": {
+                                "role": "assistant",
+                                "content": None,
+                                "tool_calls": [{"id": "c", "type": "function", "function": {"name": name, "arguments": "{}"}}],
+                            },
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 2, "completion_tokens": 3},
+                }
+            ).encode()
+        )
 
     config = GatewayConfig("chat", "https://example.test/v1", "key", "local", tool_names="alias", messages_usage_policy="deferred")
     with listener(config, upstream) as url:
+
         def run(name):
             body = dict(request_body(name), stream=stream)
             with post(url.removesuffix("responses") + "messages", body) as response:
@@ -106,9 +148,17 @@ def test_gateway_alias_json_stream_and_concurrent_isolation(stream):
             if stream:
                 events = [json.loads(event.data) for event in SSEParser().feed(wire)]
                 assert events[-1]["type"] == "message_stop"
-                assert next(event["content_block"]["name"] for event in events if event["type"] == "content_block_start" and event["content_block"]["type"] == "tool_use") == name
+                assert (
+                    next(
+                        event["content_block"]["name"]
+                        for event in events
+                        if event["type"] == "content_block_start" and event["content_block"]["type"] == "tool_use"
+                    )
+                    == name
+                )
             else:
                 assert json.loads(wire)["content"][0]["name"] == name
+
         with ThreadPoolExecutor(max_workers=3) as pool:
             list(pool.map(run, ["mcp_" + "a" * 100, "mcp_" + "b" * 100, "mcp_" + "a" * 100]))
 
@@ -124,9 +174,28 @@ def test_alias_gateway_all_six_routes_restore_names_and_snapshots(source, target
         alias = outbound["tools"][0]["function"]["name"] if target == "chat" else outbound["tools"][0]["name"]
         if stream:
             encoder = StreamEncoder(target)
-            deltas = [Delta("start", model="m", input_tokens=1, output_tokens=0), Delta("tool_start", index=0, call_id="c", name=alias), Delta("tool_delta", index=0, text="{}"), Delta("tool_end", index=0), Delta("finish", reason="tool_calls", input_tokens=1, output_tokens=1)]
+            deltas = [
+                Delta("start", model="m", input_tokens=1, output_tokens=0),
+                Delta("tool_start", index=0, call_id="c", name=alias),
+                Delta("tool_delta", index=0, text="{}"),
+                Delta("tool_end", index=0),
+                Delta("finish", reason="tool_calls", input_tokens=1, output_tokens=1),
+            ]
             return io.BytesIO(b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta)))
-        chat = {"model": "m", "choices": [{"finish_reason": "tool_calls", "message": {"role": "assistant", "content": None, "tool_calls": [{"type": "function", "id": "c", "function": {"name": alias, "arguments": "{}"}}]}}], "usage": {"prompt_tokens": 1, "completion_tokens": 1}}
+        chat = {
+            "model": "m",
+            "choices": [
+                {
+                    "finish_reason": "tool_calls",
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [{"type": "function", "id": "c", "function": {"name": alias, "arguments": "{}"}}],
+                    },
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+        }
         return io.BytesIO(json.dumps(convert_response(chat, "chat", target)).encode())
 
     config = GatewayConfig(target, "https://example.test/v1", "key", "local", tool_names="alias", messages_usage_policy="deferred")
@@ -142,10 +211,22 @@ def test_alias_gateway_all_six_routes_restore_names_and_snapshots(source, target
         elif source == "messages":
             calls = [event["content_block"] for event in events if event.get("content_block", {}).get("type") == "tool_use"]
         else:
-            calls = [call["function"] for event in events for choice in event.get("choices", []) for call in choice.get("delta", {}).get("tool_calls", []) if "name" in call.get("function", {})]
+            calls = [
+                call["function"]
+                for event in events
+                for choice in event.get("choices", [])
+                for call in choice.get("delta", {}).get("tool_calls", [])
+                if "name" in call.get("function", {})
+            ]
     else:
         result = json.loads(wire)
-        calls = result["output"] if source == "responses" else result["content"] if source == "messages" else [call["function"] for call in result["choices"][0]["message"]["tool_calls"]]
+        calls = (
+            result["output"]
+            if source == "responses"
+            else result["content"]
+            if source == "messages"
+            else [call["function"] for call in result["choices"][0]["message"]["tool_calls"]]
+        )
     assert calls and all(call["name"] == name for call in calls)
 
 

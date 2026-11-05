@@ -24,13 +24,19 @@ def chat_result(count=0):
     message = {"role": "assistant", "content": "synthetic"}
     if count:
         message["tool_calls"] = [{"id": f"call_{i}", "type": "function", "function": {"name": "lookup", "arguments": "{}"}} for i in range(count)]
-    return {"model": "m", "choices": [{"message": message, "finish_reason": "tool_calls" if count else "stop"}],
-            "usage": {"prompt_tokens": 2, "completion_tokens": 1}}
+    return {
+        "model": "m",
+        "choices": [{"message": message, "finish_reason": "tool_calls" if count else "stop"}],
+        "usage": {"prompt_tokens": 2, "completion_tokens": 1},
+    }
 
 
 def context(parallel=True):
-    return {"parallel_tool_calls": parallel, "tools": [{"type": "function", "name": "lookup", "parameters": {"type": "object"}}],
-            "tool_choice": {"type": "function", "name": "lookup"}}
+    return {
+        "parallel_tool_calls": parallel,
+        "tools": [{"type": "function", "name": "lookup", "parameters": {"type": "object"}}],
+        "tool_choice": {"type": "function", "name": "lookup"},
+    }
 
 
 @pytest.mark.parametrize("source", ["chat", "messages"])
@@ -93,7 +99,20 @@ def test_context_binding_is_isolated_between_concurrent_streams_and_json():
         list(pool.map(run, range(32)))
 
 
-@pytest.mark.parametrize("metadata", [[], {"parallel_tool_calls": "yes"}, {"tools": False}, {"tools": [1]}, {"tool_choice": 0}, {"tool_choice": "invalid"}, {"max_output_tokens": True}, {"temperature": float("nan")}, {"instructions": 1}])
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        [],
+        {"parallel_tool_calls": "yes"},
+        {"tools": False},
+        {"tools": [1]},
+        {"tool_choice": 0},
+        {"tool_choice": "invalid"},
+        {"max_output_tokens": True},
+        {"temperature": float("nan")},
+        {"instructions": 1},
+    ],
+)
 def test_invalid_context_is_rejected_before_conversion_or_stream_start(metadata):
     with pytest.raises(ConversionError):
         bind_response_context(metadata)
@@ -124,8 +143,9 @@ def test_gateway_metadata_matches_original_explicit_request_only(source, stream,
     raw = source_wire(source, tools=False) if stream else json.dumps(convert_response(chat_result(), "chat", source)).encode()
     with listener(source, lambda req, timeout: io.BytesIO(raw)) as origin, request(origin, "responses", json.dumps(body).encode()) as response:
         encoded = response.read()
-    snapshots = ([json.loads(event.data)["response"] for event in SSEParser().feed(encoded) if "response" in json.loads(event.data)]
-                 if stream else [json.loads(encoded)])
+    snapshots = (
+        [json.loads(event.data)["response"] for event in SSEParser().feed(encoded) if "response" in json.loads(event.data)] if stream else [json.loads(encoded)]
+    )
     assert snapshots
     for snapshot in snapshots:
         expected = metadata or {"tools": [], "tool_choice": "none", "parallel_tool_calls": False}

@@ -15,13 +15,35 @@ from protoverta.server import GatewayConfig
 
 
 def profile(defaults, **extra):
-    return ProviderProfile("https://example.invalid/v1", "chat", "m", "2026-11-04", "synthetic default support fixture",
-                           "max_completion_tokens", "completion_total", sampling_defaults=defaults, **extra)
+    return ProviderProfile(
+        "https://example.invalid/v1",
+        "chat",
+        "m",
+        "2026-11-04",
+        "synthetic default support fixture",
+        "max_completion_tokens",
+        "completion_total",
+        sampling_defaults=defaults,
+        **extra,
+    )
 
 
-@pytest.mark.parametrize("defaults", [{}, {"temperature": None}, {"temperature": True}, {"temperature": float("nan")},
-                                      {"temperature": float("inf")}, {"temperature": -1}, {"temperature": 3},
-                                      {"top_p": -1}, {"top_p": 2}, {"top_p": "1"}, {"unknown": 0}])
+@pytest.mark.parametrize(
+    "defaults",
+    [
+        {},
+        {"temperature": None},
+        {"temperature": True},
+        {"temperature": float("nan")},
+        {"temperature": float("inf")},
+        {"temperature": -1},
+        {"temperature": 3},
+        {"top_p": -1},
+        {"top_p": 2},
+        {"top_p": "1"},
+        {"unknown": 0},
+    ],
+)
 def test_invalid_defaults_fail_at_configuration_time(defaults):
     with pytest.raises(ValueError):
         profile(defaults)
@@ -76,8 +98,12 @@ def test_configured_default_respects_a_model_record_explicitly_rejecting_tempera
     from urllib.error import HTTPError
 
     assert "temperature" in request_features({"temperature": 0}, "chat")
-    caps = CapabilityRegistry((CapabilityRecord("https://example.invalid/v1", "chat", "m", {"temperature": False}, "2026-11-04", "synthetic unsupported fixture"),))
-    cfg = GatewayConfig("chat", "https://example.invalid/v1", "synthetic", "local", provider_profiles=ProviderProfiles((profile({"temperature": 0.7}),)), capabilities=caps)
+    caps = CapabilityRegistry(
+        (CapabilityRecord("https://example.invalid/v1", "chat", "m", {"temperature": False}, "2026-11-04", "synthetic unsupported fixture"),)
+    )
+    cfg = GatewayConfig(
+        "chat", "https://example.invalid/v1", "synthetic", "local", provider_profiles=ProviderProfiles((profile({"temperature": 0.7}),)), capabilities=caps
+    )
     seen = []
     with listener(cfg, lambda *a, **k: seen.append(1)) as url:
         with pytest.raises(HTTPError) as caught:

@@ -39,7 +39,26 @@ def validate(core, codex, claude, output):
         env = sanitized_environment()
         env["PYTHONPATH"] = os.pathsep.join((str(project / "src"), str(projects[0] / "src"), str(projects[0] / "scripts")))
         guard = ["-p", "gateway_test_guard"] if project != projects[0] else []
-        command([sys.executable, "-B", "-m", "pytest", *guard, "-p", "no:cacheprovider", "-o", "addopts=", "--tb=short", "--show-capture=no", "-q", "--junitxml", reports / ("source-" + project.name + ".xml")], project, env=env)
+        command(
+            [
+                sys.executable,
+                "-B",
+                "-m",
+                "pytest",
+                *guard,
+                "-p",
+                "no:cacheprovider",
+                "-o",
+                "addopts=",
+                "--tb=short",
+                "--show-capture=no",
+                "-q",
+                "--junitxml",
+                reports / ("source-" + project.name + ".xml"),
+            ],
+            project,
+            env=env,
+        )
         if project != projects[0]:
             command([sys.executable, projects[0] / "scripts/check_test_report.py", reports / ("source-" + project.name + ".xml")], project, env=env)
         lint_paths = ["src", "tests", "scripts"]
@@ -95,7 +114,30 @@ print('Three isolated wheels: runtime API compatibility PASS')
     for project in projects:
         # Override Claude's source-pythonpath so wheel tests cannot silently
         # import checkout code instead of the installed artifacts.
-        command([python, "-B", "-m", "pytest", "-p", "gateway_test_guard", "-p", "no:cacheprovider", "-o", "pythonpath=", "-o", "addopts=", "--tb=short", "--show-capture=no", "-q", project / "tests", "--junitxml", reports / ("installed-" + project.name + ".xml")], output, env=clean)
+        command(
+            [
+                python,
+                "-B",
+                "-m",
+                "pytest",
+                "-p",
+                "gateway_test_guard",
+                "-p",
+                "no:cacheprovider",
+                "-o",
+                "pythonpath=",
+                "-o",
+                "addopts=",
+                "--tb=short",
+                "--show-capture=no",
+                "-q",
+                project / "tests",
+                "--junitxml",
+                reports / ("installed-" + project.name + ".xml"),
+            ],
+            output,
+            env=clean,
+        )
         if project != projects[0]:
             command([python, projects[0] / "scripts/check_test_report.py", reports / ("installed-" + project.name + ".xml")], output, env=clean)
     command([python, projects[0] / "scripts/check_sdk.py", "--installed", "--report-dir", reports / "sdk"], output, env=clean)

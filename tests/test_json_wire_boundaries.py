@@ -20,11 +20,17 @@ from protoverta.streaming import Delta, StreamDecoder, StreamError
 
 PROTOCOLS = ("chat", "messages", "responses")
 PATHS = {"chat": "/v1/chat/completions", "messages": "/v1/messages", "responses": "/v1/responses"}
-VALID = {"model": "m", "max_tokens": 20, "messages": [{"role": "user", "content": "valid 🌏"}],
-    "tools": [{"type": "function", "function": {"name": "f", "parameters": {
-        "type": "object", "properties": {"x": {"type": "number", "enum": [17]}}}}}]}
-RESULT = {"model": "m", "choices": [{"message": {"role": "assistant", "content": "valid 🌏"},
-    "finish_reason": "stop"}], "usage": {"prompt_tokens": 2, "completion_tokens": 1}}
+VALID = {
+    "model": "m",
+    "max_tokens": 20,
+    "messages": [{"role": "user", "content": "valid 🌏"}],
+    "tools": [{"type": "function", "function": {"name": "f", "parameters": {"type": "object", "properties": {"x": {"type": "number", "enum": [17]}}}}}],
+}
+RESULT = {
+    "model": "m",
+    "choices": [{"message": {"role": "assistant", "content": "valid 🌏"}, "finish_reason": "stop"}],
+    "usage": {"prompt_tokens": 2, "completion_tokens": 1},
+}
 
 
 @contextmanager
@@ -35,8 +41,7 @@ def listener(protocol, upstream):
         def handle_error(self, request, client_address):
             errors.append("uncaught handler exception")
 
-    server = CheckedServer(("127.0.0.1", 0), make_handler(
-        GatewayConfig(protocol, "https://example.invalid/v1", "fixture", "local"), upstream_open=upstream))
+    server = CheckedServer(("127.0.0.1", 0), make_handler(GatewayConfig(protocol, "https://example.invalid/v1", "fixture", "local"), upstream_open=upstream))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -49,8 +54,7 @@ def listener(protocol, upstream):
 
 
 def request(origin, source, raw):
-    return urlopen(Request(origin + PATHS[source], data=raw,
-        headers={"Authorization": "Bearer local", "Content-Type": "application/json"}), timeout=3)
+    return urlopen(Request(origin + PATHS[source], data=raw, headers={"Authorization": "Bearer local", "Content-Type": "application/json"}), timeout=3)
 
 
 @pytest.mark.parametrize("source", PROTOCOLS)
@@ -63,9 +67,9 @@ def test_invalid_request_json_rejects_without_dispatch_and_recovers(source, targ
         return io.BytesIO(encode_json(convert_response(RESULT, "chat", target)))
 
     good = encode_json(convert_request(VALID, "chat", source))
-    invalid = [b'{"x":' + b'1' * 5000 + b'}', b'{"x":"\\ud800"}', b'{"\\udfff":"x"}']
+    invalid = [b'{"x":' + b"1" * 5000 + b"}", b'{"x":"\\ud800"}', b'{"\\udfff":"x"}']
     for number in (b"NaN", b"Infinity", b"-Infinity", b"1e309", b"-1e309"):
-        raw = good.replace(b'"enum": [17]', b'"enum": [' + number + b']')
+        raw = good.replace(b'"enum": [17]', b'"enum": [' + number + b"]")
         assert raw != good
         invalid.append(raw)
     with listener(target, upstream) as origin:
@@ -83,7 +87,7 @@ def test_invalid_request_json_rejects_without_dispatch_and_recovers(source, targ
     assert len(calls) == 1
 
 
-@pytest.mark.parametrize("bad", [b'{"x":' + b'1' * 5000 + b'}', b'{"x":NaN}', b'{"x":1e309}', b'{"x":"\\ud800"}'])
+@pytest.mark.parametrize("bad", [b'{"x":' + b"1" * 5000 + b"}", b'{"x":NaN}', b'{"x":1e309}', b'{"x":"\\ud800"}'])
 @pytest.mark.parametrize("target", PROTOCOLS)
 def test_invalid_upstream_json_returns_structured_failure_and_recovers(bad, target):
     responses = iter([bad, encode_json(RESULT)])
@@ -116,10 +120,13 @@ def test_library_rejects_invalid_schema_values_in_requests_and_responses(source,
 @pytest.mark.parametrize("source", ["chat", "messages"])
 def test_doctor_does_not_certify_inconsistent_stream_tool_finish(source):
     encoder = StreamEncoder(source)
-    deltas = [Delta("start", model="m", input_tokens=1, output_tokens=0),
+    deltas = [
+        Delta("start", model="m", input_tokens=1, output_tokens=0),
         Delta("tool_start", index=0, call_id="fixture_call", name="fixture_nonce"),
-        Delta("tool_delta", index=0, text="{}"), Delta("tool_end", index=0),
-        Delta("finish", reason="tool_calls", input_tokens=1, output_tokens=1)]
+        Delta("tool_delta", index=0, text="{}"),
+        Delta("tool_end", index=0),
+        Delta("finish", reason="tool_calls", input_tokens=1, output_tokens=1),
+    ]
     raw = b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta))
     if source == "chat":
         raw = raw.replace(b'"finish_reason":"tool_calls"', b'"finish_reason":"stop"')
@@ -130,8 +137,7 @@ def test_doctor_does_not_certify_inconsistent_stream_tool_finish(source):
         for event in parser.feed(raw):
             decoder.feed(event)
     config = GatewayConfig(source, "https://example.invalid/v1", "fixture", "local")
-    report = check_route(config, "m", source, cases=("streaming_tools",),
-        upstream_open=lambda req, timeout: io.BytesIO(raw))
+    report = check_route(config, "m", source, cases=("streaming_tools",), upstream_open=lambda req, timeout: io.BytesIO(raw))
     assert not report[0]["passed"]
     assert evidence_report(config, "m", source, report, verified_with="synthetic")["routes"] == []
 
@@ -148,11 +154,11 @@ def test_length_termination_with_tool_calls_remains_valid(source):
 @pytest.mark.parametrize("after_payload", [False, True])
 def test_bad_sse_json_never_produces_success(protocol, after_payload):
     raw = source_wire(protocol, tools=False)
-    bad = b'event: message\ndata: {"x":' + b'1' * 5000 + b'}\n\n'
+    bad = b'event: message\ndata: {"x":' + b"1" * 5000 + b"}\n\n"
     # Force a separate read after valid payload has been forwarded. Remove the
     # original terminal event so this exercises a parser error mid-stream,
     # rather than just rejecting an event after an already completed stream.
-    chunks = [raw[:raw.rfind(b"event: ")], bad] if after_payload else [bad]
+    chunks = [raw[: raw.rfind(b"event: ")], bad] if after_payload else [bad]
 
     class Fragmented(io.BytesIO):
         def __init__(self):

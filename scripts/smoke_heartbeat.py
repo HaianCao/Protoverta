@@ -17,8 +17,7 @@ from protoverta.core import Protocol
 
 
 def run(client, *, pause_seconds=0.3, heartbeat_interval=0.03):
-    if not (math.isfinite(pause_seconds) and math.isfinite(heartbeat_interval)
-            and 0 < heartbeat_interval < pause_seconds <= 30):
+    if not (math.isfinite(pause_seconds) and math.isfinite(heartbeat_interval) and 0 < heartbeat_interval < pause_seconds <= 30):
         raise ValueError("Require 0 < heartbeat interval < fixture pause <= 30 seconds")
     keepalives = []
     original_writer = server.StreamHeartbeatWriter
@@ -57,6 +56,7 @@ def run(client, *, pause_seconds=0.3, heartbeat_interval=0.03):
             if raw == b": protoverta keepalive\n\n" or raw == b'event: ping\ndata: {"type":"ping"}\n\n':
                 keepalives.append(True)
             send(raw, timeout)
+
         return original_writer(record, *args, **kwargs)
 
     with (
@@ -65,10 +65,16 @@ def run(client, *, pause_seconds=0.3, heartbeat_interval=0.03):
         patch.object(server, "STREAM_HEARTBEAT_INTERVAL", heartbeat_interval),
     ):
         result = smoke_clients.run_smoke(client, Protocol.CHAT)
-    return {"client": client, "upstream": "chat", "passed": result["passed"] and bool(keepalives),
-            "keepalives": len(keepalives), "requests": result["rounds"],
-            "fixture_pause_seconds": pause_seconds, "test_heartbeat_interval_seconds": heartbeat_interval,
-            "scope": "Bare CLI, isolated state and local fixtures. Parser acceptance only; no real provider or production-duration idle-timeout certification."}
+    return {
+        "client": client,
+        "upstream": "chat",
+        "passed": result["passed"] and bool(keepalives),
+        "keepalives": len(keepalives),
+        "requests": result["rounds"],
+        "fixture_pause_seconds": pause_seconds,
+        "test_heartbeat_interval_seconds": heartbeat_interval,
+        "scope": "Bare CLI, isolated state and local fixtures. Parser acceptance only; no real provider or production-duration idle-timeout certification.",
+    }
 
 
 def main():

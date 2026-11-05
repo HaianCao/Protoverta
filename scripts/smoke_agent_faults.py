@@ -17,13 +17,20 @@ from protoverta.sse import SSEParser, encode_sse
 
 MAX_FAULT_ATTEMPTS = 6
 
+
 def fault_prefix(protocol):
     """Keep start + visible partial text, never a successful terminal."""
     raw = single.encode(protocol, "p04-fixture-model", text="P05_PARTIAL_NOT_SUCCESS").read()
     events = SSEParser().feed(raw)
-    terminal = {Protocol.CHAT: lambda event: event.data == "[DONE]" or any(choice.get("finish_reason") is not None for choice in json.loads(event.data).get("choices", [])),
-                Protocol.MESSAGES: lambda event: event.event in {"message_delta", "message_stop"},
-                Protocol.RESPONSES: lambda event: event.event in {"response.output_text.done", "response.content_part.done", "response.output_item.done", "response.completed"}}[protocol]
+    terminal = {
+        Protocol.CHAT: lambda event: (
+            event.data == "[DONE]" or any(choice.get("finish_reason") is not None for choice in json.loads(event.data).get("choices", []))
+        ),
+        Protocol.MESSAGES: lambda event: event.event in {"message_delta", "message_stop"},
+        Protocol.RESPONSES: lambda event: (
+            event.event in {"response.output_text.done", "response.content_part.done", "response.output_item.done", "response.completed"}
+        ),
+    }[protocol]
     prefix = []
     for event in events:
         if terminal(event):
@@ -34,12 +41,18 @@ def fault_prefix(protocol):
 
 def verified_trace(records, fault):
     category, operation = ("upstream_timeout", "read") if fault == "timeout" else ("invalid_stream", "feed" if fault == "invalid" else "finish")
-    return isinstance(records, list) and any(isinstance(item, dict) and item.get("stream_error") == category and item.get("operation") == operation for item in records)
+    return isinstance(records, list) and any(
+        isinstance(item, dict) and item.get("stream_error") == category and item.get("operation") == operation for item in records
+    )
 
 
 def native_partial_failure(text):
-    return ("Agent terminated early due to an API error" in text and "agent did NOT finish its task" in text
-            and "P05_PARTIAL_NOT_SUCCESS" in text and parallel.FINALS[0] not in text)
+    return (
+        "Agent terminated early due to an API error" in text
+        and "agent did NOT finish its task" in text
+        and "P05_PARTIAL_NOT_SUCCESS" in text
+        and parallel.FINALS[0] not in text
+    )
 
 
 def verified_lifecycle(client, stdout, scenario):
@@ -55,10 +68,15 @@ def verified_lifecycle(client, stdout, scenario):
     # Native Claude counts a recovered PARTIAL hand-back as completed. Require
     # explicit early-termination evidence in A's own result, never accept the
     # counters or the partial model text alone as proof of safe failure delivery.
-    return (isinstance(stats, dict) and result.get("is_error") is False and result.get("permission_denials") == []
-            and all(type(stats.get(key)) is int for key in ("spawned", "completed", "failed"))
-            and stats.get("spawned") == stats.get("completed") == 2 and stats.get("failed") == 0
-            and scenario.parent_failure_correlated)
+    return (
+        isinstance(stats, dict)
+        and result.get("is_error") is False
+        and result.get("permission_denials") == []
+        and all(type(stats.get(key)) is int for key in ("spawned", "completed", "failed"))
+        and stats.get("spawned") == stats.get("completed") == 2
+        and stats.get("failed") == 0
+        and scenario.parent_failure_correlated
+    )
 
 
 class FaultReply(io.BytesIO):
@@ -118,7 +136,9 @@ class Scenario(parallel.Scenario):
                         for block in message["content"]:
                             if isinstance(block, dict) and block.get("type") == "tool_result":
                                 records[block["tool_use_id"]] = block.get("content")
-            self.parent_failure_correlated |= self.expected_failure(json.dumps(records.get("spawn_0"))) and parallel.FINALS[1] in json.dumps(records.get("spawn_1"))
+            self.parent_failure_correlated |= self.expected_failure(json.dumps(records.get("spawn_0"))) and parallel.FINALS[1] in json.dumps(
+                records.get("spawn_1")
+            )
             self.native_partial_handback |= self.protocol == Protocol.MESSAGES and native_partial_failure(json.dumps(records.get("spawn_0")))
         if parallel.TASKS[0] in text and self.stages["a"]:
             if self.stages["a"] >= MAX_FAULT_ATTEMPTS:
@@ -133,7 +153,17 @@ class Scenario(parallel.Scenario):
 
     def expected_failure(self, text):
         # The actual harness spelling is checked in the acceptance gate too.
-        markers = ("progress_timeout", "progress deadline", "timed out", "stream closed", "disconnected before completion", "API Error: 502", "API Error: 504", "upstream stream error", "invalid_stream")
+        markers = (
+            "progress_timeout",
+            "progress deadline",
+            "timed out",
+            "stream closed",
+            "disconnected before completion",
+            "API Error: 502",
+            "API Error: 504",
+            "upstream stream error",
+            "invalid_stream",
+        )
         found = any(marker.lower() in text.lower() for marker in markers) or self.protocol == Protocol.MESSAGES and native_partial_failure(text)
         self.failure_seen |= found
         return found
@@ -145,21 +175,45 @@ def run(client, upstream, adapter_source, fault):
     result = scenario.result
     lifecycle = result is not None and verified_lifecycle(client, result.stdout, scenario)
     trace_verified = verified_trace(scenario.trace_data, fault)
-    passed = (result is not None and result.returncode == 0 and parallel.DONE in result.stdout and lifecycle
-              and scenario.failure_seen and trace_verified and scenario.fault_sent.is_set() and scenario.peak == 2
-              and 1 <= scenario.stages["a"] <= MAX_FAULT_ATTEMPTS and scenario.stages["b"] == 2 and not scenario.errors
-              and (fault != "timeout" or scenario.timeout_disconnected.is_set())
-              and (scenario.audit_count == 1 if client == "codex" else scenario.parent_failure_correlated))
-    return {"passed": passed, "client": client, "upstream": upstream.value, "fault": fault,
-            "cli_version": driver["cli_version"], "lifecycle_verified": lifecycle,
-            "failure_seen": scenario.failure_seen, "fault_sent": scenario.fault_sent.is_set(),
-            "timeout_disconnected": scenario.timeout_disconnected.is_set(), "fixture_errors": scenario.errors,
-            "peak_overlapping_child_inference": scenario.peak, "mcp_audit_count": scenario.audit_count,
-            "fault_attempts": scenario.stages["a"], "retry_shapes": scenario.retry_shapes, "trace": scenario.trace_data,
-            "trace_verified": trace_verified, "parent_failure_correlated": scenario.parent_failure_correlated,
-            "native_partial_handback": scenario.native_partial_handback,
-            "observed": scenario.observed, "returncode": result.returncode if result else None,
-            "stdout": result.stdout if result else "", "stderr": result.stderr if result else ""}
+    passed = (
+        result is not None
+        and result.returncode == 0
+        and parallel.DONE in result.stdout
+        and lifecycle
+        and scenario.failure_seen
+        and trace_verified
+        and scenario.fault_sent.is_set()
+        and scenario.peak == 2
+        and 1 <= scenario.stages["a"] <= MAX_FAULT_ATTEMPTS
+        and scenario.stages["b"] == 2
+        and not scenario.errors
+        and (fault != "timeout" or scenario.timeout_disconnected.is_set())
+        and (scenario.audit_count == 1 if client == "codex" else scenario.parent_failure_correlated)
+    )
+    return {
+        "passed": passed,
+        "client": client,
+        "upstream": upstream.value,
+        "fault": fault,
+        "cli_version": driver["cli_version"],
+        "lifecycle_verified": lifecycle,
+        "failure_seen": scenario.failure_seen,
+        "fault_sent": scenario.fault_sent.is_set(),
+        "timeout_disconnected": scenario.timeout_disconnected.is_set(),
+        "fixture_errors": scenario.errors,
+        "peak_overlapping_child_inference": scenario.peak,
+        "mcp_audit_count": scenario.audit_count,
+        "fault_attempts": scenario.stages["a"],
+        "retry_shapes": scenario.retry_shapes,
+        "trace": scenario.trace_data,
+        "trace_verified": trace_verified,
+        "parent_failure_correlated": scenario.parent_failure_correlated,
+        "native_partial_handback": scenario.native_partial_handback,
+        "observed": scenario.observed,
+        "returncode": result.returncode if result else None,
+        "stdout": result.stdout if result else "",
+        "stderr": result.stderr if result else "",
+    }
 
 
 def main():

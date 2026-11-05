@@ -44,8 +44,11 @@ def test_text_or_malformed_output_is_not_parallel_agent_evidence(harness, client
 @pytest.mark.parametrize("failure", [False, True])
 @pytest.mark.parametrize("denied", [False, True])
 def test_claude_requires_two_spawned_and_expected_success_failure_counts(harness, failure, denied):
-    raw = {"is_error": False, "permission_denials": ["denied"] if denied else [],
-           "subagent_stats": {"spawned": 2, "completed": 1 if failure else 2, "failed": 1 if failure else 0}}
+    raw = {
+        "is_error": False,
+        "permission_denials": ["denied"] if denied else [],
+        "subagent_stats": {"spawned": 2, "completed": 1 if failure else 2, "failed": 1 if failure else 0},
+    }
     assert harness.completed_lifecycle("claude", json.dumps(raw), failure=failure) is not denied
 
 
@@ -85,7 +88,7 @@ def test_boolean_counters_are_not_valid_lifecycle_evidence(harness, field):
 def test_duplicate_or_malformed_spawn_identity_never_passes(harness):
     raw = lifecycle(harness)
     assert not harness.completed_lifecycle("codex", raw.replace('"child-1"', '"child-0"'))
-    assert not harness.completed_lifecycle("codex", raw.replace('["child-0"]', 'null'))
+    assert not harness.completed_lifecycle("codex", raw.replace('["child-0"]', "null"))
 
 
 @pytest.mark.parametrize("expected", [False, True])

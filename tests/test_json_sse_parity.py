@@ -14,7 +14,16 @@ def test_unknown_tool_fields_are_rejected_in_json_and_sse(protocol):
     if protocol == "chat":
         call = {"id": "c1", "type": "function", "function": {"name": "add", "arguments": "{}", "unknown_semantics": True}}
         response = {"model": "m", "choices": [{"finish_reason": "tool_calls", "message": {"role": "assistant", "content": None, "tool_calls": [call]}}]}
-        event = SSEEvent("message", json.dumps({"object": "chat.completion.chunk", "model": "m", "choices": [{"index": 0, "finish_reason": None, "delta": {"tool_calls": [{"index": 0, **call}]}}]}))
+        event = SSEEvent(
+            "message",
+            json.dumps(
+                {
+                    "object": "chat.completion.chunk",
+                    "model": "m",
+                    "choices": [{"index": 0, "finish_reason": None, "delta": {"tool_calls": [{"index": 0, **call}]}}],
+                }
+            ),
+        )
         decoder = StreamDecoder("chat")
     else:
         block = {"type": "tool_use", "id": "c1", "name": "add", "input": {}, "toolset_name": "browser"}
@@ -60,7 +69,10 @@ def test_repeated_call_id_is_rejected_before_second_stream_tool_start(protocol):
 
 def test_json_duplicate_tool_call_ids_are_not_forwarded():
     call = {"id": "same", "type": "function", "function": {"name": "add", "arguments": "{}"}}
-    response = {"model": "m", "choices": [{"finish_reason": "tool_calls", "message": {"role": "assistant", "content": None, "tool_calls": [call, copy.deepcopy(call)]}}]}
+    response = {
+        "model": "m",
+        "choices": [{"finish_reason": "tool_calls", "message": {"role": "assistant", "content": None, "tool_calls": [call, copy.deepcopy(call)]}}],
+    }
     with pytest.raises(ConversionError, match="duplicate response tool call ID"):
         convert_response(response, "chat", "responses")
 
@@ -91,7 +103,10 @@ def test_malformed_format_discriminator_reports_conversion_error():
 
 
 def test_chat_unknown_empty_delta_fields_are_not_silently_ignored():
-    event = SSEEvent("message", json.dumps({"object": "chat.completion.chunk", "model": "m", "choices": [{"index": 0, "finish_reason": None, "delta": {"unknown_semantics": {}}}]}))
+    event = SSEEvent(
+        "message",
+        json.dumps({"object": "chat.completion.chunk", "model": "m", "choices": [{"index": 0, "finish_reason": None, "delta": {"unknown_semantics": {}}}]}),
+    )
     with pytest.raises(StreamError, match="unknown_semantics"):
         StreamDecoder("chat").feed(event)
 
@@ -104,6 +119,13 @@ def test_upstream_responses_namespace_is_rejected_in_json_and_stream():
     decoder = StreamDecoder("responses")
     decoder.feed(SSEEvent("response.created", json.dumps({"type": "response.created", "sequence_number": 0, "response": {"model": "m"}})))
     with pytest.raises(StreamError, match="namespace"):
-        decoder.feed(SSEEvent("response.output_item.added", json.dumps({"type": "response.output_item.added", "sequence_number": 1, "output_index": 0, "item": dict(item, arguments="", status="in_progress")})))
+        decoder.feed(
+            SSEEvent(
+                "response.output_item.added",
+                json.dumps(
+                    {"type": "response.output_item.added", "sequence_number": 1, "output_index": 0, "item": dict(item, arguments="", status="in_progress")}
+                ),
+            )
+        )
     # Native payload forwarding continues to preserve namespace fields.
     assert convert_response(response, "responses", "responses")["output"][0]["namespace"] == "math"

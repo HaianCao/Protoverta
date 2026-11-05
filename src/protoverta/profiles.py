@@ -10,16 +10,24 @@ from .formats import decode_output_format
 
 def _blank_assistant_message(item: dict) -> bool:
     """Recognize only validated, whitespace-only Codex text placeholders."""
-    if item.get("type", "message") != "message" or item.get("role") != "assistant" or set(item) - {"type", "id", "status", "role", "content"} or item.get("status") not in (None, "completed"):
+    if (
+        item.get("type", "message") != "message"
+        or item.get("role") != "assistant"
+        or set(item) - {"type", "id", "status", "role", "content"}
+        or item.get("status") not in (None, "completed")
+    ):
         return False
     content = item.get("content")
     if isinstance(content, str):
         return not content.strip()
     return isinstance(content, list) and all(
-        isinstance(block, dict) and block.get("type") in ("input_text", "output_text")
+        isinstance(block, dict)
+        and block.get("type") in ("input_text", "output_text")
         and not (set(block) - {"type", "text", "annotations", "logprobs"})
-        and isinstance(block.get("text"), str) and not block["text"].strip()
-        and block.get("annotations") in (None, []) and block.get("logprobs") in (None, [])
+        and isinstance(block.get("text"), str)
+        and not block["text"].strip()
+        and block.get("annotations") in (None, [])
+        and block.get("logprobs") in (None, [])
         for block in content
     )
 
@@ -130,7 +138,9 @@ def prepare_codex_request(body: dict, target: Protocol, *, default_max_output_to
         decode_output_format(result, Protocol.RESPONSES)
     for tool in result.get("tools", []) if isinstance(result.get("tools"), list) else []:
         if isinstance(tool, dict) and (tool.get("type") == "namespace" or "tools" in tool):
-            raise ConversionError("Codex gateway cannot translate namespaced tools without namespace_tools='flatten'; enable mapping for synchronous function tools or use native Responses")
+            raise ConversionError(
+                "Codex gateway cannot translate namespaced tools without namespace_tools='flatten'; enable mapping for synchronous function tools or use native Responses"
+            )
     if target == Protocol.MESSAGES:
         if "max_output_tokens" not in result and default_max_output_tokens is not None:
             result["max_output_tokens"] = default_max_output_tokens
@@ -147,7 +157,9 @@ def prepare_codex_request(body: dict, target: Protocol, *, default_max_output_to
                     continue  # The strict decoder reports invalid items.
                 if item.get("role") in ("system", "developer"):
                     if conversation_started and not messages_mid_system:
-                        raise ConversionError("Codex gateway cannot relocate mid-conversation instructions into Messages system text; start a fresh session or use a Chat/Responses provider")
+                        raise ConversionError(
+                            "Codex gateway cannot relocate mid-conversation instructions into Messages system text; start a fresh session or use a Chat/Responses provider"
+                        )
                     item["role"] = "system"
                 else:
                     conversation_started = True

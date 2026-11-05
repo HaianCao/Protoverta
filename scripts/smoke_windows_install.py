@@ -17,7 +17,17 @@ from test_environment import sanitized_environment
 
 
 def run(script: Path, options: list[str], env: dict[str, str]) -> None:
-    result = subprocess.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), *options], env=env, cwd=env["USERPROFILE"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=420, check=False)
+    result = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), *options],
+        env=env,
+        cwd=env["USERPROFILE"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=420,
+        check=False,
+    )
     if result.returncode:
         raise RuntimeError(f"{script.parent.parent.name} {script.name} failed: {(result.stdout + result.stderr)[-1600:]}")
 
@@ -25,7 +35,17 @@ def run(script: Path, options: list[str], env: dict[str, str]) -> None:
 def run_remote(repo: str, name: str, options: list[str], env: dict[str, str]) -> None:
     url = f"https://raw.githubusercontent.com/HaianCao/{repo}/integration/protoverta/scripts/{name}.ps1"
     command = f'& ([scriptblock]::Create((irm "{url}"))) ' + " ".join(options)
-    result = subprocess.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command], env=env, cwd=env["USERPROFILE"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=420, check=False)
+    result = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
+        env=env,
+        cwd=env["USERPROFILE"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=420,
+        check=False,
+    )
     if result.returncode:
         raise RuntimeError(f"{repo} remote {name} failed: {(result.stdout + result.stderr)[-1600:]}")
 
@@ -39,7 +59,15 @@ def exercise(source: Path, wheel: Path, root: Path, *, command: str, skip: str, 
     outside_cwd = root / "unrelated cwd"
     for path in (roaming, local, profile, outside_cwd):
         path.mkdir(parents=True)
-    env = dict(sanitized_environment(), APPDATA=str(roaming), LOCALAPPDATA=str(local), USERPROFILE=str(profile), HOME=str(profile), PIP_CACHE_DIR=str(local / "pip-cache"), PSModuleAnalysisCachePath=str(local / "psmodule-cache"))
+    env = dict(
+        sanitized_environment(),
+        APPDATA=str(roaming),
+        LOCALAPPDATA=str(local),
+        USERPROFILE=str(profile),
+        HOME=str(profile),
+        PIP_CACHE_DIR=str(local / "pip-cache"),
+        PSModuleAnalysisCachePath=str(local / "psmodule-cache"),
+    )
     sentinel = roaming / ("codexapter" if command == "codex-ca" else "claudapter") / "preserve.txt"
     sentinel.parent.mkdir()
     sentinel.write_text("synthetic-settings\n", encoding="utf-8")
@@ -50,10 +78,16 @@ def exercise(source: Path, wheel: Path, root: Path, *, command: str, skip: str, 
     with (source / "pyproject.toml").open("rb") as project_file:
         requirements = tomllib.load(project_file)["project"]["optional-dependencies"]["gateway"]
     expected_version = next(item.split("==", 1)[1] for item in requirements if item.startswith("protoverta=="))
-    options = [skip, "-NonInteractive", "-NoPathChanges", "-WithGateway", "-SourceBranch", "integration/protoverta"] if remote_repo else [skip, "-NonInteractive", "-NoPathChanges", "-ProtovertaWheel", str(wheel)]
+    options = (
+        [skip, "-NonInteractive", "-NoPathChanges", "-WithGateway", "-SourceBranch", "integration/protoverta"]
+        if remote_repo
+        else [skip, "-NonInteractive", "-NoPathChanges", "-ProtovertaWheel", str(wheel)]
+    )
     for index in range(2):
         if remote_repo:
-            run_remote(remote_repo, "install", options if index == 0 else [skip, "-NonInteractive", "-NoPathChanges", "-SourceBranch", "integration/protoverta"], env)
+            run_remote(
+                remote_repo, "install", options if index == 0 else [skip, "-NonInteractive", "-NoPathChanges", "-SourceBranch", "integration/protoverta"], env
+            )
         else:
             run(installer, options, env)
         executable = install_root / "bin" / f"{command}.exe"
@@ -73,7 +107,13 @@ def exercise(source: Path, wheel: Path, root: Path, *, command: str, skip: str, 
             launch = [str(executable)]
         subprocess.run([*launch, "--help"], env=env, capture_output=True, check=True, timeout=30)
         check_shells(executable, env, outside_cwd)
-        subprocess.run([str(python), "-c", "import importlib.metadata,sys; assert importlib.metadata.version('protoverta') == sys.argv[1]", expected_version], env=env, capture_output=True, check=True, timeout=30)
+        subprocess.run(
+            [str(python), "-c", "import importlib.metadata,sys; assert importlib.metadata.version('protoverta') == sys.argv[1]", expected_version],
+            env=env,
+            capture_output=True,
+            check=True,
+            timeout=30,
+        )
         if sentinel.read_text(encoding="utf-8") != "synthetic-settings\n":
             raise RuntimeError("test configuration changed during install/update")
     if remote_repo:
@@ -82,7 +122,18 @@ def exercise(source: Path, wheel: Path, root: Path, *, command: str, skip: str, 
         run(uninstaller, ["-NonInteractive", "-NoPathChanges"], env)
     if executable.exists() or not sentinel.is_file():
         raise RuntimeError("uninstall did not remove only the wrapper")
-    return {"project": source.name, "install": True, "update": True, "uninstall": True, "config_preserved": True, "install_root_has_space": " " in str(install_root), "shells": ["cmd", "powershell"], "outside_repo_cwd": True, "absolute_and_child_path_launch": True, "user_path_changed": False}
+    return {
+        "project": source.name,
+        "install": True,
+        "update": True,
+        "uninstall": True,
+        "config_preserved": True,
+        "install_root_has_space": " " in str(install_root),
+        "shells": ["cmd", "powershell"],
+        "outside_repo_cwd": True,
+        "absolute_and_child_path_launch": True,
+        "user_path_changed": False,
+    }
 
 
 def check_shells(executable: Path, env: dict[str, str], cwd: Path) -> None:
@@ -103,8 +154,13 @@ def check_shells(executable: Path, env: dict[str, str], cwd: Path) -> None:
     child_env = {**env, "PATH": str(executable.parent) + os.pathsep + env.get("PATH", "")}
     bare = {
         "cmd": ["cmd.exe", "/d", "/s", "/c", f"{executable.stem} --help"],
-        "powershell": ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
-                       f"$resolved = (Get-Command {executable.stem} -CommandType Application | Select-Object -First 1).Source; if ($resolved -ne '{executable}') {{ throw \"Wrong wrapper resolved from child PATH: $resolved\" }}; & {executable.stem} --help; exit $LASTEXITCODE"],
+        "powershell": [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            f"$resolved = (Get-Command {executable.stem} -CommandType Application | Select-Object -First 1).Source; if ($resolved -ne '{executable}') {{ throw \"Wrong wrapper resolved from child PATH: $resolved\" }}; & {executable.stem} --help; exit $LASTEXITCODE",
+        ],
     }
     for shell, command in bare.items():
         result = subprocess.run(command, env=child_env, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60, check=False)
@@ -124,8 +180,24 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="protoverta windows install ") as directory:
         isolated = Path(directory)
         results = [
-            exercise(root / "free-codex-cli", wheel, isolated / "codex", command="codex-ca", skip="-SkipCodexInstall", install_name="codex-ca", remote_repo="CodexApter" if args.remote else None),
-            exercise(root / "free-claude-cli", wheel, isolated / "claude", command="claude-ca", skip="-SkipClaudeInstall", install_name="claudapter", remote_repo="ClaudApter" if args.remote else None),
+            exercise(
+                root / "free-codex-cli",
+                wheel,
+                isolated / "codex",
+                command="codex-ca",
+                skip="-SkipCodexInstall",
+                install_name="codex-ca",
+                remote_repo="CodexApter" if args.remote else None,
+            ),
+            exercise(
+                root / "free-claude-cli",
+                wheel,
+                isolated / "claude",
+                command="claude-ca",
+                skip="-SkipClaudeInstall",
+                install_name="claudapter",
+                remote_repo="ClaudApter" if args.remote else None,
+            ),
         ]
     print(json.dumps(results, indent=2))
     return 0

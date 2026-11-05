@@ -12,8 +12,7 @@ from protoverta.streaming import StreamError
 
 
 def frames(protocol):
-    return [(frame.event, json.loads(frame.data) if frame.data != "[DONE]" else frame.data)
-            for frame in SSEParser().feed(source_wire(protocol))]
+    return [(frame.event, json.loads(frame.data) if frame.data != "[DONE]" else frame.data) for frame in SSEParser().feed(source_wire(protocol))]
 
 
 def corrupt(protocol, case):
@@ -72,7 +71,17 @@ def corrupt(protocol, case):
 
 
 CASES = {
-    "responses": ["text_identity", "text_snapshot", "part_identity", "argument_identity", "tool_identity", "tool_snapshot", "final_model", "final_output", "open_item"],
+    "responses": [
+        "text_identity",
+        "text_snapshot",
+        "part_identity",
+        "argument_identity",
+        "tool_identity",
+        "tool_snapshot",
+        "final_model",
+        "final_output",
+        "open_item",
+    ],
     "messages": ["wrong_event", "initial_content", "citations", "delta_kind", "unknown_stop", "open_block", "missing_stop"],
     "chat": ["model_change", "multiple_choices", "tool_type", "unknown_delta", "unknown_stop", "duplicate_finish", "incomplete_tool"],
 }
@@ -95,10 +104,12 @@ def test_corrupt_wire_never_commits_target_success(source, target, case):
 @pytest.mark.parametrize("protocol", ["messages", "responses"])
 def test_native_closed_item_index_cannot_be_reused(protocol):
     values = frames(protocol)
-    start_name, end_name = ("content_block_start", "content_block_stop") if protocol == "messages" else ("response.output_item.added", "response.output_item.done")
+    start_name, end_name = (
+        ("content_block_start", "content_block_stop") if protocol == "messages" else ("response.output_item.added", "response.output_item.done")
+    )
     start = next(i for i, (name, _) in enumerate(values) if name == start_name)
     end = next(i for i, (name, _) in enumerate(values) if name == end_name)
-    values[end + 1:end + 1] = copy.deepcopy(values[start:end + 1])
+    values[end + 1 : end + 1] = copy.deepcopy(values[start : end + 1])
     if protocol == "responses":
         for sequence, (_, body) in enumerate(values):
             body["sequence_number"] = sequence

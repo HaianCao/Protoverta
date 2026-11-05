@@ -23,8 +23,12 @@ PROTOCOLS = ("chat", "messages", "responses")
 
 
 def prompt(choice=None, parallel=None, names=("f", "g")):
-    body = {"model": "m", "input": "synthetic", "max_output_tokens": 20,
-            "tools": [{"type": "function", "name": n, "parameters": {"type": "object"}} for n in names]}
+    body = {
+        "model": "m",
+        "input": "synthetic",
+        "max_output_tokens": 20,
+        "tools": [{"type": "function", "name": n, "parameters": {"type": "object"}} for n in names],
+    }
     if choice is not None:
         body["tool_choice"] = choice
     if parallel is not None:
@@ -37,16 +41,18 @@ def reply(source, calls=(), *, stream=False, length=False, text="ok"):
         message = {"role": "assistant", "content": text}
         if calls:
             message["tool_calls"] = [{"id": f"c{i}", "type": "function", "function": {"name": n, "arguments": "{}"}} for i, n in enumerate(calls)]
-        chat = {"model": "m", "choices": [{"message": message, "finish_reason": "length" if length else "tool_calls" if calls else "stop"}],
-                "usage": {"prompt_tokens": 2, "completion_tokens": 1}}
+        chat = {
+            "model": "m",
+            "choices": [{"message": message, "finish_reason": "length" if length else "tool_calls" if calls else "stop"}],
+            "usage": {"prompt_tokens": 2, "completion_tokens": 1},
+        }
         return json.dumps(convert_response(chat, "chat", source)).encode()
     encoder = StreamEncoder(source)
     deltas = [Delta("start", model="m", input_tokens=2, output_tokens=0)]
     if text:
         deltas.append(Delta("text", text=text))
     for i, name in enumerate(calls):
-        deltas += [Delta("tool_start", index=i, call_id=f"c{i}", name=name),
-                   Delta("tool_delta", index=i, text="{}"), Delta("tool_end", index=i)]
+        deltas += [Delta("tool_start", index=i, call_id=f"c{i}", name=name), Delta("tool_delta", index=i, text="{}"), Delta("tool_end", index=i)]
     deltas.append(Delta("finish", reason="length" if length else "tool_calls" if calls else "stop", input_tokens=2, output_tokens=1))
     return b"".join(encode_sse(e.event, e.data) for d in deltas for e in encoder.feed(d))
 
@@ -144,8 +150,10 @@ def test_late_stream_violation_does_not_expose_unauthorized_tool_or_success(sour
             return super().read1(min(size, 1))
 
     cfg = GatewayConfig(source, "https://example.invalid/v1", "synthetic", "local")
-    with (listener(cfg, lambda *a, **k: Trickle(reply(source, ("unknown",), stream=True, text="visible"))) as url,
-          request(url, "responses", json.dumps({**prompt(), "stream": True}).encode()) as response):
+    with (
+        listener(cfg, lambda *a, **k: Trickle(reply(source, ("unknown",), stream=True, text="visible"))) as url,
+        request(url, "responses", json.dumps({**prompt(), "stream": True}).encode()) as response,
+    ):
         assert response.status == 200
         events = [json.loads(e.data) for e in SSEParser().feed(response.read())]
     assert any(e.get("delta") == "visible" for e in events)
@@ -156,8 +164,10 @@ def test_late_stream_violation_does_not_expose_unauthorized_tool_or_success(sour
 @pytest.mark.parametrize("stream", [False, True])
 def test_output_limit_before_required_call_remains_a_truthful_incomplete_response(stream):
     cfg = GatewayConfig("chat", "https://example.invalid/v1", "synthetic", "local")
-    with (listener(cfg, lambda *a, **k: io.BytesIO(reply("chat", stream=stream, length=True))) as url,
-          request(url, "responses", json.dumps({**prompt("required"), "stream": stream}).encode()) as response):
+    with (
+        listener(cfg, lambda *a, **k: io.BytesIO(reply("chat", stream=stream, length=True))) as url,
+        request(url, "responses", json.dumps({**prompt("required"), "stream": stream}).encode()) as response,
+    ):
         raw = response.read()
     final = snapshots(raw)[-1] if stream else json.loads(raw)
     assert final["status"] == "incomplete" and final["incomplete_details"]["reason"] == "max_output_tokens"
@@ -179,8 +189,9 @@ def test_policy_uses_wire_names_but_snapshot_keeps_effective_logical_tools(sourc
     body = namespaced_body() if mode == "namespace" else search_body()
     before = copy.deepcopy(body)
     body["stream"] = stream
-    cfg = GatewayConfig(source, "https://example.invalid/v1", "synthetic", "local",
-                        namespace_tools="flatten", tool_names="alias", client_tool_search="function")
+    cfg = GatewayConfig(
+        source, "https://example.invalid/v1", "synthetic", "local", namespace_tools="flatten", tool_names="alias", client_tool_search="function"
+    )
     seen = []
 
     def upstream(req, *, timeout):

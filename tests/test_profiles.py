@@ -8,9 +8,12 @@ from protoverta.profiles import prepare_codex_request
 
 def codex_request():
     return {
-        "model": "example-model", "store": False, "stream": True,
+        "model": "example-model",
+        "store": False,
+        "stream": True,
         "input": [{"role": "developer", "content": "Project instructions"}, {"role": "user", "content": "Hello"}],
-        "client_metadata": {"client": "codex"}, "prompt_cache_key": "opaque-key",
+        "client_metadata": {"client": "codex"},
+        "prompt_cache_key": "opaque-key",
         "include": ["reasoning.encrypted_content"],
         "reasoning": {"summary": "none", "effort": "medium"},
         "parallel_tool_calls": True,
@@ -41,11 +44,14 @@ def test_messages_profile_applies_budget_and_initial_instruction_policy():
     assert prepare_codex_request(body, Protocol.MESSAGES, default_max_output_tokens=8192)["max_output_tokens"] == 256
 
 
-@pytest.mark.parametrize("field,value", [
-    ("include", ["web_search_call.action.sources"]),
-    ("reasoning", {"summary": "auto"}),
-    ("text", {"format": {"type": "unknown"}}),
-])
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("include", ["web_search_call.action.sources"]),
+        ("reasoning", {"summary": "auto"}),
+        ("text", {"format": {"type": "unknown"}}),
+    ],
+)
 def test_codex_profile_rejects_unmapped_behavior(field, value):
     body = codex_request()
     body[field] = value
@@ -62,10 +68,9 @@ def test_codex_profile_does_not_relocate_later_instructions():
 
 def test_multiple_response_tool_calls_stay_in_one_assistant_turn():
     body = {
-        "model": "m", "input": [
-            {"type": "function_call", "call_id": f"call_{index}", "name": "lookup", "arguments": "{}"}
-            for index in range(2)
-        ] + [
+        "model": "m",
+        "input": [{"type": "function_call", "call_id": f"call_{index}", "name": "lookup", "arguments": "{}"} for index in range(2)]
+        + [
             {"type": "function_call_output", "id": f"output_{index}", "call_id": f"call_{index}", "output": [{"type": "input_text", "text": f"result_{index}"}]}
             for index in range(2)
         ],
@@ -77,9 +82,14 @@ def test_multiple_response_tool_calls_stay_in_one_assistant_turn():
 
 
 def test_effort_and_sequential_tool_choice_round_trip():
-    body = {"model": "m", "messages": [{"role": "user", "content": "Hi"}], "max_tokens": 16,
-            "reasoning_effort": "low", "parallel_tool_calls": False,
-            "tools": [{"type": "function", "function": {"name": "lookup", "parameters": {"type": "object"}}}]}
+    body = {
+        "model": "m",
+        "messages": [{"role": "user", "content": "Hi"}],
+        "max_tokens": 16,
+        "reasoning_effort": "low",
+        "parallel_tool_calls": False,
+        "tools": [{"type": "function", "function": {"name": "lookup", "parameters": {"type": "object"}}}],
+    }
     messages = convert_request(body, "chat", "messages")
     assert messages["tool_choice"] == {"type": "auto", "disable_parallel_tool_use": True}
     result = convert_request(messages, "messages", "chat")

@@ -32,11 +32,25 @@ def test_cancel_retains_unknown_token_charge_releases_only_its_concurrency_and_k
     database = tmp_path / "quota.sqlite"
     observations = []
     clients = []
-    with upstream(source, failure="cancel") as (base, release, cancelled, records, active, _), gateway_session(
-        GatewayConfig(source, base, "synthetic", "local", messages_usage_policy="deferred",
-                      shared_admission_db=str(database), shared_requests=4, shared_concurrency=3,
-                      shared_token_limit=100, token_counter=lambda *_: TokenCount(10, exact=True)), observer=observations.append,
-    ) as origin, ThreadPoolExecutor(3) as pool:
+    with (
+        upstream(source, failure="cancel") as (base, release, cancelled, records, active, _),
+        gateway_session(
+            GatewayConfig(
+                source,
+                base,
+                "synthetic",
+                "local",
+                messages_usage_policy="deferred",
+                shared_admission_db=str(database),
+                shared_requests=4,
+                shared_concurrency=3,
+                shared_token_limit=100,
+                token_counter=lambda *_: TokenCount(10, exact=True),
+            ),
+            observer=observations.append,
+        ) as origin,
+        ThreadPoolExecutor(3) as pool,
+    ):
         try:
             clients = list(pool.map(lambda model: connect(origin, target, model), ["a", "b", "parent"]))
             for _, response, _ in clients:
@@ -97,8 +111,19 @@ def test_three_stream_gate_requires_all_three_lanes_in_every_frame_round(scripts
 @pytest.mark.parametrize("fault", [None, "wrong_cwd", "wrong_read", "main_modified", "one_request"])
 def test_worktree_gate_requires_relative_read_correct_cwd_and_unchanged_main(scripts, fault):
     _, two = scripts
-    flags = ["distinct_gateways", "cross_tokens_rejected", "first_completed", "first_gateway_closed", "second_survived", "second_completed", "second_gateway_closed", "diagnostics_isolated",
-             "worktree_reads_verified", "worktree_cwd_verified", "main_checkout_unchanged"]
+    flags = [
+        "distinct_gateways",
+        "cross_tokens_rejected",
+        "first_completed",
+        "first_gateway_closed",
+        "second_survived",
+        "second_completed",
+        "second_gateway_closed",
+        "diagnostics_isolated",
+        "worktree_reads_verified",
+        "worktree_cwd_verified",
+        "main_checkout_unchanged",
+    ]
     result = {**dict.fromkeys(flags, True), "worktrees": True, "upstream_counts": [2, 2], "fixture_errors": [[], []], "errors": []}
     if fault == "wrong_cwd":
         result["worktree_cwd_verified"] = False

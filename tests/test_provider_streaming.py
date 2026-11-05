@@ -11,9 +11,11 @@ from protoverta.streaming import Delta, StreamDecoder, StreamError
 
 def encoded_events(protocol):
     encoder = StreamEncoder(protocol)
-    return [event for delta in [Delta("start", model="m"), Delta("text", text="ok"),
-                               Delta("finish", reason="stop", input_tokens=3, output_tokens=2)]
-            for event in encoder.feed(delta)]
+    return [
+        event
+        for delta in [Delta("start", model="m"), Delta("text", text="ok"), Delta("finish", reason="stop", input_tokens=3, output_tokens=2)]
+        for event in encoder.feed(delta)
+    ]
 
 
 def chat_postlude():
@@ -91,8 +93,11 @@ def test_responses_error_without_sequence_is_an_error_not_success():
 
 @pytest.mark.parametrize("placeholder", [None, "", []])
 def test_json_empty_reasoning_placeholders_do_not_drop_real_reasoning(placeholder):
-    body = {"model": "m", "choices": [{"message": {"role": "assistant", "content": "ok", "reasoning": placeholder}, "finish_reason": "stop"}],
-            "usage": {"prompt_tokens": 3, "completion_tokens": 2}}
+    body = {
+        "model": "m",
+        "choices": [{"message": {"role": "assistant", "content": "ok", "reasoning": placeholder}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 3, "completion_tokens": 2},
+    }
     assert convert_response(body, "chat", "messages")["content"][0]["text"] == "ok"
     body["choices"][0]["message"]["reasoning"] = "not portable"
     with pytest.raises(ConversionError, match="reasoning"):
@@ -101,8 +106,12 @@ def test_json_empty_reasoning_placeholders_do_not_drop_real_reasoning(placeholde
 
 @pytest.mark.parametrize("citations", [None, []])
 def test_empty_citations_are_not_meaningful_citations(citations):
-    body = {"model": "m", "content": [{"type": "text", "text": "ok", "citations": citations}], "stop_reason": "end_turn",
-            "usage": {"input_tokens": 3, "output_tokens": 2}}
+    body = {
+        "model": "m",
+        "content": [{"type": "text", "text": "ok", "citations": citations}],
+        "stop_reason": "end_turn",
+        "usage": {"input_tokens": 3, "output_tokens": 2},
+    }
     assert convert_response(body, "messages", "chat")["choices"][0]["message"]["content"] == "ok"
     body["content"][0]["citations"] = [{"type": "web_search_result_location", "url": "https://example.test"}]
     with pytest.raises(ConversionError, match="citations"):

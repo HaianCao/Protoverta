@@ -21,7 +21,12 @@ class CacheCheckpoint:
                     if index != len(system) - 1 or block.get("type") != "text":
                         raise ConversionError("only an end-of-system text cache checkpoint is portable under this policy")
                     hint = block.pop("cache_control")
-                    if not isinstance(hint, dict) or set(hint) - {"type", "ttl"} or hint.get("type") != "ephemeral" or hint.get("ttl", "5m") not in ("5m", "1h"):
+                    if (
+                        not isinstance(hint, dict)
+                        or set(hint) - {"type", "ttl"}
+                        or hint.get("type") != "ephemeral"
+                        or hint.get("ttl", "5m") not in ("5m", "1h")
+                    ):
                         raise ConversionError("unsupported cache checkpoint")
                     self.hint = hint
 
@@ -32,7 +37,10 @@ class CacheCheckpoint:
 
         if has_hint(value.get("messages")) or has_hint(value.get("input")) or has_hint(value.get("tools")) or has_hint(value.get("system")):
             raise ConversionError("this cache checkpoint has no certified portable location")
-        if self.hint is not None and (config.upstream_protocol != Protocol.CHAT or not config.provider_profiles.supports_prompt_cache(config.upstream_base_url, config.upstream_protocol, body.get("model"))):
+        if self.hint is not None and (
+            config.upstream_protocol != Protocol.CHAT
+            or not config.provider_profiles.supports_prompt_cache(config.upstream_base_url, config.upstream_protocol, body.get("model"))
+        ):
             raise ConversionError("no exact provider/model evidence for the requested cache contract")
         return value
 

@@ -60,7 +60,7 @@ class _HeaderReader:
 
     def readinto(self, buffer):
         data = self.read(len(buffer))
-        buffer[:len(data)] = data
+        buffer[: len(data)] = data
         return len(data)
 
     def readline(self, limit=-1):
@@ -96,4 +96,5 @@ def _connection(kind, request):
         connection = kind(*args, **kwargs)
         connection.response_class = partial(_TimedResponse, budget=getattr(request, "protoverta_budget", None))
         return connection
+
     return create

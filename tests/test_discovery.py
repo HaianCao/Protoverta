@@ -13,11 +13,15 @@ import pytest
 from protoverta.discovery import CatalogError, CatalogPolicy, fetch_catalog, parse_page
 
 
-@pytest.mark.parametrize("wire", [
-    b'HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n20\r\n{"data":[',
-    b'HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nprivate-invalid-size\r\n',
-    b'private-invalid-status\r\n\r\n',
-], ids=["truncated-chunk", "invalid-chunk-size", "invalid-status-line"])
+@pytest.mark.parametrize(
+    "wire",
+    [
+        b'HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n20\r\n{"data":[',
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nprivate-invalid-size\r\n",
+        b"private-invalid-status\r\n\r\n",
+    ],
+    ids=["truncated-chunk", "invalid-chunk-size", "invalid-status-line"],
+)
 def test_catalog_real_http_framing_errors_are_safe_and_close_connection(wire):
     disconnected = threading.Event()
     requests = []
@@ -126,11 +130,14 @@ def pages(values, captured=None):
 
 
 @pytest.mark.parametrize("value", [chr(0xD800), chr(0xDFFF), "private-" + chr(0xD800) + "-name"], ids=["high-surrogate", "low-surrogate", "embedded-surrogate"])
-@pytest.mark.parametrize("field,message", [
-    ("id", "model catalog contains an invalid model ID"),
-    ("display_name", "model catalog contains an invalid display name"),
-    ("last_id", "invalid catalog pagination cursor"),
-])
+@pytest.mark.parametrize(
+    "field,message",
+    [
+        ("id", "model catalog contains an invalid model ID"),
+        ("display_name", "model catalog contains an invalid display name"),
+        ("last_id", "invalid catalog pagination cursor"),
+    ],
+)
 @pytest.mark.parametrize("from_wire", [False, True], ids=["parsed-object", "escaped-json"])
 def test_catalog_rejects_surrogates_before_return_or_cursor_reuse(value, field, message, from_wire):
     policy = CatalogPolicy(pagination="after_id")
@@ -154,10 +161,12 @@ def test_catalog_preserves_valid_unicode_and_supplementary_characters(escaped):
     identifier = "mô-hình-🚀"
     name = "Mô hình tiếng Việt 日本語 🚀"
     captured = []
-    bodies = iter([
-        {"data": [{"id": identifier, "display_name": name}], "has_more": True, "last_id": identifier},
-        {"data": [], "has_more": False},
-    ])
+    bodies = iter(
+        [
+            {"data": [{"id": identifier, "display_name": name}], "has_more": True, "last_id": identifier},
+            {"data": [], "has_more": False},
+        ]
+    )
 
     def opener(request, timeout):
         captured.append(request.full_url)
@@ -172,32 +181,57 @@ def test_catalog_preserves_valid_unicode_and_supplementary_characters(escaped):
 
 
 def test_catalog_reports_explicit_metadata_but_never_certifies_capabilities():
-    policy = CatalogPolicy(pagination="after_id", name_field="name", context_field="limits.context", output_field="limits.output", modalities_field="architecture.input_modalities")
+    policy = CatalogPolicy(
+        pagination="after_id", name_field="name", context_field="limits.context", output_field="limits.output", modalities_field="architecture.input_modalities"
+    )
     captured = []
-    result = fetch_catalog("https://example.test/api/v1", {"Authorization": "Bearer synthetic"}, policy, upstream_open=pages([
-        {"data": [{"id": "b", "name": "Bravo", "limits": {"context": 1000, "output": 100}, "architecture": {"input_modalities": ["text", "image"]}}], "has_more": True, "last_id": "b"},
-        {"data": [{"id": "a"}], "has_more": False},
-    ], captured))
+    result = fetch_catalog(
+        "https://example.test/api/v1",
+        {"Authorization": "Bearer synthetic"},
+        policy,
+        upstream_open=pages(
+            [
+                {
+                    "data": [{"id": "b", "name": "Bravo", "limits": {"context": 1000, "output": 100}, "architecture": {"input_modalities": ["text", "image"]}}],
+                    "has_more": True,
+                    "last_id": "b",
+                },
+                {"data": [{"id": "a"}], "has_more": False},
+            ],
+            captured,
+        ),
+    )
     assert [item.id for item in result] == ["a", "b"]
     assert result[1].context_window_tokens == 1000 and result[1].input_modalities == ("text", "image")
     assert all(item.capability_status == "unknown" for item in result)
     assert captured[1].full_url == "https://example.test/api/v1/models?limit=1000&after_id=b"
 
 
-@pytest.mark.parametrize("policy,values", [
-    (CatalogPolicy(max_pages=1, pagination="after_id"), [{"data": [], "has_more": True, "last_id": "a"}]),
-    (CatalogPolicy(max_models=1), [{"data": [{"id": "a"}, {"id": "b"}]}]),
-    (CatalogPolicy(max_bytes=5), [{"data": []}]),
-    (CatalogPolicy(), [{"data": [], "has_more": True, "last_id": "a"}]),
-    (CatalogPolicy(pagination="after_id"), [{"data": [], "has_more": True, "last_id": "a"}, {"data": [], "has_more": True, "last_id": "b"}, {"data": [], "has_more": True, "last_id": "a"}]),
-    (CatalogPolicy(pagination="after_id"), [{"data": [{"id": "a", "display_name": "First"}], "has_more": True, "last_id": "a"}, {"data": [{"id": "a", "display_name": "Changed"}]}]),
-])
+@pytest.mark.parametrize(
+    "policy,values",
+    [
+        (CatalogPolicy(max_pages=1, pagination="after_id"), [{"data": [], "has_more": True, "last_id": "a"}]),
+        (CatalogPolicy(max_models=1), [{"data": [{"id": "a"}, {"id": "b"}]}]),
+        (CatalogPolicy(max_bytes=5), [{"data": []}]),
+        (CatalogPolicy(), [{"data": [], "has_more": True, "last_id": "a"}]),
+        (
+            CatalogPolicy(pagination="after_id"),
+            [{"data": [], "has_more": True, "last_id": "a"}, {"data": [], "has_more": True, "last_id": "b"}, {"data": [], "has_more": True, "last_id": "a"}],
+        ),
+        (
+            CatalogPolicy(pagination="after_id"),
+            [{"data": [{"id": "a", "display_name": "First"}], "has_more": True, "last_id": "a"}, {"data": [{"id": "a", "display_name": "Changed"}]}],
+        ),
+    ],
+)
 def test_catalog_fails_closed_on_limits_cycles_conflicts_and_unconfigured_pagination(policy, values):
     with pytest.raises(CatalogError):
         fetch_catalog("https://example.test/v1", {}, policy, upstream_open=pages(values))
 
 
-@pytest.mark.parametrize("body", [{"data": {}}, {"data": [None]}, {"data": [{"id": "bad\nmodel"}]}, {"data": [], "has_more": "true"}, {"data": [{"id": "m", "display_name": 1}]}])
+@pytest.mark.parametrize(
+    "body", [{"data": {}}, {"data": [None]}, {"data": [{"id": "bad\nmodel"}]}, {"data": [], "has_more": "true"}, {"data": [{"id": "m", "display_name": 1}]}]
+)
 def test_catalog_rejects_malformed_data_without_echoing_values(body):
     with pytest.raises(CatalogError):
         fetch_catalog("https://example.test/v1", {}, upstream_open=pages([body]))
@@ -229,7 +263,13 @@ def test_catalog_transport_errors_close_http_errors_and_do_not_leak_credentials(
 
 def test_catalog_policy_mapping_requires_exact_prefix_and_evidence(tmp_path):
     path = tmp_path / "catalog.json"
-    body = {"schema_version": 1, "base_url": "https://example.test/v1", "checked_at": "2026-10-25", "evidence": "synthetic", "policy": {"context_field": "context_length"}}
+    body = {
+        "schema_version": 1,
+        "base_url": "https://example.test/v1",
+        "checked_at": "2026-10-25",
+        "evidence": "synthetic",
+        "policy": {"context_field": "context_length"},
+    }
     path.write_text(json.dumps(body), encoding="utf-8")
     assert CatalogPolicy.load(path, body["base_url"]).context_field == "context_length"
     with pytest.raises(CatalogError):

@@ -27,7 +27,9 @@ def test_failed_suite_names_are_reported_without_assertion_values(checker, monke
 
 
 def test_failed_coverage_command_returns_nonzero_without_traceback(checker, monkeypatch, tmp_path, capsys):
-    monkeypatch.setattr(sys, "argv", ["check_coverage.py", "--codex-source", str(tmp_path), "--claude-source", str(tmp_path), "--output", str(tmp_path / "output")])
+    monkeypatch.setattr(
+        sys, "argv", ["check_coverage.py", "--codex-source", str(tmp_path), "--claude-source", str(tmp_path), "--output", str(tmp_path / "output")]
+    )
     monkeypatch.setattr(checker.importlib.metadata, "version", lambda _: "7.17.0")
 
     def failed(*args):

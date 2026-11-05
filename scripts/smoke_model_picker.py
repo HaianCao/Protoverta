@@ -51,6 +51,7 @@ class Terminal:
                     self.queue.put(value)
             except (EOFError, OSError):
                 pass
+
         self.thread = threading.Thread(target=read, daemon=True)
         self.thread.start()
 
@@ -108,7 +109,13 @@ def worker(client, source, report, workspace):
     launcher = importlib.import_module(package + ".launcher")
     config_module = importlib.import_module(package + ".config")
     observed = []
-    if workspace is None or workspace.resolve().parent != Path(tempfile.gettempdir()).resolve() or not workspace.name.startswith("protoverta-picker-") or not workspace.is_dir() or any(workspace.iterdir()):
+    if (
+        workspace is None
+        or workspace.resolve().parent != Path(tempfile.gettempdir()).resolve()
+        or not workspace.name.startswith("protoverta-picker-")
+        or not workspace.is_dir()
+        or any(workspace.iterdir())
+    ):
         raise ValueError("Worker requires its parent's new empty fixture directory under Temp")
     with nullcontext(str(workspace)) as temporary:
         root = Path(temporary)
@@ -117,15 +124,23 @@ def worker(client, source, report, workspace):
             path = root / key
             path.mkdir()
             env[key] = str(path)
-        env.update(CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1", DISABLE_AUTOUPDATER="1", CLAUDE_CODE_DISABLE_AUTO_MEMORY="1",
-                   HTTP_PROXY="http://127.0.0.1:9", HTTPS_PROXY="http://127.0.0.1:9", NO_PROXY="127.0.0.1,localhost",
-                   TERM="xterm-256color")
+        env.update(
+            CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1",
+            DISABLE_AUTOUPDATER="1",
+            CLAUDE_CODE_DISABLE_AUTO_MEMORY="1",
+            HTTP_PROXY="http://127.0.0.1:9",
+            HTTPS_PROXY="http://127.0.0.1:9",
+            NO_PROXY="127.0.0.1,localhost",
+            TERM="xterm-256color",
+        )
         config = config_module.Config(path=root / "adapter.toml")
         version = run_process([shutil.which(client), "--version"], env=env, cwd=root, timeout=3, text=True, encoding="utf-8")
         expected_version = "codex-cli 0.166.0" if client == "codex" else "2.1.308 (Claude Code)"
         if version.returncode or version.stdout.strip() != expected_version:
             raise ValueError("Model picker fixture requires its pinned native CLI version")
-        provider = config_module.Provider("fixture", "Synthetic provider", "http://127.0.0.1:9/v1", protocol="chat_completions" if client == "codex" else "chat", execution_mode="gateway")
+        provider = config_module.Provider(
+            "fixture", "Synthetic provider", "http://127.0.0.1:9/v1", protocol="chat_completions" if client == "codex" else "chat", execution_mode="gateway"
+        )
         provider.agent_models = {"policy": "custom", "default": OTHER, **({"effort": "low"} if client == "codex" else {})}
         config.providers["fixture"] = provider
         if client == "codex":
@@ -134,16 +149,36 @@ def worker(client, source, report, workspace):
         config_module.save(config)
         before = config.path.read_bytes()
         if client == "claude":
-            (Path(env["CLAUDE_CONFIG_DIR"]) / ".claude.json").write_text(json.dumps({"hasCompletedOnboarding": True, "theme": "dark", "numStartups": 1,
-                                                                                 "projects": {str(root): {"hasTrustDialogAccepted": True, "hasCompletedProjectOnboarding": True}}}), encoding="utf-8")
+            (Path(env["CLAUDE_CONFIG_DIR"]) / ".claude.json").write_text(
+                json.dumps(
+                    {
+                        "hasCompletedOnboarding": True,
+                        "theme": "dark",
+                        "numStartups": 1,
+                        "projects": {str(root): {"hasTrustDialogAccepted": True, "hasCompletedProjectOnboarding": True}},
+                    }
+                ),
+                encoding="utf-8",
+            )
         else:
-            result = run_process([shutil.which("codex"), "debug", "models", "--bundled"], env=env, cwd=root,
-                                 timeout=10, text=True, encoding="utf-8")
+            result = run_process([shutil.which("codex"), "debug", "models", "--bundled"], env=env, cwd=root, timeout=10, text=True, encoding="utf-8")
             entry = next(item for item in json.loads(result.stdout)["models"] if item["slug"] == "gpt-5.5")
             path = root / "catalog.json"
-            entries = [{**entry, "slug": mid, "display_name": label, "priority": index,
-                        "supports_search_tool": False, "tool_mode": None, "support_verbosity": False, "apply_patch_tool_type": None,
-                        "experimental_supported_tools": [], "default_reasoning_summary": "none"} for index, (mid, label) in enumerate(((MAIN, "Synthetic Alpha"), (OTHER, "Synthetic Beta")))]
+            entries = [
+                {
+                    **entry,
+                    "slug": mid,
+                    "display_name": label,
+                    "priority": index,
+                    "supports_search_tool": False,
+                    "tool_mode": None,
+                    "support_verbosity": False,
+                    "apply_patch_tool_type": None,
+                    "experimental_supported_tools": [],
+                    "default_reasoning_summary": "none",
+                }
+                for index, (mid, label) in enumerate(((MAIN, "Synthetic Alpha"), (OTHER, "Synthetic Beta")))
+            ]
             path.write_text(json.dumps({"models": entries}), encoding="utf-8")
             env["CODEX_CA_MODEL_CATALOG"] = str(path)
 
@@ -155,12 +190,20 @@ def worker(client, source, report, workspace):
             body = json.loads(request.data)
             users = [message for message in body.get("messages", []) if message.get("role") == "user"]
             user_text = " ".join(str(message.get("content")) for message in users)
-            observed.append({"model": body.get("model"), "marker_prompt": MARKER in request.data.decode(),
-                             "task_prompt": "Reply with " + MARKER + "." in user_text,
-                             "request_kind": "title_helper" if "Write the title in the predominant language" in user_text else "conversation"})
+            observed.append(
+                {
+                    "model": body.get("model"),
+                    "marker_prompt": MARKER in request.data.decode(),
+                    "task_prompt": "Reply with " + MARKER + "." in user_text,
+                    "request_kind": "title_helper" if "Write the title in the predominant language" in user_text else "conversation",
+                }
+            )
             encoder = StreamEncoder(Protocol.CHAT)
-            deltas = [Delta("start", model=body["model"], input_tokens=1, output_tokens=0), Delta("text", text=MARKER),
-                      Delta("finish", reason="stop", input_tokens=1, output_tokens=1)]
+            deltas = [
+                Delta("start", model=body["model"], input_tokens=1, output_tokens=0),
+                Delta("text", text=MARKER),
+                Delta("finish", reason="stop", input_tokens=1, output_tokens=1),
+            ]
             return io.BytesIO(b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta)))
 
         token_method = "resolve_token" if client == "codex" else "get_token"
@@ -168,12 +211,21 @@ def worker(client, source, report, workspace):
         try:
             with patch.dict(os.environ, env, clear=True), patch.object(launcher, token_method, return_value="synthetic-token"):
                 gateway, _ = launcher._gateway(config, provider, MAIN)
-                with patch("protoverta.server.make_handler", side_effect=lambda config, **kwargs: make_handler(config, upstream_open=upstream, **kwargs)), gateway_session(gateway) as origin:
-                    extra = ["--no-daemon", "--no-alt-screen", "--sandbox", "read-only"] if client == "codex" else ["--setting-sources", "", "--strict-mcp-config", "--tools", "", "--system-prompt", "Synthetic picker test; no tools."]
+                with (
+                    patch("protoverta.server.make_handler", side_effect=lambda config, **kwargs: make_handler(config, upstream_open=upstream, **kwargs)),
+                    gateway_session(gateway) as origin,
+                ):
+                    extra = (
+                        ["--no-daemon", "--no-alt-screen", "--sandbox", "read-only"]
+                        if client == "codex"
+                        else ["--setting-sources", "", "--strict-mcp-config", "--tools", "", "--system-prompt", "Synthetic picker test; no tools."]
+                    )
                     if client == "codex":
                         for key in ("features.daemon_auto_start", "features.plugins", "features.apps", "features.remote_plugin", "check_for_update_on_startup"):
                             extra += ["-c", key + "=false"]
-                    args, child_env = launcher.build_invocation(config, provider, MAIN, "low" if client == "codex" else "default", extra, gateway_url=origin, gateway_token=gateway.inbound_token)
+                    args, child_env = launcher.build_invocation(
+                        config, provider, MAIN, "low" if client == "codex" else "default", extra, gateway_url=origin, gateway_token=gateway.inbound_token
+                    )
                     terminal = Terminal(args, child_env, root)
                     text = terminal.wait(lambda text: "trust" in text.lower() or MAIN in text or "Synthetic Alpha" in text or "theme" in text.lower())
                     compact = re.sub(r"\s", "", text).lower()
@@ -187,14 +239,20 @@ def worker(client, source, report, workspace):
                         terminal.send("\x1b[B\r" if client == "claude" else "\r")
                     terminal.wait(lambda text: MAIN in text or "Synthetic Alpha" in text)
                     time.sleep(0.8)
+
                     def native_defaults():
                         result = {}
-                        for path in (Path(env["CLAUDE_CONFIG_DIR"]) / "settings.json", Path(env["CLAUDE_CONFIG_DIR"]) / ".claude.json", Path(env["HOME"]) / ".claude.json"):
+                        for path in (
+                            Path(env["CLAUDE_CONFIG_DIR"]) / "settings.json",
+                            Path(env["CLAUDE_CONFIG_DIR"]) / ".claude.json",
+                            Path(env["HOME"]) / ".claude.json",
+                        ):
                             try:
                                 result[path.name] = json.loads(path.read_text(encoding="utf-8")).get("model")
                             except (OSError, ValueError):
                                 result[path.name] = None
                         return result
+
                     native_before = native_defaults() if client == "claude" else None
                     offset = len(terminal.drain())
                     terminal.send("/model\r")
@@ -213,21 +271,33 @@ def worker(client, source, report, workspace):
                         terminal.wait(lambda text: "Setmodelto" + OTHER in re.sub(r"\s", "", text) and "session" in text.lower(), start=selected_offset)
                     time.sleep(0.8)
                     terminal.send("Reply with " + MARKER + ".\r")
-                    terminal.wait(lambda _: any(item["task_prompt"] and item["request_kind"] == "conversation" and item["model"] == OTHER for item in observed), 15)
+                    terminal.wait(
+                        lambda _: any(item["task_prompt"] and item["request_kind"] == "conversation" and item["model"] == OTHER for item in observed), 15
+                    )
                     terminal.wait(lambda text: MARKER in text)
-                    safe_requests = all(item["model"] in {MAIN, OTHER} and (item["request_kind"] != "conversation" or not item["task_prompt"] or item["model"] == OTHER) for item in observed)
-                    result = {"passed": picker_seen and safe_requests and config.path.read_bytes() == before,
-                              "client": client, "picker_seen": picker_seen, "observed": observed,
-                              "defaults_unchanged": config.path.read_bytes() == before, "alias_used": False,
-                              "native_defaults_unchanged": native_before == native_defaults() if client == "claude" else None,
-                              "cli_version": expected_version}
+                    safe_requests = all(
+                        item["model"] in {MAIN, OTHER} and (item["request_kind"] != "conversation" or not item["task_prompt"] or item["model"] == OTHER)
+                        for item in observed
+                    )
+                    result = {
+                        "passed": picker_seen and safe_requests and config.path.read_bytes() == before,
+                        "client": client,
+                        "picker_seen": picker_seen,
+                        "observed": observed,
+                        "defaults_unchanged": config.path.read_bytes() == before,
+                        "alias_used": False,
+                        "native_defaults_unchanged": native_before == native_defaults() if client == "claude" else None,
+                        "cli_version": expected_version,
+                    }
                     if client == "claude":
                         result["passed"] = result["passed"] and result["native_defaults_unchanged"]
                     report.write_text(json.dumps({**result, "screen": terminal.raw}, indent=2), encoding="utf-8")
                     print(json.dumps(result))
                     return 0 if result["passed"] else 1
         except Exception:
-            report.write_text(json.dumps({"passed": False, "client": client, "observed": observed, "screen": terminal.raw if terminal else ""}, indent=2), encoding="utf-8")
+            report.write_text(
+                json.dumps({"passed": False, "client": client, "observed": observed, "screen": terminal.raw if terminal else ""}, indent=2), encoding="utf-8"
+            )
             raise
         finally:
             if terminal is not None:
@@ -247,9 +317,15 @@ def main():
     with tempfile.TemporaryDirectory(prefix="protoverta-picker-") as temporary:
         if Path(temporary).resolve().parent != Path(tempfile.gettempdir()).resolve():
             raise RuntimeError("Fixture directory must stay under the temporary root")
-        result = run_process([sys.executable, "-B", str(Path(__file__).resolve()), *sys.argv[1:], "--worker", "--workdir", temporary],
-                             env={**sanitized_environment(), "PYTHONIOENCODING": "utf-8"}, cwd=Path(__file__).resolve().parents[1], timeout=60,
-                             text=True, encoding="utf-8", errors="replace")
+        result = run_process(
+            [sys.executable, "-B", str(Path(__file__).resolve()), *sys.argv[1:], "--worker", "--workdir", temporary],
+            env={**sanitized_environment(), "PYTHONIOENCODING": "utf-8"},
+            cwd=Path(__file__).resolve().parents[1],
+            timeout=60,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
         time.sleep(0.3)  # Windows job termination releases SQLite handles asynchronously.
     print(json.dumps({"stdout": result.stdout[-2500:]}))
     if result.returncode:

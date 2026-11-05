@@ -248,7 +248,11 @@ class StreamDecoder:
         if reason != "length" and (reason == "tool_calls") != self.saw_tool:
             raise StreamError("finish reason disagrees with tool calls")
         self.ended = True
-        return [Delta("finish", reason=reason, input_tokens=self.input_tokens, output_tokens=self.output_tokens, service_tier=self.service_tier, **self.usage_details)]
+        return [
+            Delta(
+                "finish", reason=reason, input_tokens=self.input_tokens, output_tokens=self.output_tokens, service_tier=self.service_tier, **self.usage_details
+            )
+        ]
 
     def _chat(self, event: SSEEvent) -> list[Delta]:
         if event.data == "[DONE]":
@@ -287,12 +291,17 @@ class StreamDecoder:
             # OpenRouter may repeat the finished choice in its usage postlude.
             # Only an empty, unchanged completion with first-time usage qualifies.
             delta = _obj(choice.get("delta"), "Chat usage delta")
-            if (choice.get("index") == 0 and not choice.get("logprobs")
-                    and choice.get("finish_reason") == self.reason
-                    and set(delta) <= {"role", "content"}
-                    and delta.get("role") in (None, "assistant") and delta.get("content") in (None, "")
-                    and isinstance(body.get("usage"), dict)
-                    and self.input_tokens is None and self.output_tokens is None):
+            if (
+                choice.get("index") == 0
+                and not choice.get("logprobs")
+                and choice.get("finish_reason") == self.reason
+                and set(delta) <= {"role", "content"}
+                and delta.get("role") in (None, "assistant")
+                and delta.get("content") in (None, "")
+                and isinstance(body.get("usage"), dict)
+                and self.input_tokens is None
+                and self.output_tokens is None
+            ):
                 self._usage(body["usage"])
                 return deltas
             raise StreamError("Chat choice arrived after finish_reason")
@@ -316,7 +325,9 @@ class StreamDecoder:
                 if value:
                     raise UnsupportedStreamFeatureError("refusal")
                 continue
-            if field not in {"role", "content", "tool_calls"} and (field not in {"refusal", "annotations", "reasoning", "reasoning_content", "reasoning_details"} or value not in (None, "", [])):
+            if field not in {"role", "content", "tool_calls"} and (
+                field not in {"refusal", "annotations", "reasoning", "reasoning_content", "reasoning_details"} or value not in (None, "", [])
+            ):
                 raise StreamError(f"unsupported Chat delta field: {field}")
         if delta.get("role") not in (None, "assistant"):
             raise StreamError("Chat delta has a non-assistant role")
@@ -555,7 +566,11 @@ class StreamDecoder:
                 self.saw_tool = True
                 return [Delta("tool_start", index=index, item_id=item_id, call_id=call_id, name=name, tool_type="custom" if custom else "function")]
             raise StreamError(f"unsupported Responses output item: {item_type}")
-        if kind in {"response.content_part.added", "response.reasoning_text.delta", "response.reasoning_text.done", "response.content_part.done"} and type(body.get("output_index")) is int and self.items.get(body["output_index"], (None,))[0] == "reasoning":
+        if (
+            kind in {"response.content_part.added", "response.reasoning_text.delta", "response.reasoning_text.done", "response.content_part.done"}
+            and type(body.get("output_index")) is int
+            and self.items.get(body["output_index"], (None,))[0] == "reasoning"
+        ):
             return self._public_reasoning_event(body, kind)
         if kind == "response.content_part.added":
             index = _index(body.get("output_index"), "output_index")
@@ -605,7 +620,11 @@ class StreamDecoder:
             index = _index(body.get("output_index"), "output_index")
             if self.items.get(index, (None,))[0] != "text" or self.text_parts.get(index) != "open" or body.get("text") != self.text_items[index]:
                 raise StreamError("Responses completed text differs from deltas")
-            if body.get("item_id") != self.items[index][1] or body.get("content_index") != 0 or self._probabilities(body.get("logprobs")) != self.item_probabilities[index]:
+            if (
+                body.get("item_id") != self.items[index][1]
+                or body.get("content_index") != 0
+                or self._probabilities(body.get("logprobs")) != self.item_probabilities[index]
+            ):
                 raise StreamError("unsupported Responses completed text metadata")
             from .logprobs import align
 
@@ -635,7 +654,12 @@ class StreamDecoder:
             if body.get("item_id") != self.items[index][1] or body.get("content_index") != 0:
                 raise StreamError("Responses completed content part has wrong identity")
             part = _obj(body.get("part"), "Responses completed content part")
-            if part.get("type") != "output_text" or part.get("text") != self.text_items[index] or part.get("annotations") != [] or self._probabilities(part.get("logprobs")) != self.item_probabilities[index]:
+            if (
+                part.get("type") != "output_text"
+                or part.get("text") != self.text_items[index]
+                or part.get("annotations") != []
+                or self._probabilities(part.get("logprobs")) != self.item_probabilities[index]
+            ):
                 raise StreamError("unsupported Responses completed content metadata")
             self.text_parts[index] = "closed"
             return []
@@ -680,7 +704,12 @@ class StreamDecoder:
             if not isinstance(content, list) or len(content) != 1:
                 raise StreamError("unsupported Responses completed message content")
             part = _obj(content[0], "Responses completed message content")
-            if part.get("type") != "output_text" or part.get("text") != self.text_items[index] or part.get("annotations") != [] or self._probabilities(part.get("logprobs")) != self.item_probabilities[index]:
+            if (
+                part.get("type") != "output_text"
+                or part.get("text") != self.text_items[index]
+                or part.get("annotations") != []
+                or self._probabilities(part.get("logprobs")) != self.item_probabilities[index]
+            ):
                 raise StreamError("Responses completed message content differs from deltas")
             self.completed_items[index] = item
             return []
@@ -701,11 +730,19 @@ class StreamDecoder:
                 if item != self.completed_items.get(index):
                     raise StreamError("Responses final output differs from streamed items")
             status = response.get("status")
-            if kind == "response.incomplete" and status == "incomplete" and _obj(response.get("incomplete_details"), "incomplete_details").get("reason") == "content_filter":
+            if (
+                kind == "response.incomplete"
+                and status == "incomplete"
+                and _obj(response.get("incomplete_details"), "incomplete_details").get("reason") == "content_filter"
+            ):
                 raise UnsupportedStreamFeatureError("content_filter")
             if kind == "response.completed" and status == "completed":
                 reason = "tool_calls" if self.saw_tool else "stop"
-            elif kind == "response.incomplete" and status == "incomplete" and _obj(response.get("incomplete_details"), "incomplete_details").get("reason") == "max_output_tokens":
+            elif (
+                kind == "response.incomplete"
+                and status == "incomplete"
+                and _obj(response.get("incomplete_details"), "incomplete_details").get("reason") == "max_output_tokens"
+            ):
                 reason = "length"
             else:
                 raise StreamError("unsupported Responses final status")

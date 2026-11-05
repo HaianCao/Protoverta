@@ -71,7 +71,7 @@ def test_invalid_or_nonportable_reported_tiers_fail_with_static_errors(source, t
 def test_stream_terminal_tier_is_retained_without_claiming_it_at_creation(source, target, tier, early):
     pipe = StreamTranscoder(source, target, request_context={"service_tier": "priority"} if target == "responses" else None)
     raw = wire(source, tier, early=early)
-    converted = b"".join(pipe.feed(raw[i:i + 7]) for i in range(0, len(raw), 7)) + pipe.finish()
+    converted = b"".join(pipe.feed(raw[i : i + 7]) for i in range(0, len(raw), 7)) + pipe.finish()
     if target == "responses":
         created, completed = snapshots(converted)
         assert "service_tier" not in created

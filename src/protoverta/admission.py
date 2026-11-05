@@ -34,7 +34,17 @@ class AdmissionStorageError(RuntimeError):
 
 
 class SharedAdmission:
-    def __init__(self, path: str | PathLike[str], scope: str, *, requests: int = 40, window: float = 60.0, concurrency: int = 5, lease: float = 610.0, clock: Callable[[], float] = time.time) -> None:
+    def __init__(
+        self,
+        path: str | PathLike[str],
+        scope: str,
+        *,
+        requests: int = 40,
+        window: float = 60.0,
+        concurrency: int = 5,
+        lease: float = 610.0,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
         if type(requests) is not int or requests < 1 or type(concurrency) is not int or concurrency < 1:
             raise ValueError("shared request and concurrency limits must be positive integers")
         if any(isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value) or value <= 0 for value in (window, lease)):

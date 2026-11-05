@@ -18,12 +18,38 @@ def measure(project, package, output, core):
     output.mkdir()
     data_file = output / ".coverage"
     config_file = output / "coverage.ini"
-    config_file.write_text("[run]\nbranch = true\nparallel = true\npatch = subprocess\nsource = " + str(project / "src" / package) + "\ndata_file = " + str(data_file) + "\n", encoding="utf-8")
+    config_file.write_text(
+        "[run]\nbranch = true\nparallel = true\npatch = subprocess\nsource = " + str(project / "src" / package) + "\ndata_file = " + str(data_file) + "\n",
+        encoding="utf-8",
+    )
     env = sanitized_environment()
     env["PYTHONPATH"] = os.pathsep.join([str(core / "scripts"), str(core / "src"), str(project / "src")])
     canary = "protoverta" if package == "protoverta" else package + ".cli"
     pid_file = output / "canary.pid"
-    command = [sys.executable, "-m", "coverage", "run", "--rcfile", str(config_file), "-m", "pytest", "-p", "coverage_subprocess_guard", "-p", "no:cacheprovider", "-o", "addopts=", "-q", "--tb=short", "--show-capture=no", "--coverage-canary-package", canary, "--coverage-canary-pid", str(pid_file), str(project / "tests")]
+    command = [
+        sys.executable,
+        "-m",
+        "coverage",
+        "run",
+        "--rcfile",
+        str(config_file),
+        "-m",
+        "pytest",
+        "-p",
+        "coverage_subprocess_guard",
+        "-p",
+        "no:cacheprovider",
+        "-o",
+        "addopts=",
+        "-q",
+        "--tb=short",
+        "--show-capture=no",
+        "--coverage-canary-package",
+        canary,
+        "--coverage-canary-pid",
+        str(pid_file),
+        str(project / "tests"),
+    ]
     result = subprocess.run(command, cwd=project, env=env, capture_output=True, timeout=600, check=False)
     (output / "pytest.log").write_bytes(result.stdout + result.stderr)
     if result.returncode:

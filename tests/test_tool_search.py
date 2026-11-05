@@ -14,9 +14,20 @@ from protoverta.tool_search import ClientToolSearchMap
 
 
 def body():
-    return {"model": "m", "input": "find a tool", "max_output_tokens": 64, "tools": [
-        {"type": "tool_search", "execution": "client", "description": "Search tools", "parameters": {"type": "object", "properties": {"goal": {"type": "string"}}}},
-        {"type": "function", "name": "deferred", "defer_loading": True, "parameters": {"type": "object"}}]}
+    return {
+        "model": "m",
+        "input": "find a tool",
+        "max_output_tokens": 64,
+        "tools": [
+            {
+                "type": "tool_search",
+                "execution": "client",
+                "description": "Search tools",
+                "parameters": {"type": "object", "properties": {"goal": {"type": "string"}}},
+            },
+            {"type": "function", "name": "deferred", "defer_loading": True, "parameters": {"type": "object"}},
+        ],
+    }
 
 
 def loaded():
@@ -24,14 +35,33 @@ def loaded():
 
 
 def history():
-    return [{"type": "tool_search_call", "execution": "client", "status": "completed", "call_id": "search1", "arguments": {"goal": "lookup"}},
-            {"type": "tool_search_output", "execution": "client", "status": "completed", "call_id": "search1", "tools": [loaded()]}]
+    return [
+        {"type": "tool_search_call", "execution": "client", "status": "completed", "call_id": "search1", "arguments": {"goal": "lookup"}},
+        {"type": "tool_search_output", "execution": "client", "status": "completed", "call_id": "search1", "tools": [loaded()]},
+    ]
 
 
 def upstream_call(target, name="pv_client_tool_search"):
     if target == "chat":
-        return {"model": "m", "choices": [{"message": {"role": "assistant", "content": None, "tool_calls": [{"id": "s2", "type": "function", "function": {"name": name, "arguments": '{"goal":"next"}'}}]}, "finish_reason": "tool_calls"}]}
-    return {"model": "m", "content": [{"type": "tool_use", "id": "s2", "name": name, "input": {"goal": "next"}}], "stop_reason": "tool_use", "usage": {"input_tokens": 4, "output_tokens": 5}}
+        return {
+            "model": "m",
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [{"id": "s2", "type": "function", "function": {"name": name, "arguments": '{"goal":"next"}'}}],
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ],
+        }
+    return {
+        "model": "m",
+        "content": [{"type": "tool_use", "id": "s2", "name": name, "input": {"goal": "next"}}],
+        "stop_reason": "tool_use",
+        "usage": {"input_tokens": 4, "output_tokens": 5},
+    }
 
 
 @pytest.mark.parametrize("target", ["chat", "messages"])
@@ -109,9 +139,14 @@ def test_namespace_deferred_children_require_explicit_search_output():
     from protoverta.namespaces import NamespaceMap
 
     request = body()
-    namespace = {"type": "namespace", "name": "ns", "tools": [
-        {"type": "function", "name": "immediate", "parameters": {"type": "object"}},
-        {"type": "function", "name": "not_loaded", "parameters": {"type": "object"}, "defer_loading": True}]}
+    namespace = {
+        "type": "namespace",
+        "name": "ns",
+        "tools": [
+            {"type": "function", "name": "immediate", "parameters": {"type": "object"}},
+            {"type": "function", "name": "not_loaded", "parameters": {"type": "object"}, "defer_loading": True},
+        ],
+    }
     request["tools"].append(namespace)
     before = copy.deepcopy(request)
     prepared = ClientToolSearchMap().prepare(request)

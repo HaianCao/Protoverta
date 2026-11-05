@@ -49,13 +49,17 @@ def snapshot(workspace):
             dependencies[package] = importlib.metadata.version(package)
         except importlib.metadata.PackageNotFoundError:
             dependencies[package] = None
-    return {"schema_version": 1, "python": platform.python_version(), "os": sys.platform,
-            "projects": [project_identity(workspace / name) for name in ("protoverta", "free-codex-cli", "free-claude-cli")],
-            "test_dependencies": dependencies,
-            "cli_version_matrix": CLI_VERSION_MATRIX,
-            "pinned_sdk_baseline": PINNED_SDK_BASELINE,
-            "provider_certification": False,
-            "scope": "Source identity only. Attach named validation results; a snapshot is not a passed test or CLI/provider compatibility claim."}
+    return {
+        "schema_version": 1,
+        "python": platform.python_version(),
+        "os": sys.platform,
+        "projects": [project_identity(workspace / name) for name in ("protoverta", "free-codex-cli", "free-claude-cli")],
+        "test_dependencies": dependencies,
+        "cli_version_matrix": CLI_VERSION_MATRIX,
+        "pinned_sdk_baseline": PINNED_SDK_BASELINE,
+        "provider_certification": False,
+        "scope": "Source identity only. Attach named validation results; a snapshot is not a passed test or CLI/provider compatibility claim.",
+    }
 
 
 def main():

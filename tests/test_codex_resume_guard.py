@@ -21,6 +21,7 @@ def test_closed_resume_is_rejected_before_harness_execution_without_rewriting_ot
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "scripts"))
     fixture = importlib.import_module("smoke_parallel_agents")
     config = GatewayConfig(source, "https://example.invalid/v1", "fake", "local", namespace_tools="flatten", codex_model_safe_resume=guarded)
+
     def upstream(request, *, timeout):
         body = json.loads(request.data)
         name = body["tools"][0]["function"]["name"] if source == Protocol.CHAT else body["tools"][0]["name"] if source == Protocol.MESSAGES else "resume_agent"
@@ -31,12 +32,36 @@ def test_closed_resume_is_rejected_before_harness_execution_without_rewriting_ot
         if source == Protocol.RESPONSES:
             value = {"model": "main", "output": [item]}
         elif source == Protocol.CHAT:
-            value = {"model": "main", "choices": [{"finish_reason": "tool_calls", "message": {"role": "assistant", "content": None, "tool_calls": [{"id": "resume-control", "type": "function", "function": {"name": name, "arguments": item["arguments"]}}]}}]}
+            value = {
+                "model": "main",
+                "choices": [
+                    {
+                        "finish_reason": "tool_calls",
+                        "message": {
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": [{"id": "resume-control", "type": "function", "function": {"name": name, "arguments": item["arguments"]}}],
+                        },
+                    }
+                ],
+            }
         else:
-            value = {"model": "main", "role": "assistant", "content": [{"type": "tool_use", "id": "resume-control", "name": name, "input": {"id": "synthetic-child"}}], "stop_reason": "tool_use", "usage": {"input_tokens": 1, "output_tokens": 1}}
+            value = {
+                "model": "main",
+                "role": "assistant",
+                "content": [{"type": "tool_use", "id": "resume-control", "name": name, "input": {"id": "synthetic-child"}}],
+                "stop_reason": "tool_use",
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            }
         return io.BytesIO(json.dumps(value).encode())
-    body = {"model": "main", "input": "synthetic", "max_output_tokens": 32, "stream": streaming,
-            "tools": [{"type": "namespace", "name": "multi_agent_v1", "tools": [{"type": "function", "name": "resume_agent", "parameters": {"type": "object"}}]}]}
+
+    body = {
+        "model": "main",
+        "input": "synthetic",
+        "max_output_tokens": 32,
+        "stream": streaming,
+        "tools": [{"type": "namespace", "name": "multi_agent_v1", "tools": [{"type": "function", "name": "resume_agent", "parameters": {"type": "object"}}]}],
+    }
     with listener(config, upstream) as url:
         try:
             with post(url, body) as response:
@@ -79,7 +104,10 @@ def _responses_text_wire(trailing_done):
         {"type": "response.output_text.done", **position, "text": "hi", "logprobs": []},
         {"type": "response.content_part.done", **position, "part": dict(part, text="hi")},
         {"type": "response.output_item.done", "output_index": 0, "item": final_item},
-        {"type": "response.completed", "response": dict(base, status="completed", output=[final_item], usage={"input_tokens": 3, "output_tokens": 1, "total_tokens": 4})},
+        {
+            "type": "response.completed",
+            "response": dict(base, status="completed", output=[final_item], usage={"input_tokens": 3, "output_tokens": 1, "total_tokens": 4}),
+        },
     ]
     wire = b"".join(sse({**event, "sequence_number": index}) for index, event in enumerate(events))
     return wire + (b"data: [DONE]\n\n" if trailing_done else b"")

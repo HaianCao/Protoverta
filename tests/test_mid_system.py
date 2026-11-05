@@ -8,7 +8,11 @@ from protoverta.server import GatewayConfig
 
 
 def request():
-    return {"model": "verified-model", "max_output_tokens": 64, "input": [{"role": "system", "content": "Initial"}, {"role": "user", "content": "Question"}, {"role": "system", "content": "New instruction"}]}
+    return {
+        "model": "verified-model",
+        "max_output_tokens": 64,
+        "input": [{"role": "system", "content": "Initial"}, {"role": "user", "content": "Question"}, {"role": "system", "content": "New instruction"}],
+    }
 
 
 def test_opt_in_preserves_system_position_without_hoisting_or_mutation():
@@ -55,11 +59,19 @@ def test_gateway_capability_config_is_exact_and_messages_only(models, protocol):
 
 @pytest.mark.parametrize("complete", [False, True])
 def test_system_after_parallel_tools_requires_every_result(complete):
-    body = {"model": "m", "max_tokens": 64, "messages": [
-        {"role": "user", "content": "Question"},
-        {"role": "assistant", "content": None, "tool_calls": [{"id": identifier, "type": "function", "function": {"name": "read", "arguments": "{}"}} for identifier in ("a", "b")]},
-        {"role": "tool", "tool_call_id": "a", "content": "Result a"},
-    ]}
+    body = {
+        "model": "m",
+        "max_tokens": 64,
+        "messages": [
+            {"role": "user", "content": "Question"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{"id": identifier, "type": "function", "function": {"name": "read", "arguments": "{}"}} for identifier in ("a", "b")],
+            },
+            {"role": "tool", "tool_call_id": "a", "content": "Result a"},
+        ],
+    }
     if complete:
         body["messages"].append({"role": "tool", "tool_call_id": "b", "content": "Result b"})
     body["messages"].append({"role": "system", "content": "New instruction"})

@@ -49,5 +49,7 @@ def run_process(args, **kwargs):
                 process.kill()
             stdout, stderr = process.communicate(timeout=10)
             detail = "still running" if root_status is None else f"exited {root_status}; descendant pipes remained open"
-            return subprocess.CompletedProcess(args, 124, stdout, stderr + f"\nIsolated client timed out (root {detail}; own-job images={images}); its process tree was terminated.\n")
+            return subprocess.CompletedProcess(
+                args, 124, stdout, stderr + f"\nIsolated client timed out (root {detail}; own-job images={images}); its process tree was terminated.\n"
+            )
         return subprocess.CompletedProcess(args, process.returncode, stdout, stderr)

@@ -49,10 +49,7 @@ def fixture_server(open_upstream):
             pass
 
         def do_POST(self):
-            auth = (
-                self.headers.get("Authorization") == "Bearer fake-upstream-key"
-                or self.headers.get("x-api-key") == "fake-upstream-key"
-            )
+            auth = self.headers.get("Authorization") == "Bearer fake-upstream-key" or self.headers.get("x-api-key") == "fake-upstream-key"
             if not auth:
                 self.send_error(401)
                 return
@@ -86,18 +83,9 @@ def fixture_server(open_upstream):
 def summarize_request(body: dict) -> dict:
     return {
         "keys": sorted(body),
-        "options": {
-            key: body[key]
-            for key in ("reasoning", "text", "parallel_tool_calls", "include")
-            if key in body
-        },
-        "tool_types": sorted(
-            {str(tool.get("type", "function")) for tool in body.get("tools", [])}
-        ),
-        "tool_names": [
-            tool.get("name") or tool.get("function", {}).get("name")
-            for tool in body.get("tools", [])
-        ],
+        "options": {key: body[key] for key in ("reasoning", "text", "parallel_tool_calls", "include") if key in body},
+        "tool_types": sorted({str(tool.get("type", "function")) for tool in body.get("tools", [])}),
+        "tool_names": [tool.get("name") or tool.get("function", {}).get("name") for tool in body.get("tools", [])],
     }
 
 
@@ -138,21 +126,12 @@ def run_smoke(
         deltas = [Delta("start", model=body["model"], input_tokens=1, output_tokens=0)]
         if tool_loop and rounds == 1:
             name = "get_goal" if client == "codex" else "Read"
-            available = {
-                tool.get("name") or tool.get("function", {}).get("name")
-                for tool in body.get("tools", [])
-            }
+            available = {tool.get("name") or tool.get("function", {}).get("name") for tool in body.get("tools", [])}
             if mcp_fixture:
                 name = next((value for value in available if value and "fixture_lookup" in value), "missing-mcp-fixture")
             if name not in available:
-                raise RuntimeError(
-                    f"Smoke tool {name} is absent from the client request"
-                )
-            arguments = (
-                "{}"
-                if client == "codex" or mcp_fixture
-                else json.dumps({"file_path": str(task_root / "fixture.txt")})
-            )
+                raise RuntimeError(f"Smoke tool {name} is absent from the client request")
+            arguments = "{}" if client == "codex" or mcp_fixture else json.dumps({"file_path": str(task_root / "fixture.txt")})
             for index in range(2):
                 deltas.extend(
                     [
@@ -163,37 +142,23 @@ def run_smoke(
                             name=name,
                         ),
                         Delta("tool_delta", index=index, text=arguments),
-                        *(
-                            [Delta("tool_end", index=index)]
-                            if upstream == Protocol.MESSAGES
-                            else []
-                        ),
+                        *([Delta("tool_end", index=index)] if upstream == Protocol.MESSAGES else []),
                     ]
                 )
             if upstream != Protocol.MESSAGES:
                 deltas.extend(Delta("tool_end", index=index) for index in range(2))
-            deltas.append(
-                Delta("finish", reason="tool_calls", input_tokens=1, output_tokens=1)
-            )
+            deltas.append(Delta("finish", reason="tool_calls", input_tokens=1, output_tokens=1))
         else:
             if tool_loop:
                 if mcp_fixture and "LOCAL_SEARCH_FIXTURE_VALUE" not in json.dumps(body):
                     raise ValueError("Client did not replay a successful fixture MCP result")
                 if upstream == Protocol.RESPONSES:
-                    tool_result_count = sum(
-                        item.get("type") == "function_call_output"
-                        for item in body["input"]
-                    )
+                    tool_result_count = sum(item.get("type") == "function_call_output" for item in body["input"])
                 elif upstream == Protocol.CHAT:
-                    tool_result_count = sum(
-                        item.get("role") == "tool" for item in body["messages"]
-                    )
+                    tool_result_count = sum(item.get("role") == "tool" for item in body["messages"])
                 else:
                     tool_result_count = sum(
-                        block.get("type") == "tool_result"
-                        for item in body["messages"]
-                        for block in item.get("content", [])
-                        if isinstance(block, dict)
+                        block.get("type") == "tool_result" for item in body["messages"] for block in item.get("content", []) if isinstance(block, dict)
                     )
             deltas.extend(
                 [
@@ -201,11 +166,7 @@ def run_smoke(
                     Delta("finish", reason="stop", input_tokens=1, output_tokens=1),
                 ]
             )
-        wire = b"".join(
-            encode_sse(item.event, item.data)
-            for delta in deltas
-            for item in encoder.feed(delta)
-        )
+        wire = b"".join(encode_sse(item.event, item.data) for delta in deltas for item in encoder.feed(delta))
         return io.BytesIO(wire)
 
     with tempfile.TemporaryDirectory(prefix="protoverta-smoke-") as directory:
@@ -249,13 +210,24 @@ def run_smoke(
             token_name = "PROTOVERTA_MCP_FIXTURE_TOKEN"
             if os.name == "nt":
                 token_name = token_name.lower()
-            mcp_path.write_text(json.dumps({"mcpServers": {"fixture": {"command": sys.executable, "args": [str(Path(__file__).with_name("smoke_tool_search.py")), "--mcp", "--mcp-verify-env"], "env_vars": ["PYTHONPATH", token_name]}}}), encoding="utf-8")
+            mcp_path.write_text(
+                json.dumps(
+                    {
+                        "mcpServers": {
+                            "fixture": {
+                                "command": sys.executable,
+                                "args": [str(Path(__file__).with_name("smoke_tool_search.py")), "--mcp", "--mcp-verify-env"],
+                                "env_vars": ["PYTHONPATH", token_name],
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
             env["CLAUDE_CA_MCP_CONFIG"] = str(mcp_path)
             env["PROTOVERTA_MCP_FIXTURE_TOKEN"] = "local-mcp-env"
             env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1] / "src")
-        (task_root / "fixture.txt").write_text(
-            "Protoverta local tool fixture.\n", encoding="utf-8"
-        )
+        (task_root / "fixture.txt").write_text("Protoverta local tool fixture.\n", encoding="utf-8")
         with (
             fixture_server(open_upstream) as upstream_origin,
             patch(
@@ -277,9 +249,7 @@ def run_smoke(
                 default_max_output_tokens=4096,
                 upstream_reasoning=reasoning_policy,
                 public_reasoning=public_reasoning,
-                messages_usage_policy="deferred"
-                if client == "claude" and upstream != Protocol.MESSAGES
-                else "strict",
+                messages_usage_policy="deferred" if client == "claude" and upstream != Protocol.MESSAGES else "strict",
             )
             with gateway_session(config) as origin:
                 result = run_client(
@@ -303,9 +273,7 @@ def run_smoke(
         return {
             "client": client,
             "upstream": upstream.value,
-            "adapter": "installed"
-            if installed_adapter
-            else (str(adapter_source) if adapter_source else None),
+            "adapter": "installed" if installed_adapter else (str(adapter_source) if adapter_source else None),
             "passed": result.returncode == 0
             and MARKER in result.stdout
             and (not tool_loop or (rounds == 2 and tool_result_count == 2 and not tool_execution_failed(client, result.stdout, result.stderr))),
@@ -465,11 +433,7 @@ def run_client(
                 prompt or "Reply with PROTOVERTA_SMOKE_OK.",
             ]
         else:
-            base = (
-                upstream_origin
-                if upstream == Protocol.MESSAGES
-                else upstream_origin + "/v1"
-            )
+            base = upstream_origin if upstream == Protocol.MESSAGES else upstream_origin + "/v1"
             config_path.write_text(
                 f'schema_version = 1\n[[providers]]\nid = "smoke"\ndisplay_name = "Smoke"\nbase_url = "{base}"\nprotocol = "{upstream.value}"\nexecution_mode = "gateway"\nupstream_reasoning = "{adapter_policy}"\n',
                 encoding="utf-8",
@@ -495,7 +459,7 @@ def run_client(
                 if client == "codex":
                     agents["effort"] = "low"
             inline = "{ " + ", ".join(key + " = " + json.dumps(value) for key, value in agents.items()) + " }"
-            content = content.replace("upstream_reasoning = ", f'agent_models = {inline}\nupstream_reasoning = ', 1)
+            content = content.replace("upstream_reasoning = ", f"agent_models = {inline}\nupstream_reasoning = ", 1)
             config_path.write_text(content, encoding="utf-8")
         if provider_id != "smoke":
             content = config_path.read_text(encoding="utf-8")
@@ -516,7 +480,7 @@ def run_client(
             args[at:at] = ["resume", resume_id]
             if "--sandbox" in args:
                 at = args.index("--sandbox")
-                del args[at:at + 2]
+                del args[at : at + 2]
             # exec resume has no --sandbox flag of its own. Preserve the first
             # invocation's read-only policy explicitly at Codex's root scope.
             if adapter_source is not None or installed_adapter:
@@ -532,7 +496,14 @@ def run_client(
         # Real-provider probes must not multiply failed requests through the
         # CLI's default reconnect policy. These overrides belong at root scope.
         at = args.index("--") + 1
-        retry_options = ["-c", f"model_providers.{provider_id}.request_max_retries=0", "-c", f"model_providers.{provider_id}.stream_max_retries=0", "-c", "features.daemon_auto_start=false"]
+        retry_options = [
+            "-c",
+            f"model_providers.{provider_id}.request_max_retries=0",
+            "-c",
+            f"model_providers.{provider_id}.stream_max_retries=0",
+            "-c",
+            "features.daemon_auto_start=false",
+        ]
         for key in ("features.plugins", "features.apps", "features.remote_plugin", "check_for_update_on_startup"):
             retry_options += ["-c", key + "=false"]
         for key, value in (codex_config or {}).items():
@@ -551,7 +522,7 @@ def run_client(
             raise ValueError("Tracing requires a source adapter and synthetic state")
         module_index = args.index("-m")
         module_name = args[module_index + 1]
-        args[module_index:module_index + 2] = [str(Path(__file__).with_name("trace_adapter.py")), module_name, str(trace_file)]
+        args[module_index : module_index + 2] = [str(Path(__file__).with_name("trace_adapter.py")), module_name, str(trace_file)]
     return run_process(
         args,
         cwd=directory,
@@ -572,9 +543,7 @@ def main() -> int:
     parser.add_argument("--upstream-reasoning", choices=["auto", "provider_default", "disabled", "openrouter_disabled"], default="provider_default")
     parser.add_argument("--mcp-fixture", action="store_true", help="Claude adapter: execute the fixed read-only MCP tool")
     parser.add_argument("--agent-model-policy", choices=["inherit", "selected"], help="Exercise an explicit launcher agent-model policy; does not spawn agents")
-    parser.add_argument(
-        "--upstream", type=Protocol, choices=list(Protocol), required=True
-    )
+    parser.add_argument("--upstream", type=Protocol, choices=list(Protocol), required=True)
     parser.add_argument(
         "--model",
         help="Exercise client behavior for an arbitrary model ID against the local fixture",

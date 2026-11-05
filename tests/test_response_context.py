@@ -6,8 +6,12 @@ from protoverta.response_context import restore_request_context
 
 def test_snapshot_context_does_not_infer_usage_defaults_or_mutate_input():
     result = {"output": [], "parallel_tool_calls": False}
-    request = {"tools": [{"type": "function", "name": "lookup"}], "parallel_tool_calls": True,
-               "tool_choice": {"type": "function", "name": "lookup"}, "max_output_tokens": 64}
+    request = {
+        "tools": [{"type": "function", "name": "lookup"}],
+        "parallel_tool_calls": True,
+        "tool_choice": {"type": "function", "name": "lookup"},
+        "max_output_tokens": 64,
+    }
     output = restore_request_context(result, request)
     assert output["parallel_tool_calls"] is True
     assert output["tools"] == [{**request["tools"][0], "description": None, "parameters": None, "strict": None}]

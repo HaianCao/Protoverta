@@ -33,9 +33,7 @@ class ContextAssessment:
     def headers(self):
         kind = "unavailable" if self.input_tokens is None else "operator-exact" if self.exact else self.count_kind
         category = "unavailable" if self.input_tokens is None else "exact" if self.exact else "estimate"
-        values = {"X-Protoverta-Context-Verdict": self.verdict,
-                  "X-Protoverta-Context-Count-Kind": kind,
-                  "X-Protoverta-Context-Count-Category": category}
+        values = {"X-Protoverta-Context-Verdict": self.verdict, "X-Protoverta-Context-Count-Kind": kind, "X-Protoverta-Context-Count-Category": category}
         for name, value in (("Input", self.input_tokens), ("Output-Reserve", self.reserved_output_tokens), ("Limit", self.context_window_tokens)):
             if value is not None:
                 values["X-Protoverta-Context-" + name] = str(value)
@@ -71,7 +69,11 @@ def assess_context(body, protocol, limit, *, policy="estimate", counter: Callabl
         raise ValueError("unknown context preflight policy")
     if limit is not None and (type(limit) is not int or limit <= 0):
         raise ValueError("context limit must be positive")
-    output = body.get("max_completion_tokens", body.get("max_tokens")) if protocol == Protocol.CHAT else body.get("max_output_tokens" if protocol == Protocol.RESPONSES else "max_tokens")
+    output = (
+        body.get("max_completion_tokens", body.get("max_tokens"))
+        if protocol == Protocol.CHAT
+        else body.get("max_output_tokens" if protocol == Protocol.RESPONSES else "max_tokens")
+    )
     if output is not None and (type(output) is not int or output <= 0):
         raise ConversionError("context preflight requires a positive explicit output reserve")
     count = None

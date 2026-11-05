@@ -113,7 +113,11 @@ class Scenario(parallel.Scenario):
         tools = list(functions(body, self.protocol))
         if stage == 1:
             tool = single.find_tool(tools, "agent" if self.client == "claude" else "spawn_agent")
-            args = {"prompt": TASK, "description": "Wait in local fixture", "subagent_type": "p04-worker", "run_in_background": True} if self.client == "claude" else {"message": TASK}
+            args = (
+                {"prompt": TASK, "description": "Wait in local fixture", "subagent_type": "p04-worker", "run_in_background": True}
+                if self.client == "claude"
+                else {"message": TASK}
+            )
             return parallel.calls_wire(self.protocol, body["model"], [(tool, args, "spawn_exit_child")])
         if stage == 3:
             self.completion_notification, _ = cancel.notification_evidence(body, self.child_id, CHILD_DONE)
@@ -144,11 +148,16 @@ class Scenario(parallel.Scenario):
 
 
 def verified_cleanup(console, mode):
-    return (isinstance(console, dict) and console.get("timed_out") is False
-            and type(console.get("remaining_before_cleanup")) is int and console["remaining_before_cleanup"] == 0
-            and console.get("upstream_closed_before_cleanup") is True
-            and type(console.get("returncode")) is int and console["returncode"] == (130 if mode == "interrupt" else 0)
-            and (mode != "interrupt" or console.get("event_sent") is True and console.get("console_owned") is True))
+    return (
+        isinstance(console, dict)
+        and console.get("timed_out") is False
+        and type(console.get("remaining_before_cleanup")) is int
+        and console["remaining_before_cleanup"] == 0
+        and console.get("upstream_closed_before_cleanup") is True
+        and type(console.get("returncode")) is int
+        and console["returncode"] == (130 if mode == "interrupt" else 0)
+        and (mode != "interrupt" or console.get("event_sent") is True and console.get("console_owned") is True)
+    )
 
 
 def verified_lifecycle(client, stdout, child_id, mode):
@@ -160,11 +169,16 @@ def verified_lifecycle(client, stdout, child_id, mode):
         if not isinstance(result, dict):
             return False
         stats = result.get("subagent_stats", {})
-        return (isinstance(stats, dict) and all(type(stats.get(key)) is int for key in ("spawned", "completed", "failed", "started_in_background"))
-                and stats.get("spawned") == stats.get("started_in_background") == 1 and stats.get("failed") == 0
-                and stats.get("completed") == (0 if mode == "interrupt" else 1)
-                and result.get("permission_denials") == [] and result.get("is_error") is (mode == "interrupt")
-                and (mode != "interrupt" or result.get("terminal_reason") == "aborted_streaming"))
+        return (
+            isinstance(stats, dict)
+            and all(type(stats.get(key)) is int for key in ("spawned", "completed", "failed", "started_in_background"))
+            and stats.get("spawned") == stats.get("started_in_background") == 1
+            and stats.get("failed") == 0
+            and stats.get("completed") == (0 if mode == "interrupt" else 1)
+            and result.get("permission_denials") == []
+            and result.get("is_error") is (mode == "interrupt")
+            and (mode != "interrupt" or result.get("terminal_reason") == "aborted_streaming")
+        )
     spawned = []
     for line in stdout.splitlines():
         try:
@@ -210,19 +224,39 @@ def run(client, upstream, adapter_source, mode):
     lifecycle = result is not None and verified_lifecycle(client, result.stdout, state.child_id, mode)
     expected_child = 2 if client == "claude" and mode == "normal" else 1
     expected_parent = 3 if client == "claude" and mode == "normal" else 2
-    passed = (result is not None and cleanup and lifecycle and result.returncode == state.console.get("returncode") and state.child_id and state.stages == {"parent": expected_parent, "child": expected_child}
-              and state.disconnected.is_set() and not state.errors and state.audit_count == 0
-              and (client != "claude" or state.background_artifact_owned)
-              and (client != "claude" or mode != "normal" or state.child_completed and state.completion_notification)
-              and (mode == "interrupt" or result.returncode == 0 and DONE in result.stdout))
-    return {"passed": bool(passed), "client": client, "upstream": upstream.value, "mode": mode,
-            "cli_version": driver["cli_version"], "cleanup_verified": cleanup, "console": state.console,
-            "lifecycle_verified": lifecycle,
-            "child_started": state.child_started.is_set(), "child_disconnected": state.disconnected.is_set(),
-            "child_completed": state.child_completed, "background_artifact_owned": state.background_artifact_owned,
-            "completion_notification": state.completion_notification,
-            "fixture_errors": state.errors, "observed": state.observed,
-            "stdout": result.stdout if result else "", "stderr": result.stderr if result else ""}
+    passed = (
+        result is not None
+        and cleanup
+        and lifecycle
+        and result.returncode == state.console.get("returncode")
+        and state.child_id
+        and state.stages == {"parent": expected_parent, "child": expected_child}
+        and state.disconnected.is_set()
+        and not state.errors
+        and state.audit_count == 0
+        and (client != "claude" or state.background_artifact_owned)
+        and (client != "claude" or mode != "normal" or state.child_completed and state.completion_notification)
+        and (mode == "interrupt" or result.returncode == 0 and DONE in result.stdout)
+    )
+    return {
+        "passed": bool(passed),
+        "client": client,
+        "upstream": upstream.value,
+        "mode": mode,
+        "cli_version": driver["cli_version"],
+        "cleanup_verified": cleanup,
+        "console": state.console,
+        "lifecycle_verified": lifecycle,
+        "child_started": state.child_started.is_set(),
+        "child_disconnected": state.disconnected.is_set(),
+        "child_completed": state.child_completed,
+        "background_artifact_owned": state.background_artifact_owned,
+        "completion_notification": state.completion_notification,
+        "fixture_errors": state.errors,
+        "observed": state.observed,
+        "stdout": result.stdout if result else "",
+        "stderr": result.stderr if result else "",
+    }
 
 
 def main():

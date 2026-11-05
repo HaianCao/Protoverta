@@ -6,14 +6,36 @@ from protoverta import ConversionError, Protocol, convert_request
 from protoverta.profiles import prepare_codex_request
 from protoverta.server import apply_upstream_reasoning
 
-SCHEMA = {"type": "object", "properties": {"ok": {"type": "boolean"}, "values": {"type": "array", "items": {"type": "integer"}}}, "required": ["ok", "values"], "additionalProperties": False}
+SCHEMA = {
+    "type": "object",
+    "properties": {"ok": {"type": "boolean"}, "values": {"type": "array", "items": {"type": "integer"}}},
+    "required": ["ok", "values"],
+    "additionalProperties": False,
+}
 
 
 def request(protocol):
     return {
-        Protocol.CHAT: {"model": "m", "messages": [{"role": "user", "content": "Return JSON"}], "max_completion_tokens": 64, "response_format": {"type": "json_schema", "json_schema": {"name": "result", "schema": copy.deepcopy(SCHEMA), "strict": True}}, "reasoning_effort": "low"},
-        Protocol.RESPONSES: {"model": "m", "input": "Return JSON", "max_output_tokens": 64, "text": {"format": {"type": "json_schema", "name": "result", "schema": copy.deepcopy(SCHEMA), "strict": True}}, "reasoning": {"effort": "low"}},
-        Protocol.MESSAGES: {"model": "m", "messages": [{"role": "user", "content": "Return JSON"}], "max_tokens": 64, "output_config": {"format": {"type": "json_schema", "schema": copy.deepcopy(SCHEMA)}, "effort": "low"}},
+        Protocol.CHAT: {
+            "model": "m",
+            "messages": [{"role": "user", "content": "Return JSON"}],
+            "max_completion_tokens": 64,
+            "response_format": {"type": "json_schema", "json_schema": {"name": "result", "schema": copy.deepcopy(SCHEMA), "strict": True}},
+            "reasoning_effort": "low",
+        },
+        Protocol.RESPONSES: {
+            "model": "m",
+            "input": "Return JSON",
+            "max_output_tokens": 64,
+            "text": {"format": {"type": "json_schema", "name": "result", "schema": copy.deepcopy(SCHEMA), "strict": True}},
+            "reasoning": {"effort": "low"},
+        },
+        Protocol.MESSAGES: {
+            "model": "m",
+            "messages": [{"role": "user", "content": "Return JSON"}],
+            "max_tokens": 64,
+            "output_config": {"format": {"type": "json_schema", "schema": copy.deepcopy(SCHEMA)}, "effort": "low"},
+        },
     }[protocol]
 
 

@@ -14,8 +14,11 @@ from protoverta.streaming import StreamDecoder, StreamError
 
 ROUTES = [(a, b) for a in ("chat", "messages", "responses") for b in ("chat", "messages", "responses") if a != b]
 UNICODE = st.text(st.characters(blacklist_categories=("Cs",)), min_size=1, max_size=60)
-JSON = st.recursive(st.none() | st.booleans() | st.integers(min_value=-(2**63), max_value=2**63 - 1) | UNICODE,
-                    lambda child: st.lists(child, max_size=4) | st.dictionaries(UNICODE, child, max_size=4), max_leaves=12)
+JSON = st.recursive(
+    st.none() | st.booleans() | st.integers(min_value=-(2**63), max_value=2**63 - 1) | UNICODE,
+    lambda child: st.lists(child, max_size=4) | st.dictionaries(UNICODE, child, max_size=4),
+    max_leaves=12,
+)
 ARGUMENTS = st.dictionaries(UNICODE, JSON, max_size=5)
 PARTITIONS = st.lists(st.integers(min_value=0, max_value=65535), max_size=80)
 PROPERTY = settings(max_examples=50, deadline=None, derandomize=True, database=None)
@@ -28,6 +31,7 @@ def chunks(raw, cuts):
 
 def wire(source, text, arguments):
     original = json.dumps(CALLS[0][2], ensure_ascii=False)
+
     def replace(value):
         if isinstance(value, list):
             return [replace(item) for item in value]
@@ -38,8 +42,11 @@ def wire(source, text, arguments):
         if value == original:
             return json.dumps(arguments, ensure_ascii=False)
         return value
-    return b"".join(encode_sse(event.event, json.dumps(replace(json.loads(event.data)), ensure_ascii=False) if event.data != "[DONE]" else event.data)
-                    for event in SSEParser().feed(source_wire(source)))
+
+    return b"".join(
+        encode_sse(event.event, json.dumps(replace(json.loads(event.data)), ensure_ascii=False) if event.data != "[DONE]" else event.data)
+        for event in SSEParser().feed(source_wire(source))
+    )
 
 
 def translate(raw, source, target, cuts):
@@ -58,9 +65,13 @@ def semantics(raw, source):
             calls[delta.index] = [delta.call_id, delta.name, ""]
         elif delta.kind == "tool_delta":
             calls[delta.index][2] += delta.text
-    return ("".join(delta.text for delta in deltas if delta.kind == "text"),
-            [(identifier, name, json.loads(arguments)) for identifier, name, arguments in calls.values()],
-            deltas[-1].reason, deltas[-1].input_tokens, deltas[-1].output_tokens)
+    return (
+        "".join(delta.text for delta in deltas if delta.kind == "text"),
+        [(identifier, name, json.loads(arguments)) for identifier, name, arguments in calls.values()],
+        deltas[-1].reason,
+        deltas[-1].input_tokens,
+        deltas[-1].output_tokens,
+    )
 
 
 @pytest.mark.parametrize(("source", "target"), ROUTES)
@@ -107,8 +118,11 @@ def test_invalid_tool_json_never_commits_success(source, target, cuts, text):
         if isinstance(value, dict):
             return {key: '{"x":' if key in ("arguments", "partial_json") and isinstance(item, str) else corrupt(item) for key, item in value.items()}
         return value
-    raw = b"".join(encode_sse(event.event, json.dumps(corrupt(json.loads(event.data))) if event.data != "[DONE]" else event.data)
-                    for event in SSEParser().feed(wire(source, text, {})))
+
+    raw = b"".join(
+        encode_sse(event.event, json.dumps(corrupt(json.loads(event.data))) if event.data != "[DONE]" else event.data)
+        for event in SSEParser().feed(wire(source, text, {}))
+    )
     pipe = StreamTranscoder(source, target, messages_usage_policy="deferred")
     output = bytearray()
     with pytest.raises(StreamError):
