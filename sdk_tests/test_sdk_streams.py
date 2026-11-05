@@ -3,7 +3,6 @@
 import io
 import json
 import threading
-import time
 from contextlib import contextmanager
 from http.server import ThreadingHTTPServer
 
@@ -206,18 +205,24 @@ def test_official_sdk_accepts_post_payload_keepalives_before_verified_eof(monkey
     original_read = Fragmented.read1
     original_writer = gateway.StreamHeartbeatWriter
     keepalives = []
+    keepalive_sent = threading.Event()
 
     def delayed_eof(self, size):
         raw = original_read(self, size)
         if not raw:
-            time.sleep(0.12)  # Finite trusted fixture, no provider/network I/O.
+            # Hold EOF until one keepalive is on the wire. A fixed sleep raced
+            # the 15.6 ms Windows monotonic clock on Python < 3.13. The bound
+            # keeps a missing heartbeat a failure; no provider/network I/O.
+            keepalive_sent.wait(2.0)
         return raw
 
     def writer(send, *args, **kwargs):
         def record(raw, timeout):
-            if raw == b": protoverta keepalive\n\n" or raw == b'event: ping\ndata: {"type":"ping"}\n\n':
-                keepalives.append(True)
+            keepalive = raw == b": protoverta keepalive\n\n" or raw == b'event: ping\ndata: {"type":"ping"}\n\n'
             send(raw, timeout)
+            if keepalive:
+                keepalives.append(True)
+                keepalive_sent.set()
         return original_writer(record, *args, **kwargs)
 
     monkeypatch.setattr(Fragmented, "read1", delayed_eof)
