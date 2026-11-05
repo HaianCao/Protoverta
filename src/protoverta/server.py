@@ -84,7 +84,7 @@ class GatewayConfig:
     upstream_api_key: str = field(repr=False)
     inbound_token: str = field(repr=False)
     auth_style: str = "bearer"
-    timeout: float = 120.0
+    timeout: float = 300.0
     max_body_bytes: int = 8 * 1024 * 1024
     client_profile: str = "strict"
     default_max_output_tokens: int | None = None
@@ -97,8 +97,8 @@ class GatewayConfig:
     public_reasoning: bool = False
     tool_names: str | None = None
     max_concurrent_requests: int = 16
-    total_timeout: float = 600.0
-    progress_timeout: float = 120.0
+    total_timeout: float = 3600.0
+    progress_timeout: float = 300.0
     max_stream_bytes: int = 32 * 1024 * 1024
     max_stream_items: int = 1024
     max_tool_argument_bytes: int = 8 * 1024 * 1024
@@ -524,6 +524,12 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                     or "length" in getattr(decoder, "finish_reasons", {}).values()
                     or getattr(decoder, "truncated", False)
                 )
+                if getattr(decoder, "upstream_error", False):
+                    # A native upstream failure event was forwarded verbatim;
+                    # the request did not succeed even though HTTP said 200.
+                    self._trace.outcome = "upstream_http"
+                    self._trace.phase = "upstream"
+                    return
                 self._trace.outcome = "truncated_output" if stream_truncated else "success"
                 self._trace.phase = "stream"
                 details = getattr(decoder, "usage_details", {})

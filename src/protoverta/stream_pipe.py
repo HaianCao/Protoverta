@@ -211,6 +211,31 @@ class _LifecycleValidator:
         self.stop_reason = False
         self.saw_trailing_done = False
         self.truncated = False
+        # An upstream-reported failure in the client's own protocol. It is
+        # forwarded verbatim (not replaced by a gateway error) and ends the
+        # stream; only that protocol's own failure epilogue may follow it.
+        self.upstream_error = False
+
+    def _upstream_failure(self, body: dict, kind: str | None) -> None:
+        if self.protocol == Protocol.RESPONSES:
+            if "sequence_number" in body:
+                sequence = self._index(body, "sequence_number")
+                if sequence <= self.sequence:
+                    raise StreamError("Responses sequence_number did not increase")
+                self.sequence = sequence
+            if kind == "response.failed":
+                response = body.get("response")
+                if not self.started or not isinstance(response, dict) or response.get("status") != "failed":
+                    raise StreamError("Responses failure event disagrees with lifecycle")
+                self.ended = True
+            elif self.upstream_error:
+                raise StreamError("duplicate upstream Responses error event")
+        else:
+            if not isinstance(body.get("error"), dict):
+                raise StreamError("upstream stream error has no error object")
+            # Messages has no epilogue after `error`; Chat may end with [DONE].
+            self.ended = self.protocol == Protocol.MESSAGES
+        self.upstream_error = True
 
     def _index(self, body: dict, field: str) -> int:
         value = body.get(field)
@@ -225,6 +250,9 @@ class _LifecycleValidator:
                 return
             raise StreamError("event after stream completion")
         if self.protocol == Protocol.CHAT and event.data == "[DONE]":
+            if self.upstream_error:
+                self.ended = True
+                return
             if not self.started or not self.choices or self.choices != self.finished_choices:
                 raise StreamError("Chat stream ended before all choices finished")
             self.ended = True
@@ -235,8 +263,15 @@ class _LifecycleValidator:
             raise StreamError("native stream event is not valid JSON") from exc
         if not isinstance(body, dict):
             raise StreamError("native stream event must be an object")
-        if event.event == "error" or body.get("type") == "error" or body.get("error"):
-            raise StreamError("upstream stream reported an error")
+        kind = body.get("type")
+        if event.event == "error" or kind == "error" or self.protocol != Protocol.RESPONSES and body.get("error") is not None:
+            self._upstream_failure(body, "error")
+            return
+        if self.protocol == Protocol.RESPONSES and kind == "response.failed" and event.event in {"message", kind}:
+            self._upstream_failure(body, kind)
+            return
+        if self.upstream_error:
+            raise StreamError("event after an upstream stream error")
         if self.protocol == Protocol.CHAT:
             choices = body.get("choices")
             if not isinstance(choices, list):
@@ -267,7 +302,6 @@ class _LifecycleValidator:
                         self.truncated = True
             self.started = True
             return
-        kind = body.get("type")
         if not isinstance(kind, str) or event.event not in {"message", kind}:
             raise StreamError("native event/data type mismatch")
         if self.protocol == Protocol.MESSAGES:
@@ -337,11 +371,9 @@ class _LifecycleValidator:
             ):
                 self.truncated = True
             self.ended = True
-        elif kind == "response.failed":
-            raise StreamError("upstream Responses stream failed")
 
     def finish(self) -> None:
-        if not self.ended:
+        if not self.ended and not self.upstream_error:
             raise StreamError("stream ended before its terminal event")
 
 

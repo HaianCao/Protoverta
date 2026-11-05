@@ -67,14 +67,14 @@ active authenticated requests per gateway. Excess requests receive 503 with
 failure or disconnect. This is local concurrency control, not a provider RPM/TPM
 rate limiter and not a global limit across gateway processes.
 
-`--timeout` (Python: `timeout`) defaults to 120 seconds and bounds socket I/O,
+`--timeout` (Python: `timeout`) defaults to 300 seconds and bounds socket I/O,
 including client body reads. It is **not a total generation or semantic-progress
 deadline**. Incomplete client body reads time out with 408. Limits must be finite
 and positive; no timeout, sandbox, privilege or real user installation is altered
 by the test harnesses.
 
-Separate upstream budgets are now available: `--total-timeout` (600 seconds)
-and `--progress-timeout` (120 seconds). The former never resets; the latter
+Separate upstream budgets are now available: `--total-timeout` (3600 seconds)
+and `--progress-timeout` (300 seconds). The former never resets; the latter
 resets for content/tool-argument progress, not pings, usage or repeated function
 metadata. Deadlines cover header/body reads in the default HTTP(S) transport,
 including slow-drip headers/JSON bodies, HTTP chunk-size lines, chunk terminators
@@ -83,6 +83,23 @@ a shorter socket I/O timeout keeps its transport classification. Connection esta
 smaller remaining socket budget; OS DNS resolution is not forcibly cancellable.
 Custom injected transports must implement bounded I/O themselves; checks around
 their reads cannot interrupt arbitrary blocking Python callbacks.
+
+The defaults are deliberately no stricter than the clients they serve: Codex
+CLI's per-provider `stream_idle_timeout_ms` and Claude Code's streaming body idle
+timeout are both five minutes, and neither bounds a whole stream. Hidden
+reasoning can stay silent for minutes before the first visible delta, and long
+outputs on slow providers can exceed ten minutes. The total budget stays finite;
+shared-admission leases therefore last `total_timeout + timeout + 5` seconds.
+
+Native routes (same protocol in and out) forward an upstream-reported stream
+failure verbatim instead of replacing it with a gateway error: a Messages
+`error` event, a Responses `error` or `response.failed` event, or a Chat chunk
+with an `error` object. Clients keep the provider's own classification, such as
+`overloaded_error`, `rate_limit_error` or `context_length_exceeded`. Only that
+protocol's own epilogue may follow (Responses `response.failed` after `error`,
+Chat `[DONE]`); anything else is rejected as an invalid stream. Translated routes
+still report a gateway `invalid_stream` failure, because the upstream error
+envelope cannot be carried into another protocol verbatim.
 
 `--max-stream-bytes` (32 MiB), `--max-stream-items` (1024), and
 `--max-tool-argument-bytes` (8 MiB) bound cumulative upstream wire data, logical

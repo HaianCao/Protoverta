@@ -279,7 +279,7 @@ def test_client_disconnect_stops_upstream_stream_processing(disconnect):
 
     class Connection:
         def settimeout(self, seconds):
-            assert 0 < seconds <= 120
+            assert 0 < seconds <= config.timeout
 
     config = GatewayConfig(Protocol.MESSAGES, "https://example.com/v1", "key", "local", "x-api-key")
     handler_type = make_handler(config)
