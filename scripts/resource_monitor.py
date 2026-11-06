@@ -72,10 +72,15 @@ class ResourceMonitor:
             "sample_capacity": self.samples.maxlen,
             "retained_thread_delta": last["threads"] - first["threads"],
             "retained_handle_delta": last["handles_or_fds"] - first["handles_or_fds"],
+            # Windows allocates a fixed set of handles during the first seconds
+            # of load (2026-11-06: +20 at 60 s, +20 at 120 s, +16 at 300 s,
+            # i.e. not growing). Like RSS, judge retention after warm-up so a
+            # growing leak still fails while one-time allocation does not.
+            "warm_handle_growth": last["handles_or_fds"] - warm["handles_or_fds"],
             "retained_tcp_delta": last["tcp_connections"] - first["tcp_connections"],
             "policy_passed": last["rss_bytes"] - warm["rss_bytes"] <= 64 * 1024 * 1024
             and last["threads"] - first["threads"] <= 2
-            and last["handles_or_fds"] - first["handles_or_fds"] <= 4
+            and last["handles_or_fds"] - warm["handles_or_fds"] <= 4
             and last["tcp_connections"] <= first["tcp_connections"],
-            "policy": "warm RSS growth <=64 MiB; retained threads <=2, handles/fds <=4, TCP <=baseline; bounded-run observation only",
+            "policy": "warm RSS growth <=64 MiB; warm handle/fd growth <=4; retained threads <=2, TCP <=baseline; bounded-run observation only",
         }

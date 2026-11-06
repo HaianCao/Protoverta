@@ -38,8 +38,9 @@ Kiểm tra ít nhất:
   không tạo completed giả; đây không phải upstream thành công.
 - `opened=closed`, `active_after=0`, `lifetime_threads_after=0`.
 - Resource counters khả dụng và `policy_passed=true`: RSS sau warmup tăng không
-  quá 64 MiB, thread giữ lại không quá 2, handle/fd không quá 4, TCP không vượt
-  baseline. Đây là ngưỡng quan sát, không phải bằng chứng không có mọi memory leak.
+  quá 64 MiB, handle/fd sau warmup tăng không quá 4 (cấp phát một lần lúc mới
+  chạy tải được bỏ qua; 2026-11-06 Windows: +16..20 cố định ở 60/120/300 s), thread
+  giữ lại không quá 2, TCP không vượt baseline. Đây là ngưỡng quan sát, không phải bằng chứng không có mọi memory leak.
 
 Bài này giữ hai server gateway đồng thời, dùng key/tag tổng hợp khác nhau,
 request JSON/SSE, client ngắt và stream thiếu kết thúc. Nó chỉ chạy Chat upstream

@@ -22,9 +22,12 @@ class FakeThread:
         return self.alive
 
 
-def monitor(monkeypatch, clock, rss):
+def monitor(monkeypatch, clock, rss, handles=lambda second: 10):
     process = SimpleNamespace(
-        memory_info=lambda: SimpleNamespace(rss=rss(clock[0])), num_threads=lambda: 3, num_handles=lambda: 10, net_connections=lambda **kwargs: []
+        memory_info=lambda: SimpleNamespace(rss=rss(clock[0])),
+        num_threads=lambda: 3,
+        num_handles=lambda: handles(clock[0]),
+        net_connections=lambda **kwargs: [],
     )
     monkeypatch.setitem(sys.modules, "psutil", SimpleNamespace(Process=lambda: process))
     monkeypatch.setattr(resource_monitor.threading, "Thread", FakeThread)
@@ -82,6 +85,27 @@ def test_terminal_growth_after_old_sample_limit_fails_resource_policy(monkeypatc
     result = sampler.finish()
     assert result["available"] and not result["policy_passed"]
     assert result["after"]["rss_bytes"] == 100 * 1024 * 1024
+
+
+def _run_handles(monkeypatch, handles, duration=300):
+    clock = [0]
+    sampler = monitor(monkeypatch, clock, lambda second: 1024 * 1024, handles)
+    for second in range(1, duration):
+        clock[0] = second
+        sampler.sample()
+    clock[0] = duration
+    return sampler.finish()
+
+
+def test_one_time_handle_allocation_during_warmup_passes(monkeypatch):
+    # Observed on Windows: +16..20 handles in the first seconds, then flat.
+    result = _run_handles(monkeypatch, lambda second: 10 if second == 0 else 30)
+    assert result["policy_passed"] and result["retained_handle_delta"] == 20 and result["warm_handle_growth"] == 0
+
+
+def test_handle_growth_after_warmup_still_fails(monkeypatch):
+    result = _run_handles(monkeypatch, lambda second: 10 + second // 20)
+    assert not result["policy_passed"] and result["warm_handle_growth"] > 4
 
 
 def test_failed_sampler_shutdown_does_not_claim_resource_success_or_sample_concurrently(monkeypatch):
