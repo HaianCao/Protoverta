@@ -29,6 +29,13 @@ class AdmissionPolicyError(ValueError):
     pass
 
 
+# Each transaction opens a connection and (in the default rollback-journal
+# mode) creates and deletes a journal file. On Windows, file scanners can hold
+# those briefly; a 1 s wait rejected healthy requests on CI runners. Contention
+# beyond this bound still fails closed with AdmissionStorageError.
+STORAGE_WAIT_SECONDS = 5.0
+
+
 class AdmissionStorageError(RuntimeError):
     """Local budget storage failed; never classify this as upstream transport."""
 
@@ -62,7 +69,7 @@ class SharedAdmission:
 
     def _connect(self) -> sqlite3.Connection:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(self.path, timeout=1, isolation_level=None)
+        connection = sqlite3.connect(self.path, timeout=STORAGE_WAIT_SECONDS, isolation_level=None)
         try:
             connection.execute("CREATE TABLE IF NOT EXISTS budgets (scope TEXT PRIMARY KEY, requests INTEGER, window REAL, concurrency INTEGER, cooldown REAL)")
             connection.execute("CREATE TABLE IF NOT EXISTS attempts (id TEXT PRIMARY KEY, scope TEXT, started REAL, active_until REAL)")
@@ -79,7 +86,7 @@ class SharedAdmission:
         # Serialize local writers BEFORE SQLite's busy wait. Several handler
         # threads spinning on independent connections can starve each other.
         # Other processes remain coordinated by SQLite; contention fails closed.
-        if not self._local_lock.acquire(timeout=1):
+        if not self._local_lock.acquire(timeout=STORAGE_WAIT_SECONDS):
             raise AdmissionStorageError("Shared provider budget storage is unavailable.")
         try:
             with self._database_transaction() as connection:
