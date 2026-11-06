@@ -3,6 +3,7 @@
 import base64
 import binascii
 from dataclasses import dataclass
+from typing import Any
 
 from .errors import ConversionError
 
@@ -12,7 +13,7 @@ class PDF:
     data: str
     filename: str | None = None
 
-    def encode(self, target):
+    def encode(self, target: str) -> dict[str, Any]:
         if target == "messages":
             if self.filename is not None:
                 raise ConversionError("PDF filename has no equivalent Messages filename field")
@@ -23,7 +24,7 @@ class PDF:
         return {"type": "input_file", "file_data": value, **({"filename": self.filename} if self.filename else {})}
 
 
-def decode_pdf(block, source):
+def decode_pdf(block: Any, source: str) -> PDF:
     if not isinstance(block, dict):
         raise ConversionError("PDF input must be an object")
     filename = None

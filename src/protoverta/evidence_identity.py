@@ -4,10 +4,11 @@ import hashlib
 import json
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 
 @lru_cache(maxsize=1)
-def core_fingerprint():
+def core_fingerprint() -> str:
     digest = hashlib.sha256()
     for path in sorted(Path(__file__).parent.glob("*.py")):
         digest.update(path.name.encode())
@@ -16,7 +17,7 @@ def core_fingerprint():
     return digest.hexdigest()
 
 
-def route_identity(config):
+def route_identity(config: Any) -> str:
     body = {
         "core": core_fingerprint(),
         "provider_profiles": config.provider_profiles.fingerprint() if config.provider_profiles else None,
@@ -28,5 +29,5 @@ def route_identity(config):
     return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
-def evidence_options(config):
+def evidence_options(config: Any) -> dict[str, Any]:
     return {"current_identity": route_identity(config) if config.require_current_evidence else None, "max_age_days": config.evidence_max_age_days}

@@ -1,9 +1,11 @@
 """Unsigned public reasoning text only; never summaries or opaque state."""
 
+from typing import Any
+
 from .errors import ConversionError
 
 
-def response_reasoning(item: dict, *, initial: bool = False) -> str:
+def response_reasoning(item: dict[str, Any], *, initial: bool = False) -> str:
     if (
         set(item) - {"type", "id", "status", "summary", "content", "encrypted_content"}
         or item.get("encrypted_content") is not None
@@ -21,11 +23,12 @@ def response_reasoning(item: dict, *, initial: bool = False) -> str:
     part = content[0]
     if not isinstance(part, dict) or set(part) != {"type", "text"} or part.get("type") != "reasoning_text" or not isinstance(part.get("text"), str):
         raise ConversionError("unsupported public reasoning content")
-    return part["text"]
+    text: str = part["text"]
+    return text
 
 
-def reasoning_item(text: str, *, identifier: str | None = None, status: str = "completed") -> dict:
-    result = {"type": "reasoning", "summary": [], "content": [{"type": "reasoning_text", "text": text}], "status": status}
+def reasoning_item(text: str, *, identifier: str | None = None, status: str = "completed") -> dict[str, Any]:
+    result: dict[str, Any] = {"type": "reasoning", "summary": [], "content": [{"type": "reasoning_text", "text": text}], "status": status}
     if identifier is not None:
         result["id"] = identifier
     return result

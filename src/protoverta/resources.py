@@ -32,14 +32,30 @@ class DeadlineInput(io.RawIOBase):
     header to live forever. BufferedReader must wrap this, not the other way round.
     """
 
-    def __init__(self, raw, connection, budget):
+    def __init__(self, raw, connection, budget, *, header_deadline=None):
         self.raw, self.connection, self.budget = raw, connection, budget
+        # Absolute clock time by which the request line and headers must have
+        # arrived; cleared once they are parsed. Unauthenticated, idle or
+        # trickling connections must not hold a gateway slot for a whole
+        # request budget.
+        self.header_deadline = header_deadline
+
+    def _header_limit(self):
+        if self.header_deadline is None:
+            return None
+        remaining = self.header_deadline - self.budget.clock()
+        if remaining <= 0:
+            raise TimeoutError("Local HTTP request headers timed out.")
+        return remaining
 
     def readable(self):
         return True
 
     def readinto(self, buffer):
         limit = self.budget.remaining()
+        header_limit = self._header_limit()
+        if header_limit is not None and header_limit < limit:
+            limit = header_limit
         # Do not enter an uninterruptible makefile recv while the peer is
         # silent. Windows can retain that read after shutdown with I/O refs.
         # Poll cancellation without resetting the original per-read timeout.

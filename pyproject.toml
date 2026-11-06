@@ -43,10 +43,21 @@ python_version = "3.11"
 mypy_path = "$MYPY_CONFIG_FILE_DIR/src"
 files = [
   "src/protoverta/admission.py",
+  "src/protoverta/automatic_reasoning.py",
+  "src/protoverta/custom_tools.py",
+  "src/protoverta/documents.py",
+  "src/protoverta/errors.py",
+  "src/protoverta/evidence_identity.py",
   "src/protoverta/failures.py",
+  "src/protoverta/harness_controls.py",
+  "src/protoverta/json_wire.py",
   "src/protoverta/lifetime.py",
   "src/protoverta/observability.py",
+  "src/protoverta/reasoning.py",
+  "src/protoverta/response_context.py",
   "src/protoverta/retry.py",
+  "src/protoverta/routing.py",
+  "src/protoverta/selection_status.py",
   "src/protoverta/sse.py",
 ]
 strict = true

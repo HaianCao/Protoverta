@@ -1,0 +1,148 @@
+# Provider compatibility and known limits
+
+Evidence date: **2026-11-06**. Clients: Claude Code **2.1.318** (ClaudApter) and
+Codex CLI **0.167.0** (CodexApter), Protoverta built from source. "Tool loop"
+means a real model call, a real client tool execution and a second model call
+that must use the tool result. Provider behaviour changes without notice;
+re-check with the live probes below before relying on a row.
+
+This page is written for the user documentation site. Each provider section
+has the same headings: endpoints, tested models, recommended settings, limits.
+
+## Summary matrix
+
+| Provider | Model | Upstream protocol | Claude Code (ClaudApter) | Codex (CodexApter) |
+| --- | --- | --- | --- | --- |
+| OpenRouter | `stealth/crouton-alpha` | Chat | Tool loop passed | Tool loop passed |
+| OpenRouter | `nvidia/nemotron-3-ultra-550b-a55b:free` | Responses / Messages | Tool loop passed (Responses) | Tool loop passed (Messages) |
+| NVIDIA NIM | `z-ai/glm-5.3-flash` | Chat | Tool loop passed | Gateway tool loop passed |
+| NVIDIA NIM | `deepseek-ai/deepseek-v4.1-flash` | Chat | Tool loop passed | Works with effort `low`/`high`; `medium` rejected by provider |
+| NVIDIA NIM | `minimaxai/minimax-m3.1-flash` | Chat | Gateway tool loop passed | Tool loop passed |
+| TokenHarbor | `deepseek-v4.1-flash:free` | Chat | Tool loop passed | Tool loop passed |
+| AgentRouter | `gpt-5.6-sol` | Responses (direct only) | Not usable through the gateway | Direct mode answered correctly |
+
+"Gateway tool loop passed" rows were verified with a scripted client of the
+same wire shape (two-turn tool loop through the real provider), not the CLI.
+
+All translated rows use the launchers' automatic reasoning policy (see
+[reasoning](reasoning.md)): the model keeps its default reasoning and reasoning
+output the client cannot represent is omitted, never fabricated.
+
+## Behaviour that applies to every provider
+
+- **Reasoning is usually on and often cannot be turned off.** A "reasoning off"
+  request is not portable: some models reject it (HTTP 400), others ignore it.
+  The automatic policy therefore does not send one. Choose an explicit
+  `disabled` reasoning policy only for a model known to honour it.
+- **Hidden reasoning still costs tokens.** Omitted reasoning is billed by the
+  provider and counted in output usage, but is not shown in Claude Code.
+- **Context window and output size are not discovered.** Claude Code and Codex
+  assume their own sizes for unknown model IDs. Set the provider's model limits
+  in the setup page (ClaudApter: context window and max output; CodexApter:
+  context window; Messages providers in CodexApter also have an output limit,
+  default 16384).
+- **Errors from the provider are passed through.** If the provider reports an
+  error inside an HTTP 200 stream, the client receives the provider's message
+  with its 4xx status (non-retryable) instead of a generic stream error.
+- **Strict stream contract.** Non-standard Chat streams are rejected; see
+  [errors](errors.md#chat-stream-variants-that-translated-routes-reject).
+
+## OpenRouter
+
+- **Endpoints:** `https://openrouter.ai/api/v1` with `/chat/completions`,
+  `/responses` and `/messages`. Bearer authentication.
+- **Tested models:** `stealth/crouton-alpha` (Chat), `nvidia/nemotron-3-ultra-550b-a55b:free`
+  (Chat, Responses, Messages).
+- **Recommended:** ClaudApter → protocol `messages` (native) or `responses`/`chat`
+  in gateway mode with automatic reasoning. CodexApter → `responses` (native) or
+  `chat`/`messages` in gateway mode with automatic reasoning.
+- **Limits:**
+  - `stealth/crouton-alpha` has **mandatory reasoning**: `reasoning_effort: none`
+    and `reasoning: {enabled: false}` both return HTTP 400 "Reasoning is
+    mandatory for this endpoint and cannot be disabled". Do not select the
+    `disabled` or `openrouter_disabled` policy for it.
+  - Chat streams carry reasoning as `reasoning` plus structured
+    `reasoning_details`; the details may contain provider-specific or encrypted
+    data and are always omitted on translated routes. Unsigned `reasoning` text
+    is kept for Codex as Responses `reasoning_text`.
+  - OpenRouter repeats the finished choice in a usage postlude; this is
+    accepted. See also [OpenRouter conformance](openrouter.md).
+  - Free (`:free`) models are rate limited by OpenRouter; expect HTTP 429 with
+    `Retry-After` under load.
+
+## NVIDIA NIM (integrate.api.nvidia.com)
+
+- **Endpoint:** `https://integrate.api.nvidia.com/v1/chat/completions` only
+  (Chat). Bearer authentication.
+- **Tested models:** `minimaxai/minimax-m3.1-flash`,
+  `deepseek-ai/deepseek-v4.1-flash`, `z-ai/glm-5.3-flash`.
+- **Recommended:** gateway mode, protocol `chat`, automatic reasoning.
+- **Limits:**
+  - `minimax-m3.1-flash` and `glm-5.3-flash` **ignore** `reasoning_effort: none`
+    and still stream `reasoning_content`.
+  - `deepseek-v4.1-flash` honours `none`, `low` and `high` but answers
+    `reasoning_effort: medium` with HTTP 200 followed by an error event
+    ("Invalid request"). In Codex choose `low` or `high` effort for this model;
+    with `medium` the request fails with that message (HTTP 400). A capability
+    registry record can declare the allowed efforts to reject `medium` before
+    any provider call.
+  - Free endpoints are rate limited per model; HTTP 429 ("Too Many Requests")
+    was observed after a few quick requests to `minimax-m3.1-flash`.
+  - Image inputs follow each model's own support; only text and tools were
+    tested here.
+
+## TokenHarbor
+
+- **Endpoint:** `https://tokenharbor.ai/v1/chat/completions` (Chat). Bearer
+  authentication.
+- **Tested model:** `deepseek-v4.1-flash:free`.
+- **Recommended:** gateway mode, protocol `chat`, automatic reasoning.
+- **Limits:**
+  - Streams `reasoning_content`; honours `reasoning_effort: none`. Standard
+    OpenAI stream shape with final usage and `[DONE]`.
+  - The reported model name drops the `:free` suffix (`deepseek-v4.1-flash`);
+    this is accepted.
+  - Only the Chat endpoint was tested.
+
+## AgentRouter
+
+- **Endpoint:** `https://agentrouter.org/v1` (Responses and Chat).
+- **Tested model:** `gpt-5.6-sol`.
+- **Limits:**
+  - AgentRouter accepts only its supported official clients. Any other client
+    (including the Protoverta gateway) receives HTTP 401 "unauthorized client
+    detected". The gateway does not imitate another client, so **gateway mode,
+    Chat Completions and ClaudApter cannot be used with AgentRouter**.
+  - **Supported setup:** CodexApter, protocol `responses`, execution mode
+    `direct` (Codex talks to AgentRouter itself). A live direct run answered
+    correctly; tool execution in that run was not independently verified.
+
+## Token logprobs (live, 2026-11-06)
+
+Requested text logprobs (`include: ["message.output_text.logprobs"]`, two
+alternatives) through a Chat upstream are **not certified for any tested
+provider**; the gateway rejects data it cannot verify rather than repairing it.
+
+| Provider / model | Observation | Result |
+| --- | --- | --- |
+| TokenHarbor `deepseek-v4.1-flash:free` | Returns logprobs, but alternative-token `bytes` are Unicode code points (`[22909, 30340]` for 好的), not UTF-8 bytes | Rejected: invalid byte arrays |
+| NVIDIA NIM `deepseek-ai/deepseek-v4.1-flash` | No progress for 90 s when logprobs are requested (JSON and SSE) | `progress_timeout` |
+| NVIDIA NIM `minimaxai/minimax-m3.1-flash` | No first byte within the probe's 15 s I/O timeout | Not established |
+| OpenRouter `stealth/crouton-alpha` | HTTP 400 for the logprob request | Unsupported |
+| OpenRouter `nemotron`, NIM `glm` (2026-11-04) | No records / reasoning-only records | Not certified |
+
+Use `scripts/probe_logprobs.py --allow-live --timeout 90 --upstream-reasoning disabled`
+to re-check a provider.
+
+## Re-checking a provider
+
+```powershell
+# Real CLI tool loop through the source launcher (may incur API charges)
+python scripts/probe_clients.py --allow-live --tool-loop --source-reasoning auto `
+  --client claude --upstream chat --model MODEL_ID `
+  --key-env KEY_VARIABLE --base-url https://provider.example/v1 `
+  --adapter-source ../free-claude-cli
+```
+
+Use `--client codex --adapter-source ../free-codex-cli` for Codex. Results are
+evidence for that provider, model, protocol, client version and date only.

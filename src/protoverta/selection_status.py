@@ -1,16 +1,18 @@
 """Conservative UI status for a text-stream route, without network or writes."""
 
 from dataclasses import fields
+from typing import Any
 
 from .capabilities import POLICY_VALUES
 from .core import Protocol
 
 
-def _count_status(protocol, overrides):
+def _count_status(protocol: Protocol | str, overrides: dict[str, Any] | None) -> tuple[str, str, str]:
     runtime = overrides or {}
     preflight = runtime.get("context_preflight", "off") or "off"
     count_mode = runtime.get("token_count_mode", "off") or "off"
     protocol = Protocol(protocol)
+    count_category: str
     if count_mode == "native":
         count_category = "exact" if protocol in (Protocol.MESSAGES, Protocol.RESPONSES) else "unavailable"
     elif count_mode == "estimate" or preflight in ("estimate", "reject_estimate"):
@@ -20,7 +22,17 @@ def _count_status(protocol, overrides):
     return preflight, count_mode, count_category
 
 
-def selection_status(registry, base_url, protocol, model, *, source_protocol, client_profile, overrides=None, freshness_required=False):
+def selection_status(
+    registry: Any,
+    base_url: str,
+    protocol: Protocol | str,
+    model: Any,
+    *,
+    source_protocol: Protocol | str,
+    client_profile: str,
+    overrides: dict[str, Any] | None = None,
+    freshness_required: bool = False,
+) -> dict[str, Any]:
     preflight, count_mode, count_category = _count_status(protocol, overrides)
     record = None
     if registry is not None and isinstance(model, str) and model:

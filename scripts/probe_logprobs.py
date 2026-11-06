@@ -71,15 +71,15 @@ def session(config, upstream_open):
         worker.join(5)
 
 
-def probe(base_url, model, key, *, streaming=False, upstream_open=None, upstream_reasoning="provider_default"):
+def probe(base_url, model, key, *, streaming=False, upstream_open=None, upstream_reasoning="provider_default", timeout=15, max_output_tokens=64):
     config = GatewayConfig(
         "chat",
         base_url,
         key,
         secrets.token_hex(32),
-        timeout=15,
-        total_timeout=30,
-        progress_timeout=20,
+        timeout=timeout,
+        total_timeout=max(30, timeout * 2),
+        progress_timeout=max(20, timeout),
         retry_attempts=1,
         max_body_bytes=LIMIT,
         max_stream_bytes=LIMIT,
@@ -88,7 +88,7 @@ def probe(base_url, model, key, *, streaming=False, upstream_open=None, upstream
     body = {
         "model": model,
         "input": "Reply with exactly OK.",
-        "max_output_tokens": 64,
+        "max_output_tokens": max_output_tokens,
         "include": ["message.output_text.logprobs"],
         "top_logprobs": 2,
         "stream": streaming,
@@ -114,7 +114,7 @@ def probe(base_url, model, key, *, streaming=False, upstream_open=None, upstream
             req = Request(
                 origin + "/v1/responses", json.dumps(body).encode(), {"Authorization": "Bearer " + config.inbound_token, "Content-Type": "application/json"}
             )
-            with build_opener(ProxyHandler({})).open(req, timeout=40) as response:
+            with build_opener(ProxyHandler({})).open(req, timeout=max(40, timeout * 3)) as response:
                 result["http_status"] = response.status
                 if not streaming:
                     raw = response.read(LIMIT + 1)
@@ -174,7 +174,9 @@ def main():
     parser.add_argument("--model", required=True)
     parser.add_argument("--key-env", required=True)
     parser.add_argument("--stream", action="store_true")
-    parser.add_argument("--upstream-reasoning", choices=("provider_default", "openrouter_disabled"), default="provider_default")
+    parser.add_argument("--upstream-reasoning", choices=("provider_default", "disabled", "openrouter_disabled"), default="provider_default")
+    parser.add_argument("--timeout", type=float, default=15, help="Socket I/O timeout; reasoning models may need longer before the first byte")
+    parser.add_argument("--max-output-tokens", type=int, default=64)
     parser.add_argument("--allow-live", action="store_true")
     args = parser.parse_args()
     if not args.allow_live:
@@ -182,7 +184,15 @@ def main():
     key = os.environ.get(args.key_env)
     if not key:
         parser.error("The selected key environment variable is empty")
-    result = probe(args.base_url, args.model, key, streaming=args.stream, upstream_reasoning=args.upstream_reasoning)
+    result = probe(
+        args.base_url,
+        args.model,
+        key,
+        streaming=args.stream,
+        upstream_reasoning=args.upstream_reasoning,
+        timeout=args.timeout,
+        max_output_tokens=args.max_output_tokens,
+    )
     print(json.dumps(result, indent=2))
     return 0 if result["passed"] else 1
 

@@ -2,11 +2,12 @@
 
 import copy
 import re
+from typing import Any
 
 from .errors import ConversionError
 
 
-def validate_openrouter(config):
+def validate_openrouter(config: Any) -> None:
     slug = config.openrouter_provider
     if slug is None:
         return
@@ -16,7 +17,7 @@ def validate_openrouter(config):
         raise ValueError("OpenRouter routing is certified only for its exact Chat API prefix")
 
 
-def apply_openrouter(body, provider, session_id):
+def apply_openrouter(body: dict[str, Any], provider: str | None, session_id: str) -> dict[str, Any]:
     if provider is None:
         return body
     if "provider" in body or "session_id" in body:

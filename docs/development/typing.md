@@ -21,6 +21,15 @@ broken import or syntax error does not count as successful rejection.
 - `observability.py`: fixed diagnostic records and observer interface.
 - `retry.py`: structural admission/budget/opener interfaces and retry results.
 - `sse.py`: incremental framing and event types.
+- Added 2026-11-06 (annotation-only changes, no behaviour change):
+  `automatic_reasoning.py`, `custom_tools.py`, `documents.py`, `errors.py`,
+  `evidence_identity.py`, `harness_controls.py`, `json_wire.py`, `reasoning.py`,
+  `response_context.py`, `routing.py`, `selection_status.py`.
+
+Not yet in scope (strict mypy, 2026-11-06): about 580 findings across the
+codecs and gateway, mostly missing annotations. Largest: `server.py` (96),
+`capabilities.py` (44), `resources.py` (43), `core.py` (41), `streaming.py` (35).
+They are tested behaviourally; extend the gate module by module.
 
 The baseline uses strict checking, unreachable-code diagnostics and no blanket
 missing-import suppression or `Any` replacement. `mypy_path` points to this

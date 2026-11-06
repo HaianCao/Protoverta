@@ -109,7 +109,9 @@ def test_concurrent_truncated_stream_churn_keeps_isolation_and_closes_resources(
 
         with ThreadPoolExecutor(6) as pool:
             list(pool.map(run, range(48)))
-    deadline = time.monotonic() + 3
+    # Monitor threads exit asynchronously; a loaded full-suite run can need more
+    # than a few seconds. The assertion below still requires full cleanup.
+    deadline = time.monotonic() + 10
     while time.monotonic() < deadline and any(thread.name in monitor_names and (thread.name, thread.ident) not in baseline for thread in threading.enumerate()):
         time.sleep(0.01)
     assert len(opened) == len(closed) == 48 and not active

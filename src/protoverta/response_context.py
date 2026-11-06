@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 from collections.abc import Callable
+from typing import Any
 
 POLICY_FIELDS = ("parallel_tool_calls", "tools", "tool_choice")
 CONTEXT_FIELDS = (
@@ -21,7 +22,7 @@ CONTEXT_FIELDS = (
 )
 
 
-def generated_response_metadata() -> dict:
+def generated_response_metadata() -> dict[str, Any]:
     """Facts for a new synchronous, stateless Responses envelope.
 
     JSON and SSE use the same contract. No implicit sampling, output format,
@@ -42,7 +43,7 @@ def generated_response_metadata() -> dict:
     }
 
 
-def bind_response_context(request: dict) -> Callable[[dict], dict]:
+def bind_response_context(request: dict[str, Any]) -> Callable[[dict[str, Any]], dict[str, Any]]:
     """Freeze portable Responses request metadata; never infer omitted policy.
 
     This checks metadata types, not upstream compliance or response provenance.
@@ -84,7 +85,7 @@ def bind_response_context(request: dict) -> Callable[[dict], dict]:
     return lambda result: restore_request_context(result, frozen)
 
 
-def restore_request_context(result: dict, request: dict) -> dict:
+def restore_request_context(result: dict[str, Any], request: dict[str, Any]) -> dict[str, Any]:
     """Apply only to translated output after request validation and name restore.
 
     A stream's created/completed snapshots must describe the same request. The

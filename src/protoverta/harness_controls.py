@@ -1,10 +1,12 @@
 """Narrow, explicit guards for verified harness control limitations."""
 
+from typing import Any
+
 from .errors import UnsupportedFeatureError
 from .streaming import UnsupportedStreamFeatureError
 
 
-def guard_codex_closed_resume(value, *, streaming=False):
+def guard_codex_closed_resume(value: Any, *, streaming: bool = False) -> None:
     """Do not let Codex 0.166 restore a B child using parent A's config."""
     if not isinstance(value, dict):
         return

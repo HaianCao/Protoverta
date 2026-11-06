@@ -184,7 +184,7 @@ python -m ruff check src tests sdk_tests scripts
 python scripts/check_types.py
 ```
 
-The strict type gate currently covers six runtime/boundary modules, not every
+The strict type gate currently covers seventeen runtime/boundary modules, not every
 codec or launcher. See [the typing scope](docs/development/typing.md).
 
 For independent official-SDK stream tests, install the optional `sdk-test` extra
@@ -202,7 +202,9 @@ python scripts/smoke_clients.py --client claude --upstream responses --tool-loop
 
 Use `--adapter-source PATH` to include a source launcher, or `--installed-adapter` to test a launcher installed in the active Python environment. These fixtures verify client/protocol interoperability, not a real provider's model capabilities.
 
-Provider checks and limits: [OpenRouter text/tool conformance](docs/compatibility/openrouter.md).
+Provider checks and limits: [tested providers and known limits](docs/compatibility/providers.md)
+(OpenRouter, NVIDIA NIM, TokenHarbor, AgentRouter) and
+[OpenRouter text/tool conformance](docs/compatibility/openrouter.md).
 Session replay checks and boundaries: [resume compatibility](docs/compatibility/resume.md).
 
 For an opt-in real OpenRouter text round trip through a source launcher, use

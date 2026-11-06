@@ -9,6 +9,7 @@ import math
 import secrets
 import socket
 import threading
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -67,6 +68,11 @@ from .tool_search import ClientToolSearchMap
 from .transport import DeadlineHTTPHandler, DeadlineHTTPSHandler
 
 STREAM_HEARTBEAT_INTERVAL = 15.0
+# Local clients send the request line and headers immediately.
+REQUEST_HEADER_TIMEOUT = 15.0
+_CAPACITY_RESPONSE = b"".join(
+    line + b"\r\n" for line in (b"HTTP/1.1 503 Service Unavailable", b"Retry-After: 1", b"Content-Length: 0", b"Connection: close", b"")
+)
 
 _PATHS = {
     "/v1/responses/compact": Protocol.RESPONSES,
@@ -324,7 +330,20 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
             if register is not None:
                 register(self.connection, self._budget)
             self.rfile.close()
-            self.rfile = io.BufferedReader(DeadlineInput(self.connection.makefile("rb", buffering=0), self.connection, self._budget))
+            self._deadline_input = DeadlineInput(
+                self.connection.makefile("rb", buffering=0),
+                self.connection,
+                self._budget,
+                header_deadline=self._budget.clock() + min(REQUEST_HEADER_TIMEOUT, config.timeout),
+            )
+            self.rfile = io.BufferedReader(self._deadline_input)
+
+        def parse_request(self):
+            parsed = super().parse_request()
+            if parsed:
+                # Headers are complete; the body follows the request budget.
+                self._deadline_input.header_deadline = None
+            return parsed
 
         def handle(self):
             try:
@@ -1280,6 +1299,8 @@ class GatewayHTTPServer(ThreadingHTTPServer):
 
     def __init__(self, address, handler):
         self._connections = threading.BoundedSemaphore(handler.connection_limit)
+        # Separate small bound for over-capacity replies; beyond it, close.
+        self._rejections = threading.BoundedSemaphore(8)
         self._active_clients = set()
         self._request_budgets = {}
         self._clients_changed = threading.Condition()
@@ -1288,7 +1309,12 @@ class GatewayHTTPServer(ThreadingHTTPServer):
 
     def process_request(self, request, client_address):
         if not self._connections.acquire(blocking=False):
-            self.shutdown_request(request)
+            # Tell the client to retry instead of resetting the connection,
+            # without blocking the accept loop.
+            if self._rejections.acquire(blocking=False):
+                threading.Thread(target=self._reject_over_capacity, args=(request,), name="protoverta-capacity-reply", daemon=True).start()
+            else:
+                self.shutdown_request(request)
             return
         with self._clients_changed:
             closing = self._closing
@@ -1303,6 +1329,32 @@ class GatewayHTTPServer(ThreadingHTTPServer):
         except BaseException:
             self._client_finished(request)
             raise
+
+    def _reject_over_capacity(self, request):
+        """Send 503, half-close, then drain briefly so close() does not reset.
+
+        Closing a socket with unread request bytes makes Windows send RST,
+        which can discard the reply the client has not read yet.
+        """
+        try:
+            request.settimeout(1)
+            request.sendall(_CAPACITY_RESPONSE)
+            request.shutdown(socket.SHUT_WR)
+            deadline = time.monotonic() + 1
+            drained = 0
+            while drained < 65536 and (remaining := deadline - time.monotonic()) > 0:
+                request.settimeout(remaining)
+                chunk = request.recv(4096)
+                if not chunk:
+                    break
+                drained += len(chunk)
+        except OSError:
+            pass
+        finally:
+            try:
+                request.close()
+            finally:
+                self._rejections.release()
 
     def _client_finished(self, request):
         self._connections.release()

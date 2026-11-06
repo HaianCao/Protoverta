@@ -1,15 +1,16 @@
 """Native custom-tool format mapping; never emulate grammar with functions."""
 
 from copy import deepcopy
+from typing import Any
 
 from .errors import ConversionError
 
 
-def custom_definition(value: dict, source: str) -> dict:
+def custom_definition(value: dict[str, Any], source: str) -> dict[str, Any]:
     allowed = {"name", "description", "format"} | ({"type"} if source == "responses" else set())
     if set(value) - allowed or not isinstance(value.get("name"), str):
         raise ConversionError("invalid custom tool definition")
-    result = {"type": "custom", "name": value["name"]}
+    result: dict[str, Any] = {"type": "custom", "name": value["name"]}
     if "description" in value:
         if not isinstance(value["description"], str):
             raise ConversionError("custom description must be a string")
@@ -41,7 +42,7 @@ def custom_definition(value: dict, source: str) -> dict:
     return result
 
 
-def encode_custom(value: dict, target: str) -> dict:
+def encode_custom(value: dict[str, Any], target: str) -> dict[str, Any]:
     result = deepcopy(value)
     if target == "responses":
         return result

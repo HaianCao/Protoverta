@@ -52,10 +52,9 @@ def test_header_deadline_and_connection_capacity_apply_before_authentication():
         time.sleep(0.04)
         with socket.create_connection(address, timeout=2) as second:
             second.sendall(b"GET / HTTP/1.0\r\n\r\n")
-            try:
-                assert second.recv(4096) == b""
-            except ConnectionError:
-                pass
+            # Over capacity: an immediate retryable 503, never a silent reset.
+            response = second.recv(4096)
+            assert response.startswith(b"HTTP/1.1 503") and b"Retry-After: 1" in response
         assert first.recv(4096) == b""
         assert not calls
         with socket.create_connection(address, timeout=2) as third:
