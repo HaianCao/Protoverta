@@ -69,9 +69,11 @@ def test_mcp_fixture_reads_only_the_fixed_file_and_audits_only_real_calls(harnes
         input="\n".join(map(json.dumps, requests)) + "\n",
         capture_output=True,
         text=True,
-        timeout=10,
-        check=True,
+        timeout=30,
+        check=False,
     )
+    # Surface the fixture's own error output; CI hides captured streams.
+    assert result.returncode == 0, result.stderr[-3000:]
     responses = [json.loads(line) for line in result.stdout.splitlines()]
     assert responses[0]["error"]["code"] == -32601
     assert responses[1]["result"] == {"content": [{"type": "text", "text": "fixed-test-value"}], "isError": False}

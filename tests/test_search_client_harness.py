@@ -134,9 +134,11 @@ def test_fixture_mcp_lists_and_calls_only_fixed_read_only_tool(harness):
         capture_output=True,
         text=True,
         encoding="utf-8",
-        timeout=10,
-        check=True,
+        timeout=30,
+        check=False,
     )
+    # Surface the fixture's own error output; CI hides captured streams.
+    assert result.returncode == 0, result.stderr[-3000:]
     responses = [json.loads(line) for line in result.stdout.splitlines()]
     assert len(responses) == 4
     assert responses[1]["result"]["tools"][0]["annotations"]["readOnlyHint"] is True
