@@ -97,6 +97,10 @@ class Terminal:
             pass  # Both owned jobs still enforce tree cleanup.
 
 
+# Native CLI releases this fixture was exercised with; extend after review.
+FIXTURE_VERSIONS = {"codex": {"codex-cli 0.166.0", "codex-cli 0.167.0"}, "claude": {"2.1.308 (Claude Code)", "2.1.318 (Claude Code)"}}
+
+
 def worker(client, source, report, workspace):
     from protoverta.core import Protocol
     from protoverta.server import gateway_session, make_handler
@@ -135,8 +139,8 @@ def worker(client, source, report, workspace):
         )
         config = config_module.Config(path=root / "adapter.toml")
         version = run_process([shutil.which(client), "--version"], env=env, cwd=root, timeout=3, text=True, encoding="utf-8")
-        expected_version = "codex-cli 0.166.0" if client == "codex" else "2.1.308 (Claude Code)"
-        if version.returncode or version.stdout.strip() != expected_version:
+        expected_versions = FIXTURE_VERSIONS[client]
+        if version.returncode or version.stdout.strip() not in expected_versions:
             raise ValueError("Model picker fixture requires its pinned native CLI version")
         provider = config_module.Provider(
             "fixture", "Synthetic provider", "http://127.0.0.1:9/v1", protocol="chat_completions" if client == "codex" else "chat", execution_mode="gateway"
@@ -287,7 +291,7 @@ def worker(client, source, report, workspace):
                         "defaults_unchanged": config.path.read_bytes() == before,
                         "alias_used": False,
                         "native_defaults_unchanged": native_before == native_defaults() if client == "claude" else None,
-                        "cli_version": expected_version,
+                        "cli_version": version.stdout.strip(),
                     }
                     if client == "claude":
                         result["passed"] = result["passed"] and result["native_defaults_unchanged"]

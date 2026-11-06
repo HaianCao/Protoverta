@@ -278,6 +278,16 @@ def _only(obj: dict[str, Any], allowed: set[str], label: str) -> None:
         raise ConversionError(f"{label}: unsupported fields: {', '.join(sorted(extras))}")
 
 
+# Legacy/optional Chat output fields some OpenAI-compatible servers always
+# emit. An explicit null carries no data, so it is equivalent to omission;
+# any non-null value is still rejected by the strict field checks.
+CHAT_NULLABLE_OUTPUT_FIELDS = frozenset({"function_call", "audio"})
+
+
+def _drop_null_legacy(message: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in message.items() if not (key in CHAT_NULLABLE_OUTPUT_FIELDS and value is None)}
+
+
 def _arguments(value: Any, label: str) -> str:
     raw = _string(value, label)
     try:
@@ -1189,7 +1199,7 @@ def _decode_result(body: dict[str, Any], source: Protocol, *, public_reasoning: 
         choice = _object(choices[0], "choice")
         if choice.get("logprobs") and not text_logprobs:
             raise ConversionError("Chat logprobs cannot be preserved")
-        msg = _object(choice.get("message"), "message")
+        msg = _drop_null_legacy(_object(choice.get("message"), "message"))
         _only(msg, {"role", "content", "tool_calls", "refusal", "annotations", "reasoning", "reasoning_content", "reasoning_details"}, "Chat response message")
         rejected_reasoning = ("reasoning", "reasoning_details") if public_reasoning else ("reasoning", "reasoning_content", "reasoning_details")
         if any(msg.get(key) not in (None, "", []) for key in rejected_reasoning):

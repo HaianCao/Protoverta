@@ -32,6 +32,10 @@ CHILD_DONE = "P04_CHILD_VERIFIED"
 DONE = "P04_PARENT_VERIFIED"
 
 
+# Native CLI releases this fixture was exercised with; extend after review.
+FIXTURE_VERSIONS = {"codex": {"codex-cli 0.166.0", "codex-cli 0.167.0"}, "claude": {"2.1.308 (Claude Code)", "2.1.318 (Claude Code)"}}
+
+
 def user_text(body, protocol):
     messages = body.get("input", []) if protocol == Protocol.RESPONSES else body.get("messages", [])
     result = []
@@ -211,8 +215,8 @@ def run(
         )
         version = original_process([executable, "--version"], cwd=directory, env=env, text=True, encoding="utf-8", errors="replace", timeout=3)
         cli_version = version.stdout.strip()
-        expected = "codex-cli 0.166.0" if client == "codex" else "2.1.308 (Claude Code)"
-        if version.returncode or (not inspect_only and cli_version != expected):
+        expected = FIXTURE_VERSIONS[client]
+        if version.returncode or (not inspect_only and cli_version not in expected):
             raise ValueError("Subagent fixture requires the documented CLI version; inspect a new version separately")
         codex_options = {
             "agents.enabled": True,

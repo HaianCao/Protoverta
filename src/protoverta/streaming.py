@@ -15,6 +15,7 @@ from .core import (
     Protocol,
     _arguments,
     _decode_usage,
+    _drop_null_legacy,
     _reported_service_tier,
     _validate_response_item,
 )
@@ -307,7 +308,7 @@ class StreamDecoder:
             raise StreamError("Chat choice arrived after finish_reason")
         if choice.get("index") != 0 or choice.get("logprobs") and not self.text_logprobs:
             raise StreamError("unsupported Chat choice index or logprobs")
-        delta = _obj(choice.get("delta"), "Chat delta")
+        delta = _drop_null_legacy(_obj(choice.get("delta"), "Chat delta"))
         for field, value in delta.items():
             if field == "reasoning_content" and self.public_reasoning:
                 if value is not None:
