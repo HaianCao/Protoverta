@@ -98,8 +98,26 @@ with an `error` object. Clients keep the provider's own classification, such as
 `overloaded_error`, `rate_limit_error` or `context_length_exceeded`. Only that
 protocol's own epilogue may follow (Responses `response.failed` after `error`,
 Chat `[DONE]`); anything else is rejected as an invalid stream. Translated routes
-still report a gateway `invalid_stream` failure, because the upstream error
-envelope cannot be carried into another protocol verbatim.
+cannot carry the upstream error envelope verbatim, so they report the provider's
+bounded, secret-redacted message with the provider's status (see
+[reasoning](reasoning.md#provider-errors-inside-a-stream)); malformed streams remain
+`invalid_stream`.
+
+### Chat stream variants that translated routes reject
+
+These are deliberate strict-contract failures, observed or documented for some
+OpenAI-compatible servers. Use a native route or a provider that follows the
+OpenAI streaming contract, or choose that provider's Responses endpoint:
+
+| Variant | Result |
+| --- | --- |
+| First chunk with `object: ""`, empty `choices` and `prompt_filter_results` (Azure OpenAI content-filter preamble) | `invalid_stream` ("invalid Chat chunk object") |
+| `finish_reason` other than `stop`, `tool_calls`, `length` (e.g. `eos`); `content_filter` | `invalid_stream`; `content_filter` is `policy_refusal` |
+| No terminal `[DONE]`, or no final usage when `stream_options.include_usage` is requested for a Messages client | `invalid_stream` ("stream ended before its terminal event"); Messages clients need measured final usage |
+| `function_call`/`audio` with a non-null value | `invalid_stream`; explicit `null` is treated as omitted |
+
+Live route-doctor checks (`--allow-live`) record the resulting outcome, so the
+provider/protocol choice can be changed before regular use.
 
 `--max-stream-bytes` (32 MiB), `--max-stream-items` (1024), and
 `--max-tool-argument-bytes` (8 MiB) bound cumulative upstream wire data, logical

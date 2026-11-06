@@ -92,6 +92,12 @@ not hiding reasoning output. Models requiring reasoning may reject them; the
 gateway does not retry with a different setting or discard unsupported output.
 The equivalent Python option is `GatewayConfig(..., upstream_reasoning="openrouter_disabled")`.
 
+`--reasoning-output omit` explicitly drops upstream reasoning that a translated
+route cannot represent (never fabricated or forwarded); the default `reject`
+fails instead. Many current models reason on every turn and reject or ignore a
+disable request, so the launchers' `auto` policy uses `omit` on translated routes.
+See [the reasoning contract](docs/compatibility/reasoning.md).
+
 `--public-reasoning` separately opts into unsigned Chat `reasoning_content` ↔
 Responses `reasoning_text` conversion for JSON/SSE and explicit history replay.
 It never turns summaries into raw reasoning, fabricates Messages signatures,
@@ -141,7 +147,8 @@ retries. These remain off unless explicitly configured; no model fallback or
 stream replay is introduced.
 
 The gateway bounds active requests with `--max-concurrent-requests` (default 16)
-and socket I/O with `--timeout` (default 120 seconds). See
+and socket I/O with `--timeout` (default 300 seconds; `--progress-timeout` 300 s and
+`--total-timeout` 3600 s bound idle and whole-request time). See
 [failure mapping and resource limits](docs/compatibility/errors.md).
 
 For payload-free local request diagnostics, add `--diagnostics`. JSON lines go

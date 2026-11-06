@@ -26,9 +26,47 @@ reasoning is rejected, not relocated. SSE validates item identity, part lifecycl
 completed text and final output snapshots. Truncated streams cannot produce a
 successful terminal event. The strict default is unchanged.
 
-`reasoning`, OpenRouter `reasoning_details`, nonempty Responses `summary`,
-encrypted content, signatures, redacted thinking and unknown fields are still
-errors. A summary is not raw reasoning; an encrypted blob is not text.
+OpenRouter streams the same unsigned text as `reasoning`; it is treated like
+`reasoning_content` (never both in one delta). OpenRouter `reasoning_details`,
+nonempty Responses `summary`, encrypted content, signatures, redacted thinking
+and unknown fields are still errors unless omitted by the policy below. A
+summary is not raw reasoning; an encrypted blob is not text.
+
+## Omitting unrepresentable reasoning (opt-in)
+
+`reasoning_output="omit"` (`--reasoning-output omit`; `omit_reasoning=True` on
+`convert_response`, `StreamDecoder` and `StreamTranscoder`) drops upstream
+reasoning that the client's protocol cannot represent on a **translated** route,
+instead of failing the request: Chat `reasoning`/`reasoning_content`/
+`reasoning_details`, Messages `thinking`/`redacted_thinking` blocks (with their
+signature deltas) and Responses `reasoning` items (with their summary/text
+events). Answer text, tool calls, usage and stop reasons are unchanged. Nothing
+is fabricated, re-signed, summarized or forwarded to another provider. Native
+routes are untouched. Successful streams record diagnostics feature
+`reasoning_omitted`. The default remains `reject`.
+
+Why it exists (live checks, 2026-11-06, Claude-style Messages tool loop over
+Chat providers): a disable request is not portable. `stealth/crouton-alpha`
+(OpenRouter) answers `reasoning_effort: none` with HTTP 400 "Reasoning is
+mandatory"; `minimaxai/minimax-m3.1-flash` and `z-ai/glm-5.3-flash` (NVIDIA NIM)
+ignore it and still stream `reasoning_content`; `deepseek-ai/deepseek-v4.1-flash`
+honours it. Under `reject` all five tested models failed the first turn; under
+`omit` all five completed a two-turn tool loop, including models that reason on
+every turn. The launchers' `auto` policy now leaves the provider default in
+place and selects `omit` on translated routes (plus unsigned public reasoning
+between Chat and Responses). Choose an explicit `disabled` policy to request
+less reasoning compute where a model honours it.
+
+## Provider errors inside a stream
+
+Some servers return HTTP 200 and then an error object as an SSE event (NVIDIA
+NIM `deepseek-ai/deepseek-v4.1-flash` does this for `reasoning_effort: medium`
+while accepting `low`/`high`). Translated routes surface the provider's bounded,
+secret-redacted message ("upstream provider reported an error: ..."), using the
+provider's 4xx status and its standard error code before any output (with
+`x-should-retry: false`, except 408/409/429) or 502 otherwise, instead of a
+generic `invalid_stream`. Diagnostics record outcome `upstream_http`. Declare a model's allowed
+efforts in a version-2 capability record to reject such requests before I/O.
 
 Messages requires its own thinking/signature contract. Unsigned text is not
 mapped to Messages thinking, given a fake signature, or inserted into ordinary

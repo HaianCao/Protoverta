@@ -59,6 +59,7 @@ from .streaming import (
     StreamError,
     UnsupportedReasoningError,
     UnsupportedStreamFeatureError,
+    UpstreamReportedError,
 )
 from .tool_names import ToolNameMap
 from .tool_policy import BoundToolPolicy, ToolPolicyViolation, normalize_tool_policy
@@ -96,6 +97,7 @@ class GatewayConfig:
     require_verified_capabilities: bool = False
     public_reasoning: bool = False
     tool_names: str | None = None
+    reasoning_output: str = "reject"
     max_concurrent_requests: int = 16
     total_timeout: float = 3600.0
     progress_timeout: float = 300.0
@@ -161,6 +163,8 @@ class GatewayConfig:
             raise ValueError("client_tool_search must be reject or function")
         if not isinstance(self.public_reasoning, bool):
             raise TypeError("public_reasoning must be a boolean")
+        if self.reasoning_output not in ("reject", "omit"):
+            raise ValueError("reasoning_output must be reject or omit")
         if self.tool_names is None:
             object.__setattr__(self, "tool_names", "alias" if self.client_profile in {"codex", "claude"} else "reject")
         if self.tool_names not in {"reject", "alias"}:
@@ -444,6 +448,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                     tool_policy=tool_policy,
                     text_logprobs=text_logprobs,
                     max_top_logprobs=max_top_logprobs,
+                    omit_reasoning=config.reasoning_output == "omit",
                     **limits,
                 )
                 if source != target
@@ -532,6 +537,8 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                     return
                 self._trace.outcome = "truncated_output" if stream_truncated else "success"
                 self._trace.phase = "stream"
+                if getattr(decoder, "omitted_reasoning", False):
+                    self._trace.feature = "reasoning_omitted"
                 details = getattr(decoder, "usage_details", {})
                 self._trace.usage(
                     getattr(decoder, "input_tokens", None),
@@ -554,7 +561,12 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                         if target == Protocol.MESSAGES
                         else "For unsigned Chat reasoning_content, enable public_reasoning explicitly on a Chat/Responses route; summaries, signed or encrypted state remain unsupported."
                     )
-                    message = "Upstream reasoning cannot be preserved on this route. " + hint + " No reasoning was dropped or given a fabricated signature."
+                    message = (
+                        "Upstream reasoning cannot be preserved on this route. "
+                        + hint
+                        + " Alternatively opt into reasoning_output='omit' to drop reasoning the client did not request."
+                        + " No reasoning was dropped or given a fabricated signature."
+                    )
                 elif isinstance(exc, UnsupportedStreamFeatureError):
                     message = str(exc)
                 if policy_violation:
@@ -597,9 +609,16 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 if policy_violation:
                     self._trace.outcome = "invalid_response"
                 self._trace.feature = feature
+                reported = isinstance(exc, UpstreamReportedError)
+                status = 422 if unsupported else 504 if timeout else 502
+                if reported:
+                    # The provider's own message, bounded and secret-redacted.
+                    message, code = str(exc), "upstream_error"
+                    status = exc.status if exc.status is not None and exc.status < 500 else 502
+                    self._trace.outcome, self._trace.phase = "upstream_http", "upstream"
                 req_path = getattr(self, "_request_path", None)
                 failure = gateway_failure(
-                    422 if unsupported else 504 if timeout else 502,
+                    status,
                     message,
                     code=code,
                     phase="stream",
@@ -613,7 +632,15 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                         self._json(
                             failure.status,
                             payload,
-                            {"x-should-retry": "false"} if policy_violation or unsupported or limited or isinstance(exc, DeadlineExceeded) else None,
+                            {"x-should-retry": "false"}
+                            if policy_violation
+                            or unsupported
+                            or limited
+                            or isinstance(exc, DeadlineExceeded)
+                            or reported
+                            and 400 <= status < 500
+                            and status not in (408, 409, 429)
+                            else None,
                         )
                     else:
                         sequence = pipeline.encoder.sequence if isinstance(pipeline, StreamTranscoder) else pipeline.decoder.sequence + 1
@@ -1114,6 +1141,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                             public_reasoning=config.public_reasoning,
                             text_logprobs=text_logprobs,
                             max_top_logprobs=outbound.get("top_logprobs") if text_logprobs else None,
+                            omit_reasoning=config.reasoning_output == "omit",
                         )
                         tool_policy.check_result(result, protocol)
                         result = restore_response(result)

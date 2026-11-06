@@ -104,6 +104,7 @@ class StreamTranscoder:
         tool_policy=None,
         text_logprobs: bool = False,
         max_top_logprobs=None,
+        omit_reasoning: bool = False,
     ) -> None:
         self.source = Protocol(source)
         self.target = Protocol(target)
@@ -117,7 +118,9 @@ class StreamTranscoder:
         self.order = _MessagesOrder(max_pending_bytes) if cross_messages else None
         self.parser = SSEParser()
         limit = max_top_logprobs if max_top_logprobs is not None else (request_context or {}).get("top_logprobs")
-        self.decoder = StreamDecoder(self.source, public_reasoning=public_reasoning, text_logprobs=text_logprobs, max_top_logprobs=limit)
+        self.decoder = StreamDecoder(
+            self.source, public_reasoning=public_reasoning, text_logprobs=text_logprobs, max_top_logprobs=limit, omit_reasoning=omit_reasoning
+        )
         if request_context is not None and self.source == self.target:
             raise ValueError("request_context requires translated Responses output")
         self.encoder = StreamEncoder(

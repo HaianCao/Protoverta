@@ -27,6 +27,7 @@ _FEATURES = {
     "codex_closed_resume",
     "compaction",
     "reasoning",
+    "reasoning_omitted",
 }
 
 

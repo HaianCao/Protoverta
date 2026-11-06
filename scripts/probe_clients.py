@@ -19,6 +19,8 @@ from unittest.mock import patch
 from urllib.request import build_opener
 
 from probe_process import run_process
+
+_REAL_SUBPROCESS_RUN = subprocess.run  # bound before any launcher patch
 from smoke_clients import MARKER, run_client
 from smoke_resume import session_id
 from stream_diagnostics import StreamDiagnostics
@@ -78,6 +80,10 @@ def _probe_codex_goal(
 
     def run(args, **kwargs):
         nonlocal completed
+        if "exec" not in args:
+            # Launcher helpers (for example the isolated `codex --version`
+            # probe) share this patched module; run them unchanged.
+            return _REAL_SUBPROCESS_RUN(args, **kwargs)
         # All retry overrides belong to Codex's root scope, not exec's scope.
         at = args.index("exec")
         args[at:at] = ["-c", "model_providers.smoke.request_max_retries=0", "-c", "model_providers.smoke.stream_max_retries=0"]
@@ -88,7 +94,7 @@ def _probe_codex_goal(
     with (
         diagnostics.capture(observe_transport=False) if diagnostics is not None else nullcontext(),
         patch.dict(os.environ, env, clear=True),
-        patch("protoverta.server.make_handler", side_effect=lambda config: real_handler(config, upstream_open=observed_open)),
+        patch("protoverta.server.make_handler", side_effect=lambda config, **options: real_handler(config, upstream_open=observed_open, **options)),
         patch("codex_adapter.launcher.subprocess.run", side_effect=run),
     ):
         marker = nonce or "PROTOVERTA_SMOKE_OK"
@@ -148,7 +154,8 @@ def probe(
     executable = shutil.which(client)
     if not executable:
         raise ValueError(f"{client} is not on PATH")
-    config = GatewayConfig(upstream, base_url, key, "isolated-probe", upstream_reasoning=reasoning)
+    # "auto" is a launcher policy; validate the gateway with its explicit base.
+    config = GatewayConfig(upstream, base_url, key, "isolated-probe", upstream_reasoning="provider_default" if reasoning == "auto" else reasoning)
     # run_client receives the prefix before /v1; validate rather than guess it.
     if not base_url.endswith("/v1"):
         raise ValueError("This probe requires an explicit /v1 API prefix")
@@ -203,6 +210,7 @@ def probe(
                 model,
                 prompt=prompt,
                 trace_file=trace_file,
+                adapter_reasoning_policy="auto" if reasoning == "auto" else None,
             )
         report = diagnostic.snapshot() if diagnostic is not None else None
         if trace_file is not None and trace_file.is_file():
@@ -291,7 +299,9 @@ def probe_resume(
         )
         for name in ("roaming", "local", "codex", "claude"):
             (root / name).mkdir()
-        config = GatewayConfig(source, base_url, key, "isolated-probe", upstream_reasoning=source_reasoning)
+        config = GatewayConfig(
+            source, base_url, key, "isolated-probe", upstream_reasoning="provider_default" if source_reasoning == "auto" else source_reasoning
+        )
         fixture = root / "fixture.txt"
         if tool_loop and client == "claude":
             fixture.write_text(nonce + "\n", encoding="utf-8")
@@ -344,7 +354,12 @@ def probe_resume(
             return {"passed": False, "client": client, "stage": "initial", "error": redact(first.stderr + first.stdout)[-2000:]}
         identifier = session_id(client, first.stdout)
         config = GatewayConfig(
-            target, target_base_url, target_key, "isolated-probe", upstream_reasoning=target_reasoning, public_reasoning=target_public_reasoning
+            target,
+            target_base_url,
+            target_key,
+            "isolated-probe",
+            upstream_reasoning="provider_default" if target_reasoning == "auto" else target_reasoning,
+            public_reasoning=target_public_reasoning,
         )
         trace = root / "trace.json"
         prompt = "Return only the exact synthetic token from our previous message. Do not use tools."
@@ -449,8 +464,8 @@ def main() -> int:
     parser.add_argument("--target-base-url", help="Resume on a different real API prefix")
     parser.add_argument("--target-model", help="Resume using a different real model")
     parser.add_argument("--target-key-env", help="Environment variable for the resume provider's key")
-    parser.add_argument("--source-reasoning", choices=["provider_default", "disabled", "openrouter_disabled"], default="openrouter_disabled")
-    parser.add_argument("--target-reasoning", choices=["provider_default", "disabled", "openrouter_disabled"])
+    parser.add_argument("--source-reasoning", choices=["auto", "provider_default", "disabled", "openrouter_disabled"], default="openrouter_disabled")
+    parser.add_argument("--target-reasoning", choices=["auto", "provider_default", "disabled", "openrouter_disabled"])
     parser.add_argument("--target-public-reasoning", action="store_true", help="Opt in to unsigned Chat reasoning_content for the Codex resume target")
     parser.add_argument(
         "--verify-replay", action="store_true", help="Resume a third turn on the target and observe whether public reasoning history is replayed"

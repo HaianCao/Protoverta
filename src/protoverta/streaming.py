@@ -46,6 +46,31 @@ class UnsupportedReasoningError(StreamError):
         super().__init__("unsupported reasoning output (reasoning_content/thinking/opaque state) under the current strict policy")
 
 
+class UpstreamReportedError(StreamError):
+    """The provider itself reported an API error inside a translated stream.
+
+    Some servers answer HTTP 200 and then send an error object as the first or
+    a later SSE event. Its bounded message is surfaced so clients see the real
+    cause instead of a generic malformed-stream failure.
+    """
+
+    def __init__(self, detail: Any, *, status: Any = None, kind: Any = None):
+        text = detail if isinstance(detail, str) else "upstream provider reported an error"
+        text = "".join(char if char.isprintable() else " " for char in text).strip()[:500] or "upstream provider reported an error"
+        self.detail = text
+        self.kind = kind if isinstance(kind, str) and kind.isascii() and len(kind) <= 64 else None
+        self.status = status if type(status) is int and 400 <= status <= 599 else None
+        super().__init__("upstream provider reported an error: " + text)
+
+
+def _reported_error(body: dict, *, status: Any = None) -> UpstreamReportedError:
+    error = body.get("error") if isinstance(body.get("error"), dict) else body
+    code = error.get("code")
+    return UpstreamReportedError(
+        error.get("message"), status=status if status is not None else code if type(code) is int else None, kind=error.get("type") or code
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class Delta:
     kind: str
@@ -136,11 +161,20 @@ class StreamDecoder:
     at EOF; it raises unless the protocol's terminal marker was seen.
     """
 
-    def __init__(self, protocol: Protocol | str, *, public_reasoning: bool = False, text_logprobs: bool = False, max_top_logprobs=None) -> None:
+    def __init__(
+        self, protocol: Protocol | str, *, public_reasoning: bool = False, text_logprobs: bool = False, max_top_logprobs=None, omit_reasoning: bool = False
+    ) -> None:
         self.protocol = Protocol(protocol)
         if not isinstance(public_reasoning, bool):
             raise TypeError("public_reasoning must be a boolean")
+        if type(omit_reasoning) is not bool:
+            raise TypeError("omit_reasoning must be a boolean")
         self.public_reasoning = public_reasoning
+        # Explicit policy: reasoning the client did not ask for (and that this
+        # route cannot represent) is dropped instead of failing the request.
+        # Nothing is fabricated or forwarded; ``omitted_reasoning`` records it.
+        self.omit_reasoning = omit_reasoning
+        self.omitted_reasoning = False
         self.reasoning_closed = False
         self.reasoning_items: dict[int, str] = {}
         self.reasoning_parts: dict[int, str] = {}
@@ -269,6 +303,8 @@ class StreamDecoder:
         if event.event not in {"message", "chat.completion.chunk"}:
             raise StreamError(f"unsupported Chat SSE event: {event.event}")
         body = _json_event(event, "Chat chunk")
+        if "error" in body and "choices" not in body:
+            raise _reported_error(body)
         if body.get("object") != "chat.completion.chunk":
             raise StreamError("invalid Chat chunk object")
         self._tier(body.get("service_tier"))
@@ -310,7 +346,10 @@ class StreamDecoder:
             raise StreamError("unsupported Chat choice index or logprobs")
         delta = _drop_null_legacy(_obj(choice.get("delta"), "Chat delta"))
         for field, value in delta.items():
-            if field == "reasoning_content" and self.public_reasoning:
+            # OpenRouter streams unsigned public reasoning as ``reasoning``;
+            # other servers use ``reasoning_content``. Never accept both.
+            public_field = field == "reasoning_content" or field == "reasoning" and "reasoning_content" not in delta
+            if public_field and self.public_reasoning:
                 if value is not None:
                     value = _str(value, "public reasoning_content")
                     if value:
@@ -319,7 +358,12 @@ class StreamDecoder:
                         deltas.append(Delta("reasoning_text", text=value))
                 continue
             if field in {"reasoning", "reasoning_content", "reasoning_details"} and value not in (None, "", []):
-                raise UnsupportedReasoningError()
+                if not self.omit_reasoning:
+                    raise UnsupportedReasoningError()
+                if not isinstance(value, str | list):
+                    raise StreamError(f"Chat {field} must be a string or array")
+                self.omitted_reasoning = True
+                continue
             if field == "refusal":
                 if value is not None and not isinstance(value, str):
                     raise StreamError("Chat refusal must be a string or null")
@@ -409,7 +453,7 @@ class StreamDecoder:
             raise StreamError("Messages event/data type mismatch")
         kind = event.event
         if kind == "error":
-            raise StreamError("upstream Messages stream reported an error")
+            raise _reported_error(body)
         if kind == "message_start":
             message = _obj(body.get("message"), "message_start.message")
             if message.get("content") not in (None, []):
@@ -429,7 +473,11 @@ class StreamDecoder:
             block = _obj(body.get("content_block"), "content_block")
             block_type = block.get("type")
             if block_type in ("thinking", "redacted_thinking"):
-                raise UnsupportedReasoningError()
+                if not self.omit_reasoning:
+                    raise UnsupportedReasoningError()
+                self.blocks[index] = "omitted"
+                self.omitted_reasoning = True
+                return []
             if block_type == "compaction":
                 raise UnsupportedStreamFeatureError("compaction")
             if block_type == "text":
@@ -458,6 +506,8 @@ class StreamDecoder:
             index = _index(body.get("index"), "content block index")
             active = self.blocks.get(index)
             delta = _obj(body.get("delta"), "content_block_delta.delta")
+            if active == "omitted" and delta.get("type") in ("thinking_delta", "signature_delta"):
+                return []
             if active == "text" and delta.get("type") == "text_delta":
                 _only(delta, {"type", "text"}, "Messages text delta")
                 return [Delta("text", index=index, text=_str(delta.get("text"), "text delta"))]
@@ -509,7 +559,9 @@ class StreamDecoder:
         if not isinstance(kind, str) or event.event not in {"message", kind}:
             raise StreamError("Responses event/data type mismatch")
         if kind == "error":
-            raise StreamError("upstream Responses stream reported an error")
+            raise _reported_error(body)
+        if kind == "response.failed" and isinstance(body.get("response"), dict) and isinstance(body["response"].get("error"), dict):
+            raise _reported_error(body["response"]["error"])
         sequence = _index(body.get("sequence_number"), "Responses sequence_number")
         if self.sequence is not None and sequence <= self.sequence:
             raise StreamError("Responses sequence_number did not increase")
@@ -534,6 +586,10 @@ class StreamDecoder:
             if item_type == "compaction":
                 raise UnsupportedStreamFeatureError("compaction")
             item_id = _str(item.get("id"), "output item ID")
+            if item_type == "reasoning" and not self.public_reasoning and self.omit_reasoning:
+                self.items[index] = ("omitted", item_id)
+                self.omitted_reasoning = True
+                return []
             if item_type == "reasoning" and not self.public_reasoning:
                 raise UnsupportedReasoningError()
             if item_type == "reasoning" and self.public_reasoning:
@@ -567,6 +623,15 @@ class StreamDecoder:
                 self.saw_tool = True
                 return [Delta("tool_start", index=index, item_id=item_id, call_id=call_id, name=name, tool_type="custom" if custom else "function")]
             raise StreamError(f"unsupported Responses output item: {item_type}")
+        if (
+            kind != "response.output_item.done"
+            and kind.startswith(("response.reasoning", "response.content_part."))
+            and type(body.get("output_index")) is int
+            and self.items.get(body["output_index"], (None,))[0] == "omitted"
+        ):
+            if body.get("item_id") != self.items[body["output_index"]][1]:
+                raise StreamError("omitted reasoning event has wrong item identity")
+            return []
         if (
             kind in {"response.content_part.added", "response.reasoning_text.delta", "response.reasoning_text.done", "response.content_part.done"}
             and type(body.get("output_index")) is int
@@ -673,6 +738,11 @@ class StreamDecoder:
             _response_item(item)
             if item.get("id") != item_id or item.get("status") not in ("completed", "incomplete"):
                 raise StreamError("Responses output item identity/status changed")
+            if item_type == "omitted":
+                if item.get("type") != "reasoning":
+                    raise StreamError("omitted reasoning item changed type")
+                self.completed_items[index] = item
+                return []
             self.incomplete_items |= item.get("status") == "incomplete"
             if item_type == "reasoning":
                 try:

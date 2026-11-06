@@ -1191,7 +1191,46 @@ def _validate_response_item(item: dict, label: str) -> None:
             raise ConversionError("upstream Responses namespace cannot be preserved in this protocol")
 
 
-def _decode_result(body: dict[str, Any], source: Protocol, *, public_reasoning: bool = False, text_logprobs: bool = False) -> Result:
+def _decode_result(
+    body: dict[str, Any], source: Protocol, *, public_reasoning: bool = False, text_logprobs: bool = False, omit_reasoning: bool = False
+) -> Result:
+    return _decode_result_parts(body, source, public_reasoning=public_reasoning, text_logprobs=text_logprobs, omit_reasoning=omit_reasoning)
+
+
+def _omittable_reasoning(body: dict[str, Any], source: Protocol, public_reasoning: bool) -> tuple[dict[str, Any], bool]:
+    """Remove upstream reasoning a route cannot represent (explicit omit policy)."""
+    if source == Protocol.CHAT:
+        choices = body.get("choices")
+        if not isinstance(choices, list) or len(choices) != 1 or not isinstance(choices[0], dict) or not isinstance(choices[0].get("message"), dict):
+            return body, False
+        message = dict(choices[0]["message"])
+        keep = set()
+        if public_reasoning:
+            keep.add("reasoning_content" if message.get("reasoning_content") is not None else "reasoning")
+        dropped = [key for key in ("reasoning", "reasoning_content", "reasoning_details") if key not in keep and message.get(key) not in (None, "", [])]
+        for key in dropped:
+            message.pop(key)
+        return {**body, "choices": [{**choices[0], "message": message}]}, bool(dropped)
+    if source == Protocol.MESSAGES:
+        content = body.get("content")
+        if not isinstance(content, list):
+            return body, False
+        kept = [block for block in content if not (isinstance(block, dict) and block.get("type") in ("thinking", "redacted_thinking"))]
+        return {**body, "content": kept}, len(kept) != len(content)
+    output = body.get("output")
+    if public_reasoning or not isinstance(output, list):
+        return body, False
+    kept = [item for item in output if not (isinstance(item, dict) and item.get("type") == "reasoning")]
+    return {**body, "output": kept}, len(kept) != len(output)
+
+
+def _decode_result_parts(
+    body: dict[str, Any], source: Protocol, *, public_reasoning: bool = False, text_logprobs: bool = False, omit_reasoning: bool = False
+) -> Result:
+    if type(omit_reasoning) is not bool:
+        raise TypeError("omit_reasoning must be a boolean")
+    if omit_reasoning:
+        body, _ = _omittable_reasoning(body, source, public_reasoning)
     if source == Protocol.CHAT:
         choices = _list(body.get("choices"), "choices")
         if len(choices) != 1:
@@ -1201,7 +1240,11 @@ def _decode_result(body: dict[str, Any], source: Protocol, *, public_reasoning: 
             raise ConversionError("Chat logprobs cannot be preserved")
         msg = _drop_null_legacy(_object(choice.get("message"), "message"))
         _only(msg, {"role", "content", "tool_calls", "refusal", "annotations", "reasoning", "reasoning_content", "reasoning_details"}, "Chat response message")
-        rejected_reasoning = ("reasoning", "reasoning_details") if public_reasoning else ("reasoning", "reasoning_content", "reasoning_details")
+        rejected_reasoning = (
+            (("reasoning_details",) if msg.get("reasoning_content") is None else ("reasoning", "reasoning_details"))
+            if public_reasoning
+            else ("reasoning", "reasoning_content", "reasoning_details")
+        )
         if any(msg.get(key) not in (None, "", []) for key in rejected_reasoning):
             raise ConversionError("Chat reasoning cannot be preserved across protocols")
         if msg.get("role") != "assistant":
@@ -1224,6 +1267,9 @@ def _decode_result(body: dict[str, Any], source: Protocol, *, public_reasoning: 
                 parts[0].logprobs = probabilities
         if public_reasoning and msg.get("reasoning_content") is not None:
             parts.insert(0, Part("reasoning_text", text=_string(msg["reasoning_content"], "reasoning_content")))
+        elif public_reasoning and msg.get("reasoning") not in (None, ""):
+            # OpenRouter's unsigned public reasoning field.
+            parts.insert(0, Part("reasoning_text", text=_string(msg["reasoning"], "reasoning")))
         for index, call in enumerate(_optional_list(msg.get("tool_calls"), "tool_calls")):
             call = _object(call, "tool_call")
             parts.append(_chat_call(call, index))
@@ -1433,8 +1479,13 @@ def convert_response(
     request_context: dict | None = None,
     text_logprobs: bool = False,
     max_top_logprobs: int | None = None,
+    omit_reasoning: bool = False,
 ) -> dict[str, Any]:
-    """Convert a completed text/function response without inventing usage."""
+    """Convert a completed text/function response without inventing usage.
+
+    ``omit_reasoning`` is an explicit policy that drops upstream reasoning the
+    target route cannot represent instead of rejecting the response.
+    """
     source, target = Protocol(source), Protocol(target)
     if type(text_logprobs) is not bool:
         raise TypeError("text_logprobs must be a boolean")
@@ -1452,7 +1503,7 @@ def convert_response(
     if source == target:
         return body.copy()
     encode_json(body)
-    result = _decode_result(_object(body, "response"), source, public_reasoning=public_reasoning, text_logprobs=text_logprobs)
+    result = _decode_result(_object(body, "response"), source, public_reasoning=public_reasoning, text_logprobs=text_logprobs, omit_reasoning=omit_reasoning)
     if text_logprobs:
         from .logprobs import records
 

@@ -80,6 +80,12 @@ def main() -> int:
         action="store_true",
         help="Opt in to unsigned reasoning_content <-> Responses reasoning_text; no summaries, signatures or encrypted state",
     )
+    parser.add_argument(
+        "--reasoning-output",
+        choices=["reject", "omit"],
+        default="reject",
+        help="Translated routes: reject (default) or explicitly omit upstream reasoning the client cannot represent; never fabricated",
+    )
     parser.add_argument("--token-count-mode", choices=["off", "estimate", "native"], default="off")
     parser.add_argument("--prompt-caching", choices=["off", "ephemeral"], default="off")
     parser.add_argument("--require-current-evidence", action="store_true")
@@ -108,6 +114,7 @@ def main() -> int:
             capabilities=capabilities,
             require_verified_capabilities=args.require_verified_capabilities,
             public_reasoning=args.public_reasoning,
+            reasoning_output=args.reasoning_output,
             tool_names=args.tool_names,
             timeout=args.timeout,
             max_concurrent_requests=args.max_concurrent_requests,

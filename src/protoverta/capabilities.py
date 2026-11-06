@@ -49,7 +49,11 @@ POLICY_VALUES = {
     "tool_names": ("reject", "alias"),
     "client_tool_search": ("reject", "function"),
     "public_reasoning": (False, True),
+    "reasoning_output": ("reject", "omit"),
 }
+# Policies added after route evidence schema 3 shipped. Records written before
+# them were necessarily produced under the then-only behaviour.
+_POLICY_DEFAULTS = {"reasoning_output": "reject"}
 
 
 def route_policies(config) -> dict:
@@ -89,6 +93,8 @@ class RouteCapabilityRecord:
 
 
 def _policy_key(policies):
+    if isinstance(policies, Mapping):
+        policies = {**{key: value for key, value in _POLICY_DEFAULTS.items() if key not in policies}, **policies}
     if not isinstance(policies, Mapping) or set(policies) != set(POLICY_VALUES):
         raise ValueError("route policies must explicitly declare every known policy")
     for key, allowed in POLICY_VALUES.items():
