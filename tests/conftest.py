@@ -13,5 +13,10 @@ def pytest_configure(config):
     # Validation is intentionally not a live-provider harness. Mutating this
     # child process cannot edit the launching shell or persistent environment.
     safe = sanitized_environment()
+    # Import paths are not credentials. Source-tree validation (for example the
+    # ecosystem workflow) relies on PYTHONPATH instead of an installed package,
+    # and test subprocesses must import the same checkout.
+    if os.environ.get("PYTHONPATH"):
+        safe["PYTHONPATH"] = os.environ["PYTHONPATH"]
     os.environ.clear()
     os.environ.update(safe)

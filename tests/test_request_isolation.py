@@ -170,7 +170,10 @@ def test_failed_child_lane_does_not_poison_sibling_or_refund_shared_request_quot
                 "synthetic",
                 "local",
                 messages_usage_policy="deferred",
-                progress_timeout=0.5,
+                # Healthy lanes wait for all three requests at the fixture
+                # barrier before their first byte; 0.5 s flaked on slow CI
+                # runners. The stalled lane still exceeds this (3 s).
+                progress_timeout=1.5,
                 shared_admission_db=str(tmp_path / "quota.sqlite"),
                 shared_requests=4,
                 shared_concurrency=3,
