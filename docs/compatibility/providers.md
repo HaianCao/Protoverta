@@ -18,7 +18,7 @@ has the same headings: endpoints, tested models, recommended settings, limits.
 | NVIDIA NIM | `z-ai/glm-5.3-flash` | Chat | Tool loop passed | Gateway tool loop passed |
 | NVIDIA NIM | `deepseek-ai/deepseek-v4.1-flash` | Chat | Tool loop passed | Works with effort `low`/`high`; `medium` rejected by provider |
 | NVIDIA NIM | `minimaxai/minimax-m3.1-flash` | Chat | Gateway tool loop passed | Tool loop passed |
-| TokenHarbor | `deepseek-v4.1-flash:free` | Chat | Tool loop passed | Tool loop passed |
+| TokenHarbor | `deepseek-v4.1-flash:free` | Chat, Responses, Messages | Tool loop passed on all three (Responses needs the post-a10 fix) | Tool loop passed on all three |
 | AgentRouter | `gpt-5.6-sol` | Responses (direct only) | Not usable through the gateway | Direct mode: tool loop passes (2026-11-07) |
 
 "Gateway tool loop passed" rows were verified with a scripted client of the
@@ -100,16 +100,25 @@ output the client cannot represent is omitted, never fabricated.
 
 ## TokenHarbor
 
-- **Endpoint:** `https://tokenharbor.ai/v1/chat/completions` (Chat). Bearer
+- **Endpoints:** `https://tokenharbor.ai/v1` serves Chat Completions,
+  Responses and Messages (all three checked on 2026-11-07). Bearer
   authentication.
 - **Tested model:** `deepseek-v4.1-flash:free`.
-- **Recommended:** gateway mode, protocol `chat`, automatic reasoning.
+- **Recommended:** gateway mode with any of the three protocols, automatic
+  reasoning. Live two-tool loops pass for Claude Code on Chat, Responses and
+  Messages, and for Codex on Chat, Responses and Messages.
 - **Limits:**
-  - Streams `reasoning_content`; honours `reasoning_effort: none`. Standard
+  - Chat streams `reasoning_content`; honours `reasoning_effort: none`. Standard
     OpenAI stream shape with final usage and `[DONE]`.
+  - Responses streams omit the `logprobs` field on text parts and on the final
+    text events. When logprobs were not requested, Protoverta after 0.3.0a10
+    (main, next release) reads the absent field as empty, so no data is lost;
+    0.3.0a10 and earlier reject the stream with "unsupported Responses content
+    part metadata" (HTTP 502), which breaks Claude Code on the Responses route.
+    Requesting logprobs from the Responses endpoint still fails, because none
+    are returned there.
   - The reported model name drops the `:free` suffix (`deepseek-v4.1-flash`);
     this is accepted.
-  - Only the Chat endpoint was tested.
 
 ## AgentRouter
 
@@ -151,11 +160,16 @@ reasoning policy.
 | Codex | Responses→Chat | NVIDIA NIM | `deepseek-ai/deepseek-v4.1-flash` | pass (150 s) |
 | Codex | Responses→Chat | NVIDIA NIM | `z-ai/glm-5.3-flash` | pass (7 s) |
 | Codex | Responses, direct | AgentRouter | `gpt-5.6-sol` | pass, 2 of 2 (9 s each) |
+| Claude Code | Messages→Chat | TokenHarbor | `deepseek-v4.1-flash:free` | pass (22 s) |
+| Claude Code | Messages (native) | TokenHarbor | `deepseek-v4.1-flash:free` | pass (19 s) |
+| Claude Code | Messages→Responses | TokenHarbor | `deepseek-v4.1-flash:free` | failed (502) before the absent-logprobs fix; pass 2 of 2 after it |
+| Codex | Responses→Chat | TokenHarbor | `deepseek-v4.1-flash:free` | pass (20 s) |
+| Codex | Responses (native) | TokenHarbor | `deepseek-v4.1-flash:free` | pass (19 s) |
+| Codex | Responses→Messages | TokenHarbor | `deepseek-v4.1-flash:free` | pass (20 s) |
 
 NIM's free tier was much slower than the day before (minimax and deepseek took
 two to three minutes per loop). Give long-running clients a generous timeout;
 the gateway's own defaults (300 s idle, 3600 s total) already allow this.
-TokenHarbor was not re-checked (no key on the test machine).
 
 ## Token logprobs (live, 2026-11-06)
 

@@ -215,6 +215,16 @@ class StreamDecoder:
         except ConversionError as exc:
             raise StreamError(str(exc)) from exc
 
+    def _text_logprobs(self, container):
+        """Responses text logprobs. Some compatible servers omit the field when
+        logprobs were not requested; that carries no data, so it reads as an
+        empty list. When logprobs were requested, omission is still an error."""
+        if "logprobs" not in container:
+            if self.text_logprobs:
+                raise StreamError("Responses text omitted the requested logprobs")
+            return []
+        return self._probabilities(container.get("logprobs"))
+
     def _tier(self, value: Any) -> None:
         try:
             reported = _reported_service_tier(value)
@@ -649,7 +659,7 @@ class StreamDecoder:
                 _only(part, {"type", "refusal"}, "Responses refusal part")
                 _str(part.get("refusal"), "refusal")
                 raise UnsupportedStreamFeatureError("refusal")
-            if part.get("type") != "output_text" or part.get("text") != "" or part.get("annotations") != [] or part.get("logprobs") != []:
+            if part.get("type") != "output_text" or part.get("text") != "" or part.get("annotations") != [] or part.get("logprobs", []) != []:
                 raise StreamError("unsupported Responses content part metadata")
             self.text_parts[index] = "open"
             self.item_probabilities[index] = []
@@ -658,10 +668,10 @@ class StreamDecoder:
             index = _index(body.get("output_index"), "output_index")
             if self.items.get(index, (None,))[0] != "text" or self.text_parts.get(index) != "open":
                 raise StreamError("Responses text delta without a message item")
-            if body.get("item_id") != self.items[index][1] or body.get("content_index") != 0 or not self.text_logprobs and body.get("logprobs") != []:
+            if body.get("item_id") != self.items[index][1] or body.get("content_index") != 0 or not self.text_logprobs and self._text_logprobs(body) != []:
                 raise StreamError("unsupported Responses text delta metadata")
             value = _str(body.get("delta"), "text delta")
-            probabilities = self._probabilities(body.get("logprobs")) if self.text_logprobs else []
+            probabilities = self._text_logprobs(body) if self.text_logprobs else []
             self.text_items[index] += value
             self.item_probabilities[index].extend(probabilities)
             if self.text_logprobs:
@@ -686,11 +696,7 @@ class StreamDecoder:
             index = _index(body.get("output_index"), "output_index")
             if self.items.get(index, (None,))[0] != "text" or self.text_parts.get(index) != "open" or body.get("text") != self.text_items[index]:
                 raise StreamError("Responses completed text differs from deltas")
-            if (
-                body.get("item_id") != self.items[index][1]
-                or body.get("content_index") != 0
-                or self._probabilities(body.get("logprobs")) != self.item_probabilities[index]
-            ):
+            if body.get("item_id") != self.items[index][1] or body.get("content_index") != 0 or self._text_logprobs(body) != self.item_probabilities[index]:
                 raise StreamError("unsupported Responses completed text metadata")
             from .logprobs import align
 
@@ -724,7 +730,7 @@ class StreamDecoder:
                 part.get("type") != "output_text"
                 or part.get("text") != self.text_items[index]
                 or part.get("annotations") != []
-                or self._probabilities(part.get("logprobs")) != self.item_probabilities[index]
+                or self._text_logprobs(part) != self.item_probabilities[index]
             ):
                 raise StreamError("unsupported Responses completed content metadata")
             self.text_parts[index] = "closed"
@@ -779,7 +785,7 @@ class StreamDecoder:
                 part.get("type") != "output_text"
                 or part.get("text") != self.text_items[index]
                 or part.get("annotations") != []
-                or self._probabilities(part.get("logprobs")) != self.item_probabilities[index]
+                or self._text_logprobs(part) != self.item_probabilities[index]
             ):
                 raise StreamError("Responses completed message content differs from deltas")
             self.completed_items[index] = item
@@ -797,7 +803,7 @@ class StreamDecoder:
                 if isinstance(item, dict) and item.get("type") == "message" and isinstance(item.get("content"), list):
                     for part in item["content"]:
                         if isinstance(part, dict) and part.get("type") == "output_text":
-                            self._probabilities(part.get("logprobs"))
+                            self._text_logprobs(part)
                 if item != self.completed_items.get(index):
                     raise StreamError("Responses final output differs from streamed items")
             status = response.get("status")
