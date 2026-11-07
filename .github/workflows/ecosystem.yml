@@ -37,26 +37,26 @@ jobs:
           foreach ($ref in @($env:CODEX_REF, $env:CLAUDE_REF)) {
             if ($ref -cnotmatch '^[0-9a-fA-F]{40}$') { throw 'Consumer refs must be full immutable commit SHAs' }
           }
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           path: protoverta
           persist-credentials: false
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           repository: HaianCao/CodexApter
           ref: ${{ inputs.codex_ref }}
           path: free-codex-cli
           persist-credentials: false
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           repository: HaianCao/ClaudApter
           ref: ${{ inputs.claude_ref }}
           path: free-claude-cli
           persist-credentials: false
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
       - name: Prepare validation tools
