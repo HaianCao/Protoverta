@@ -1,16 +1,19 @@
 # Coordinated preview validation and release
 
-Prepared versions (not published): Protoverta **0.3.0a8**, CodexApter and
-ClaudApter **0.2.0a2** on their integration branches. Stable launcher main
-branches remain separate. Never replace a6 release assets with newer code.
+Published previews: Protoverta **0.3.0a8** (2026-11-06) and **0.3.0a9**
+(2026-11-07; shared-admission storage waits 5 s instead of 1 s). CodexApter and
+ClaudApter **0.2.0a2** on their integration branches pin the latest core preview.
+Stable launcher main branches remain separate. Never replace published release
+assets with newer code; every code change ships under a new version.
 
 Publish order matters: both launcher installers download
-`releases/download/v0.3.0a8/protoverta-0.3.0a8-py3-none-any.whl`. Push the core
-and its `v0.3.0a8` tag first and wait for the Release workflow to attach the
-wheel; only then push launcher branches that pin it. Until the asset exists the
-installers stop before creating a venv with an explicit message (or accept
-`-ProtovertaWheel PATH`). Bump the core version and both pins/URLs together for
-any later release.
+`releases/download/vX/protoverta-X-py3-none-any.whl`. Push the core and its tag
+first and wait for the Release workflow to attach the wheel; only then push
+launcher branches that pin it. Until the asset exists the installers stop before
+creating a venv with an explicit message (or accept `-ProtovertaWheel PATH`).
+Bump the core version and both pins/URLs (`pyproject.toml` gateway extra,
+`scripts/install.ps1`, `.github/workflows/ci.yml`, README) together for any
+later release.
 
 ## Local acceptance
 
