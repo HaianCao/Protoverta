@@ -1,10 +1,13 @@
 # Coordinated preview validation and release
 
-Published previews: Protoverta **0.3.0a8** (2026-11-06) and **0.3.0a9**
-(2026-11-07; shared-admission storage waits 5 s instead of 1 s). CodexApter and
-ClaudApter **0.2.0a2** on their integration branches pin the latest core preview.
-Stable launcher main branches remain separate. Never replace published release
-assets with newer code; every code change ships under a new version.
+Published previews: Protoverta **0.3.0a8** (2026-11-06) and **0.3.0a10**
+(2026-11-07). The `v0.3.0a9` tag exists but has no release: its Windows
+validation exposed a request-slot release race and slow per-transaction SQLite
+connections, both fixed in a10 (WAL plus one kept connection; a 0.5 s slot
+grace). CodexApter and ClaudApter **0.2.0a2** on their integration branches pin
+the latest core preview. Stable launcher main branches remain separate. Never
+replace published release assets or move pushed tags; every code change ships
+under a new version.
 
 Publish order matters: both launcher installers download
 `releases/download/vX/protoverta-X-py3-none-any.whl`. Push the core and its tag

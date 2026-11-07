@@ -70,6 +70,10 @@ from .transport import DeadlineHTTPHandler, DeadlineHTTPSHandler
 STREAM_HEARTBEAT_INTERVAL = 15.0
 # Local clients send the request line and headers immediately.
 REQUEST_HEADER_TIMEOUT = 15.0
+# A handler releases its request slot just after the client has read the last
+# byte, so a client that sends its next request immediately can race the
+# release. Wait this long for a slot before answering 503.
+REQUEST_SLOT_GRACE_SECONDS = 0.5
 _CAPACITY_RESPONSE = b"".join(
     line + b"\r\n" for line in (b"HTTP/1.1 503 Service Unavailable", b"Retry-After: 1", b"Content-Length: 0", b"Connection: close", b"")
 )
@@ -322,6 +326,13 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
     class Handler(BaseHTTPRequestHandler):
         server_version = "Protoverta/0.3"
         connection_limit = config.max_concurrent_requests
+
+        @staticmethod
+        def release_storage() -> None:
+            # Shared admission keeps its SQLite connection between requests;
+            # the server closes it so the database file is not left open.
+            if shared_admission is not None:
+                shared_admission.close()
 
         def setup(self):
             super().setup()
@@ -702,7 +713,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                     self._error(401, "unauthorized", list_protocol, phase="request", path=target.path)
                     return
                 self._trace.correlation(self.headers.get("X-Protoverta-Agent-ID"), self.headers.get("X-Protoverta-Chain-ID"), model_identity_salt)
-                acquired = admission.acquire(blocking=False)
+                acquired = admission.acquire(timeout=REQUEST_SLOT_GRACE_SECONDS)
                 if not acquired:
                     self._error(
                         503, "Local gateway request capacity reached.", list_protocol, phase="admission", path=target.path, headers={"Retry-After": "1"}
@@ -762,7 +773,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 self._error(401, "unauthorized", protocol, phase="request", path=target_url.path)
                 return
             self._trace.correlation(self.headers.get("X-Protoverta-Agent-ID"), self.headers.get("X-Protoverta-Chain-ID"), model_identity_salt)
-            if not admission.acquire(blocking=False):
+            if not admission.acquire(timeout=REQUEST_SLOT_GRACE_SECONDS):
                 self._error(
                     503,
                     "Local gateway request capacity reached; retry after an active request finishes.",
@@ -1398,6 +1409,9 @@ class GatewayHTTPServer(ThreadingHTTPServer):
             # One shared bound, not a per-client wait multiplied by fan-out.
             # OS DNS/arbitrary injected transports remain non-preemptible.
             self._clients_changed.wait_for(lambda: not self._active_clients, timeout=2)
+        release_storage = getattr(self.RequestHandlerClass, "release_storage", None)
+        if release_storage is not None:
+            release_storage()
 
 
 def serve(config: GatewayConfig, host: str = "127.0.0.1", port: int = 0, *, observer: Observer | None = None) -> ThreadingHTTPServer:

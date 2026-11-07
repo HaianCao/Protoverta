@@ -43,6 +43,13 @@ matching shared_requests/shared_window/shared_concurrency policy. Defaults are
 40 attempts per 60 seconds and 5 concurrent upstream requests. Without a
 database configured, existing per-gateway behavior is unchanged.
 
+The database uses SQLite WAL mode (stored in the file; `-wal`/`-shm` files sit
+beside it) and each gateway keeps one connection open, so admission costs well
+under a millisecond. Keep the file on a local disk: WAL does not work on network
+shares. If WAL cannot be enabled, the gateway keeps the rollback journal with
+full sync. A busy database is waited on for up to 5 seconds before the request
+fails with 503.
+
 Scope is a one-way fingerprint of the normalized exact API prefix and upstream
 credential, independent of inbound protocol or requested model. Prompts, tool
 arguments, responses and credentials are never stored. Different keys/prefixes

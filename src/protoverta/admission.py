@@ -66,11 +66,22 @@ class SharedAdmission:
         self.scope = hashlib.sha256(scope.encode("utf-8")).hexdigest()
         self.requests, self.window, self.concurrency, self.lease = requests, window, concurrency, lease
         self.clock = clock
+        self._connection: sqlite3.Connection | None = None
+        self._closed = False
 
     def _connect(self) -> sqlite3.Connection:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(self.path, timeout=STORAGE_WAIT_SECONDS, isolation_level=None)
+        connection = sqlite3.connect(self.path, timeout=STORAGE_WAIT_SECONDS, isolation_level=None, check_same_thread=False)
         try:
+            # WAL keeps one log file instead of creating and deleting a rollback
+            # journal on every write; on Windows that create/delete is what file
+            # scanners stall on. The mode is stored in the database file, and
+            # older processes on the same file follow it. If the filesystem or
+            # a concurrent connection refuses WAL, keep the current mode and its
+            # full sync; NORMAL is only corruption-safe under WAL.
+            mode = connection.execute("PRAGMA journal_mode=WAL").fetchone()
+            if mode is not None and str(mode[0]).lower() == "wal":
+                connection.execute("PRAGMA synchronous=NORMAL")
             connection.execute("CREATE TABLE IF NOT EXISTS budgets (scope TEXT PRIMARY KEY, requests INTEGER, window REAL, concurrency INTEGER, cooldown REAL)")
             connection.execute("CREATE TABLE IF NOT EXISTS attempts (id TEXT PRIMARY KEY, scope TEXT, started REAL, active_until REAL)")
             connection.execute("CREATE INDEX IF NOT EXISTS attempts_scope ON attempts(scope)")
@@ -94,23 +105,56 @@ class SharedAdmission:
         finally:
             self._local_lock.release()
 
+    def _open(self) -> sqlite3.Connection:
+        """Storage access for one transaction: the kept connection or a new one."""
+        connection, self._connection = self._connection, None
+        return connection if connection is not None else self._connect()
+
     @contextmanager
     def _database_transaction(self) -> Iterator[sqlite3.Connection]:
+        # One connection is reused across transactions (always under the local
+        # lock). Opening and closing per transaction cost more than the write
+        # itself and, in WAL mode, the last close also checkpoints and deletes
+        # the log. A storage failure discards the connection; a policy outcome
+        # (for example AdmissionDenied) rolls back and keeps it.
+        connection = None
         try:
-            connection = self._connect()
             try:
+                connection = self._open()
                 connection.execute("BEGIN IMMEDIATE")
-                yield connection
-                connection.execute("COMMIT")
-            except BaseException:
-                if connection.in_transaction:
+                try:
+                    yield connection
+                except (OSError, sqlite3.Error):
+                    raise
+                except BaseException:
                     connection.execute("ROLLBACK")
-                raise
+                    self._keep(connection)
+                    connection = None
+                    raise
+                connection.execute("COMMIT")
+                self._keep(connection)
+                connection = None
             finally:
-                connection.close()
+                if connection is not None:
+                    connection.close()
         except (OSError, sqlite3.Error) as exc:
             # Do not expose database paths or driver messages to HTTP clients.
             raise AdmissionStorageError("Shared provider budget storage is unavailable.") from exc
+
+    def _keep(self, connection: sqlite3.Connection) -> None:
+        if self._closed:
+            connection.close()
+        else:
+            self._connection = connection
+
+    def close(self) -> None:
+        """Close the kept connection. Later transactions still work but no
+        longer keep a connection open, so a straggling request cannot leak one."""
+        with self._local_lock:
+            self._closed = True
+            connection, self._connection = self._connection, None
+        if connection is not None:
+            connection.close()
 
     def acquire(self) -> str:
         now = self.clock()

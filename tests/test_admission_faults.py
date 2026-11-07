@@ -45,7 +45,7 @@ def test_failed_release_keeps_lease_until_expiry_without_refunding_rate(tmp_path
     now = [100.0]
     budget = SharedAdmission(tmp_path / "quota.sqlite", "fixture", concurrency=1, requests=2, lease=5, clock=lambda: now[0])
     lease = budget.acquire()
-    with patch.object(budget, "_connect", side_effect=PermissionError("fixture")), pytest.raises(AdmissionStorageError):
+    with patch.object(budget, "_open", side_effect=PermissionError("fixture")), pytest.raises(AdmissionStorageError):
         budget.release(lease)
     with pytest.raises(AdmissionDenied):
         budget.acquire()
@@ -56,10 +56,10 @@ def test_failed_release_keeps_lease_until_expiry_without_refunding_rate(tmp_path
 
 
 def test_http_release_failure_does_not_overwrite_completed_response(tmp_path):
-    original = SharedAdmission._connect
+    original = SharedAdmission._open
     connections = []
 
-    def connect(self):
+    def open_storage(self):
         connections.append(1)
         if len(connections) == 2:
             raise PermissionError("synthetic release failure")
@@ -67,7 +67,7 @@ def test_http_release_failure_does_not_overwrite_completed_response(tmp_path):
 
     config = GatewayConfig("chat", "https://example.test/v1", "key", "local", shared_admission_db=str(tmp_path / "quota.sqlite"))
     with (
-        patch.object(SharedAdmission, "_connect", connect),
+        patch.object(SharedAdmission, "_open", open_storage),
         listener(
             config, lambda *args, **kwargs: io.BytesIO(b'{"model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}')
         ) as url,
@@ -79,10 +79,10 @@ def test_http_release_failure_does_not_overwrite_completed_response(tmp_path):
 
 def test_storage_failure_during_retry_closes_rejection_and_never_reissues(tmp_path):
     budget = SharedAdmission(tmp_path / "quota.sqlite", "fixture", requests=2)
-    original, connections, calls = SharedAdmission._connect, [], []
+    original, connections, calls = SharedAdmission._open, [], []
     rejected = io.BytesIO(b"{}")
 
-    def connect(self):
+    def open_storage(self):
         connections.append(1)
         if len(connections) == 2:  # acquire succeeds, publishing cooldown fails
             raise PermissionError("synthetic cooldown storage failure")
@@ -92,7 +92,7 @@ def test_storage_failure_during_retry_closes_rejection_and_never_reissues(tmp_pa
         calls.append(1)
         raise HTTPError("https://example.test", 503, "fixture", {"Retry-After": "0"}, rejected)
 
-    with patch.object(SharedAdmission, "_connect", connect), pytest.raises(AdmissionStorageError):
+    with patch.object(SharedAdmission, "_open", open_storage), pytest.raises(AdmissionStorageError):
         open_with_retry(opener, object(), RequestBudget(5, 5, 5), attempts=2, admission=budget)
     assert calls == [1] and rejected.closed
     budget.release(budget.acquire())
