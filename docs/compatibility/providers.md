@@ -46,13 +46,13 @@ output the client cannot represent is omitted, never fabricated.
   with its 4xx status (non-retryable) instead of a generic stream error.
 - **Strict stream contract.** Non-standard Chat streams are rejected; see
   [errors](errors.md#chat-stream-variants-that-translated-routes-reject).
-- **Claude Code auto mode needs Anthropic's server-side check (2.1.319+).**
-  Behind any third-party provider or the gateway, Claude Code 2.1.319 cannot
-  run auto mode's safety review and has no local classifier to fall back to,
-  so auto mode asks or denies tool calls. This is a Claude Code limit, not a
-  gateway one; use the default or accept-edits permission modes instead.
-  Evidence: the 2.1.319 changelog and the CLI's own messages ("no local one
-  judges in its place"); not exercised end to end with a live provider.
+- **Claude Code auto mode works behind the gateway (2.1.319, live).** The
+  2.1.319 changelog says auto mode asks or denies calls its server-side review
+  cannot check behind gateways. A live check on 2026-11-07 (OpenRouter,
+  `nvidia/nemotron-3-ultra-550b-a55b:free`) found otherwise: a `Bash` file
+  write ran in auto mode both directly and through the gateway's Messages→Chat
+  route with ClaudApter's settings, and was refused in the default mode. How
+  Claude Code reviewed the call is not visible; recheck after CLI updates.
 
 ## OpenRouter
 
@@ -123,6 +123,31 @@ output the client cannot represent is omitted, never fabricated.
   - **Supported setup:** CodexApter, protocol `responses`, execution mode
     `direct` (Codex talks to AgentRouter itself). A live direct run answered
     correctly; tool execution in that run was not independently verified.
+
+## Live re-check (2026-11-07)
+
+Protoverta 0.3.0a10 plus the local fixes after it, Claude Code **2.1.319**
+(ClaudApter) and Codex CLI **0.167.0** (CodexApter). Two-tool loops, automatic
+reasoning policy.
+
+| Client | Route | Provider | Model | Result |
+|---|---|---|---|---|
+| Claude Code | Messages→Chat | OpenRouter | `stealth/crouton-alpha` | pass (37 s) |
+| Claude Code | Messages→Chat | OpenRouter | `nvidia/nemotron-3-ultra-550b-a55b:free` | pass (8 s) |
+| Claude Code | Messages→Responses | OpenRouter | `nvidia/nemotron-3-ultra-550b-a55b:free` | pass (6 s) |
+| Claude Code | Messages→Chat | NVIDIA NIM | `minimaxai/minimax-m3.1-flash` | pass on retry (122 s); first run hit the 240 s client limit |
+| Claude Code | Messages→Chat | NVIDIA NIM | `deepseek-ai/deepseek-v4.1-flash` | pass (188 s) |
+| Claude Code | Messages→Chat | NVIDIA NIM | `z-ai/glm-5.3-flash` | pass (24 s) |
+| Codex | Responses→Chat | OpenRouter | `stealth/crouton-alpha` | pass (18 s) |
+| Codex | Responses→Messages | OpenRouter | `nvidia/nemotron-3-ultra-550b-a55b:free` | pass (18 s) |
+| Codex | Responses→Chat | NVIDIA NIM | `minimaxai/minimax-m3.1-flash` | pass (161 s) |
+| Codex | Responses→Chat | NVIDIA NIM | `deepseek-ai/deepseek-v4.1-flash` | pass (150 s) |
+| Codex | Responses→Chat | NVIDIA NIM | `z-ai/glm-5.3-flash` | pass (7 s) |
+
+NIM's free tier was much slower than the day before (minimax and deepseek took
+two to three minutes per loop). Give long-running clients a generous timeout;
+the gateway's own defaults (300 s idle, 3600 s total) already allow this.
+TokenHarbor was not re-checked (no key on the test machine).
 
 ## Token logprobs (live, 2026-11-06)
 
