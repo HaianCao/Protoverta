@@ -45,7 +45,7 @@ jobs:
         run: python scripts/check_types.py
       - name: Build wheel
         run: python -m pip wheel --no-deps . --wheel-dir dist
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: source-tests-${{ runner.os }}-${{ matrix.python-version }}
@@ -93,7 +93,7 @@ jobs:
       - run: python -m pip check
       - name: Independent SDK streams against scripted loopback upstreams
         run: python scripts/check_sdk.py --installed --report-dir sdk-report
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: sdk-baseline-${{ runner.os }}-${{ matrix.python-version }}

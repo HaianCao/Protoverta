@@ -140,12 +140,12 @@ jobs:
           $claude = (Get-ChildItem validation/dist/free-claude-cli/*.whl).FullName
           python protoverta/scripts/validate_upgrade.py --previous-wheel validation/protoverta-0.3.0a6-py3-none-any.whl --next-wheel $next --codex-wheel $codex --claude-wheel $claude
           if ($LASTEXITCODE) { throw 'Legacy upgrade gate failed' }
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: ecosystem-distributions
           path: validation/dist
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: compatibility-validation

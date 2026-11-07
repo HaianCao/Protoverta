@@ -52,7 +52,7 @@ jobs:
           DEPENDENCIES_OUTCOME: ${{ steps.dependencies.outcome }}
           CONFORMANCE_OUTCOME: ${{ steps.conformance.outcome }}
         run: python -c "import json,os; from pathlib import Path; p=Path('sdk-candidate-report'); p.mkdir(exist_ok=True); (p/'workflow-stages.json').write_text(json.dumps({k:os.environ[k] for k in ('PREPARE_OUTCOME','WHEEL_OUTCOME','UPGRADE_OUTCOME','DEPENDENCIES_OUTCOME','CONFORMANCE_OUTCOME')},indent=2),encoding='utf-8')"
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: sdk-candidate-${{ runner.os }}
