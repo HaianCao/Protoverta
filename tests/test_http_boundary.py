@@ -13,7 +13,8 @@ from protoverta.server import GatewayConfig, GatewayHTTPServer, make_handler
 
 @contextmanager
 def boundary_server(**options):
-    config = GatewayConfig("chat", "https://example.invalid/v1", "fixture", "local", timeout=0.5, total_timeout=0.2, progress_timeout=0.5, **options)
+    options = {"timeout": 0.5, "total_timeout": 0.2, "progress_timeout": 0.5, **options}
+    config = GatewayConfig("chat", "https://example.invalid/v1", "fixture", "local", **options)
     calls = []
 
     def upstream(request, timeout):
@@ -46,7 +47,12 @@ def test_trickling_body_expires_before_upstream_call():
 
 
 def test_header_deadline_and_connection_capacity_apply_before_authentication():
-    with boundary_server(max_concurrent_requests=1) as (address, calls), socket.create_connection(address, timeout=2) as first:
+    # The stalled first connection must hold its slot (header deadline 2 s)
+    # longer than the 0.5 s grace a waiting connection gets before its 503.
+    with (
+        boundary_server(max_concurrent_requests=1, timeout=2.0, total_timeout=2.0, progress_timeout=2.0) as (address, calls),
+        socket.create_connection(address, timeout=5) as first,
+    ):
         first.sendall(b"POST /v1/chat/completions HTTP/1.0\r\nX-Fixture:")
         # Wait for the accepted connection to own the sole handler slot.
         time.sleep(0.04)
@@ -85,3 +91,15 @@ def test_non_ascii_bearer_is_unauthorized_and_listener_recovers():
 def test_non_ascii_configured_inbound_token_is_rejected_early():
     with pytest.raises(ValueError, match="ASCII"):
         GatewayConfig("chat", "https://example.invalid/v1", "fixture", "é")
+
+
+def test_connection_freed_within_the_grace_window_is_served_not_rejected():
+    with boundary_server(max_concurrent_requests=1) as (address, calls), socket.create_connection(address, timeout=2) as first:
+        first.sendall(b"POST /v1/chat/completions HTTP/1.0\r\nX-Fixture:")
+        time.sleep(0.04)  # The first connection owns the sole slot.
+        with socket.create_connection(address, timeout=2) as second:
+            second.sendall(b"POST /v1/chat/completions HTTP/1.0\r\nContent-Length: 0\r\n\r\n")
+            time.sleep(0.05)
+            first.close()  # Frees the slot while the second waits for it.
+            assert b"401" in second.recv(4096).split(b"\r\n", 1)[0]
+        assert not calls

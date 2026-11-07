@@ -62,9 +62,11 @@ incremental taxonomy: not every older unsupported-field rejection has been
 migrated to the new class. Do not infer semantics by matching exception messages.
 
 `--max-concurrent-requests` (Python: `max_concurrent_requests`) defaults to 16
-active authenticated requests per gateway. Excess requests receive 503 with
-`Retry-After: 1` without reaching upstream. Slots are released on completion,
-failure or disconnect. This is local concurrency control, not a provider RPM/TPM
+active authenticated requests per gateway. A request or connection that finds
+no free slot waits up to 0.5 s for one (a client that sends its next request as
+soon as a response ends would otherwise race the slot release), then receives
+503 with `Retry-After: 1` without reaching upstream. Slots are released on
+completion, failure or disconnect. This is local concurrency control, not a provider RPM/TPM
 rate limiter and not a global limit across gateway processes.
 
 `--timeout` (Python: `timeout`) defaults to 300 seconds and bounds socket I/O,

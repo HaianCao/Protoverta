@@ -1320,13 +1320,30 @@ class GatewayHTTPServer(ThreadingHTTPServer):
 
     def process_request(self, request, client_address):
         if not self._connections.acquire(blocking=False):
-            # Tell the client to retry instead of resetting the connection,
-            # without blocking the accept loop.
+            # Off the accept loop: wait briefly for a slot (a handler frees it
+            # just after its client saw the connection close, so an immediate
+            # reconnect races the release), else tell the client to retry
+            # instead of resetting the connection.
             if self._rejections.acquire(blocking=False):
-                threading.Thread(target=self._reject_over_capacity, args=(request,), name="protoverta-capacity-reply", daemon=True).start()
+                threading.Thread(target=self._admit_or_reject, args=(request, client_address), name="protoverta-capacity-reply", daemon=True).start()
             else:
                 self.shutdown_request(request)
             return
+        self._admit(request, client_address)
+
+    def _admit_or_reject(self, request, client_address):
+        if not self._connections.acquire(timeout=REQUEST_SLOT_GRACE_SECONDS):
+            self._reject_over_capacity(request)
+            return
+        self._rejections.release()
+        try:
+            self._admit(request, client_address)
+        except Exception:  # noqa: BLE001 - same contract as socketserver's handler threads
+            self.handle_error(request, client_address)
+            self.shutdown_request(request)
+
+    def _admit(self, request, client_address):
+        """Serve a request whose connection slot is already held."""
         with self._clients_changed:
             closing = self._closing
             if not closing:
