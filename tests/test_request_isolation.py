@@ -32,7 +32,7 @@ def request_body(target, model):
 
 def connect(origin, target, model, token="local"):
     endpoint = urlsplit(origin)
-    connection = HTTPConnection(endpoint.hostname, endpoint.port, timeout=4)
+    connection = HTTPConnection(endpoint.hostname, endpoint.port, timeout=8)
     path = {Protocol.CHAT: "chat/completions", Protocol.MESSAGES: "messages", Protocol.RESPONSES: "responses"}[target]
     connection.request("POST", "/v1/" + path, json.dumps(request_body(target, model)), {"Authorization": "Bearer " + token})
     peer = connection.sock
@@ -82,7 +82,7 @@ def upstream(source, *, failure=None, parties=3):
                 peak[0] = max(peak[0], len(active))
             try:
                 if model in {"a", "b", "parent"}:
-                    barrier.wait(timeout=2)
+                    barrier.wait(timeout=2.5)
                 if model == "a" and failure == "429":
                     self.send_response(429)
                     self.send_header("Content-Type", "application/json")
@@ -107,7 +107,8 @@ def upstream(source, *, failure=None, parties=3):
                     ]
                 )
                 if model == "a" and failure in {"timeout", "cancel"}:
-                    self.connection.settimeout(3)
+                    # Stall longer than the gateway progress timeout below.
+                    self.connection.settimeout(4.5 if failure == "timeout" else 3)
                     if not self.connection.recv(1):
                         cancelled.set()
                     return
@@ -171,9 +172,10 @@ def test_failed_child_lane_does_not_poison_sibling_or_refund_shared_request_quot
                 "local",
                 messages_usage_policy="deferred",
                 # Healthy lanes wait for all three requests at the fixture
-                # barrier before their first byte; 0.5 s flaked on slow CI
-                # runners. The stalled lane still exceeds this (3 s).
-                progress_timeout=1.5,
+                # barrier (up to 2.5 s) before their first byte, so this must
+                # exceed the arrival spread on slow Windows runners; 0.5 s and
+                # 1.5 s both flaked. The stalled lane still exceeds it (4.5 s).
+                progress_timeout=3.0,
                 shared_admission_db=str(tmp_path / "quota.sqlite"),
                 shared_requests=4,
                 shared_concurrency=3,
