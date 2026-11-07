@@ -18,7 +18,7 @@ has the same headings: endpoints, tested models, recommended settings, limits.
 | NVIDIA NIM | `z-ai/glm-5.3-flash` | Chat | Tool loop passed | Gateway tool loop passed |
 | NVIDIA NIM | `deepseek-ai/deepseek-v4.1-flash` | Chat | Tool loop passed | Works with effort `low`/`high`; `medium` rejected by provider |
 | NVIDIA NIM | `minimaxai/minimax-m3.1-flash` | Chat | Gateway tool loop passed | Tool loop passed |
-| TokenHarbor | `deepseek-v4.1-flash:free` | Chat, Responses, Messages | Tool loop passed on all three (Responses needs the post-a10 fix) | Tool loop passed on all three |
+| TokenHarbor | `deepseek-v4.1-flash:free` | Chat, Responses, Messages | Tool loop passed on all three (Responses needs 0.3.0a11) | Tool loop passed on all three |
 | AgentRouter | `gpt-5.6-sol` | Responses (direct only) | Not usable through the gateway | Direct mode: tool loop passes (2026-11-07) |
 
 "Gateway tool loop passed" rows were verified with a scripted client of the
@@ -111,8 +111,8 @@ output the client cannot represent is omitted, never fabricated.
   - Chat streams `reasoning_content`; honours `reasoning_effort: none`. Standard
     OpenAI stream shape with final usage and `[DONE]`.
   - Responses streams omit the `logprobs` field on text parts and on the final
-    text events. When logprobs were not requested, Protoverta after 0.3.0a10
-    (main, next release) reads the absent field as empty, so no data is lost;
+    text events. When logprobs were not requested, Protoverta 0.3.0a11
+    and later read the absent field as empty, so no data is lost;
     0.3.0a10 and earlier reject the stream with "unsupported Responses content
     part metadata" (HTTP 502), which breaks Claude Code on the Responses route.
     Requesting logprobs from the Responses endpoint still fails, because none
@@ -142,7 +142,7 @@ output the client cannot represent is omitted, never fabricated.
 
 ## Live re-check (2026-11-07)
 
-Protoverta 0.3.0a10 plus the local fixes after it, Claude Code **2.1.319**
+Protoverta 0.3.0a10 plus the fixes released in 0.3.0a11, Claude Code **2.1.319**
 (ClaudApter) and Codex CLI **0.167.0** (CodexApter). Two-tool loops, automatic
 reasoning policy.
 
