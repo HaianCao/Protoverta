@@ -3,7 +3,7 @@
 Published previews: Protoverta **0.3.0a8** (2026-11-06), **0.3.0a10**
 (2026-11-07) and **0.3.0a11** (2026-11-07; Responses streams without
 unrequested text logprobs, connection-level slot grace, Python 3.14 in CI).
-The `v0.3.0a9` tag exists but has no release: its Windows
+`v0.3.0a9` was tagged but never released (the tag was removed on 2026-11-07): its Windows
 validation exposed a request-slot release race and slow per-transaction SQLite
 connections, both fixed in a10 (WAL plus one kept connection; a 0.5 s slot
 grace). CodexApter and ClaudApter **0.2.0a2** on their integration branches pin

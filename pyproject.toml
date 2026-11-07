@@ -10,10 +10,28 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 dependencies = []
+authors = [{ name = "HaianCao", email = "caohaian2005@gmail.com" }]
+keywords = ["llm", "openai", "anthropic", "chat-completions", "responses-api", "messages-api", "gateway", "protocol-adapter"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Operating System :: OS Independent",
+    "Environment :: Console",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
 
 [project.urls]
+Homepage = "https://github.com/HaianCao/Protoverta"
+Documentation = "https://github.com/HaianCao/Protoverta/tree/main/docs"
 Repository = "https://github.com/HaianCao/Protoverta"
 Issues = "https://github.com/HaianCao/Protoverta/issues"
+Changelog = "https://github.com/HaianCao/Protoverta/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 test = ["pytest>=8", "ruff==0.17.2"]

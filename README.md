@@ -13,11 +13,31 @@ Chat Completions <-> Messages <-> Responses
 
 One Gateway. Any Protocol. Any Model.
 
+<p>
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-5a4fcf?style=flat-square"></a>
+  <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-3776ab?style=flat-square&logo=python&logoColor=white">
+  <img alt="Windows and Linux" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-0078d4?style=flat-square">
+  <img alt="No dependencies" src="https://img.shields.io/badge/dependencies-none-2e7d32?style=flat-square">
+  <a href="https://github.com/HaianCao/Protoverta/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/HaianCao/Protoverta/ci.yml?branch=main&style=flat-square&label=tests"></a>
+  <a href="https://github.com/HaianCao/Protoverta/releases"><img alt="Latest preview" src="https://img.shields.io/github/v/release/HaianCao/Protoverta?include_prereleases&style=flat-square&label=preview"></a>
+</p>
+
 </div>
 
 Protoverta converts requests and responses among OpenAI Chat Completions, Anthropic Messages, and OpenAI Responses. Use it as a Python library or run it as a local HTTP gateway.
 
 **Current scope:** text, user images and inline PDF inputs, client-side function tools, forced function selection, and supported JSON output formats, including incremental SSE where usage and event ordering can be preserved. Optional policies support token counting, certified cache checkpoints and native Responses compaction. Unsupported fields, audio/video conversion and nonportable server-owned state are rejected rather than silently changed.
+
+**Ready-made launchers.** To use Codex or Claude Code with another provider
+without configuring the gateway yourself, install one of the launchers built on
+Protoverta:
+
+| Launcher | Runs | Command |
+| --- | --- | --- |
+| [CodexApter](https://github.com/HaianCao/CodexApter) | OpenAI Codex CLI with Chat Completions, Messages or Responses providers | `codex-ca` |
+| [ClaudApter](https://github.com/HaianCao/ClaudApter) | Claude Code with Messages, Chat Completions or Responses providers | `claude-ca` |
+
+Tested providers and their limits: [provider compatibility](docs/compatibility/providers.md).
 
 ## Install
 

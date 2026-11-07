@@ -1,0 +1,72 @@
+# Changelog
+
+All notable changes to Protoverta are listed here. Versions are pre-release
+previews (`0.3.0aN`); each one is published as a GitHub release with a wheel and
+an sdist. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+## [Unreleased]
+
+### Added
+- README badges, launcher links, package metadata (authors, keywords,
+  classifiers, project URLs), contributor guide and issue templates.
+
+## [0.3.0a11] - 2026-11-07
+
+### Fixed
+- Responses streams whose text events omit `logprobs` (for example
+  TokenHarbor) are accepted when logprobs were not requested. They were
+  rejected with "unsupported Responses content part metadata" (HTTP 502).
+- A connection that arrives while the gateway is at its connection limit waits
+  up to 0.5 s for a slot before receiving 503, so an immediate reconnect after a
+  closed connection is served.
+
+### Changed
+- CI also tests Python 3.14. GitHub Actions moved to Node 24 releases.
+- Provider compatibility notes cover TokenHarbor's Responses and Messages
+  endpoints, AgentRouter in direct mode, and a live re-check on
+  Claude Code 2.1.319 and Codex CLI 0.167.0.
+
+## [0.3.0a10] - 2026-11-07
+
+### Fixed
+- A request that arrives right after a response finished could get a spurious
+  503 "capacity reached" because the slot was released late. Requests now wait
+  up to 0.5 s for a slot.
+- Shared admission storage uses SQLite WAL and one kept connection per gateway
+  (about 0.2 ms per admission instead of about 11 ms), closed with the server.
+  Busy storage is waited on for up to 5 s.
+
+`v0.3.0a9` was tagged but never released (its validation exposed the issues
+fixed in 0.3.0a10); the tag was removed.
+
+## [0.3.0a8] - 2026-11-06
+
+### Added
+- `--reasoning-output omit` (`reasoning_output` policy): reasoning a translated
+  route cannot represent is dropped instead of failing the request. Nothing is
+  fabricated or forwarded.
+- Provider errors reported inside an HTTP 200 stream reach the client with the
+  provider's status and message.
+- `docs/compatibility/providers.md`: tested providers, their limits and
+  recommended settings.
+
+### Fixed
+- Chat responses with `function_call: null` or `audio: null` are accepted.
+- Over-capacity connections receive 503 with `Retry-After` instead of a reset;
+  request headers must arrive within 15 s.
+
+### Changed
+- Default timeouts: 300 s socket and progress, 3600 s total, matching the
+  Codex and Claude Code idle limits.
+- The strict type gate covers seventeen runtime modules.
+
+## [0.3.0a6] - 2026-10-23
+
+Earlier previews (0.3.0a5 and 0.3.0a6) are described in their
+[GitHub releases](https://github.com/HaianCao/Protoverta/releases).
+
+[Unreleased]: https://github.com/HaianCao/Protoverta/compare/v0.3.0a11...HEAD
+[0.3.0a11]: https://github.com/HaianCao/Protoverta/releases/tag/v0.3.0a11
+[0.3.0a10]: https://github.com/HaianCao/Protoverta/releases/tag/v0.3.0a10
+[0.3.0a8]: https://github.com/HaianCao/Protoverta/releases/tag/v0.3.0a8
+[0.3.0a6]: https://github.com/HaianCao/Protoverta/releases/tag/v0.3.0a6
