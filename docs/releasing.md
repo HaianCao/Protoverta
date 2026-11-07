@@ -64,9 +64,9 @@ runtime API works. It never edits a real installation or configuration.
    before dispatching the ecosystem workflow against those exact refs.
 2. Run core platform CI and the ecosystem job. Do not merge integration into
    launcher main as part of validation.
-3. Only after passing gates, publish a NEW v0.3.0a7 tag/assets through the release
+3. Only after passing gates, publish a NEW version tag and assets through the release
    workflow. The tag must match pyproject.toml. Never force/reuse an old tag.
-4. Verify a7 asset availability, then run both consumer pinned-gateway CI jobs
+4. Verify the new asset is downloadable, then run both consumer pinned-gateway CI jobs
    and one-line preview install/update/uninstall checks. Do not publish a consumer
    preview relying on an unavailable core release.
 5. Real-provider certification is opt-in, model/endpoint/feature-specific and
