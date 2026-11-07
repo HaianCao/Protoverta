@@ -19,7 +19,7 @@ has the same headings: endpoints, tested models, recommended settings, limits.
 | NVIDIA NIM | `deepseek-ai/deepseek-v4.1-flash` | Chat | Tool loop passed | Works with effort `low`/`high`; `medium` rejected by provider |
 | NVIDIA NIM | `minimaxai/minimax-m3.1-flash` | Chat | Gateway tool loop passed | Tool loop passed |
 | TokenHarbor | `deepseek-v4.1-flash:free` | Chat | Tool loop passed | Tool loop passed |
-| AgentRouter | `gpt-5.6-sol` | Responses (direct only) | Not usable through the gateway | Direct mode answered correctly |
+| AgentRouter | `gpt-5.6-sol` | Responses (direct only) | Not usable through the gateway | Direct mode: tool loop passes (2026-11-07) |
 
 "Gateway tool loop passed" rows were verified with a scripted client of the
 same wire shape (two-turn tool loop through the real provider), not the CLI.
@@ -121,8 +121,15 @@ output the client cannot represent is omitted, never fabricated.
     detected". The gateway does not imitate another client, so **gateway mode,
     Chat Completions and ClaudApter cannot be used with AgentRouter**.
   - **Supported setup:** CodexApter, protocol `responses`, execution mode
-    `direct` (Codex talks to AgentRouter itself). A live direct run answered
-    correctly; tool execution in that run was not independently verified.
+    `direct` (Codex talks to AgentRouter itself). On 2026-11-07, `codex-ca exec`
+    with Codex 0.167.0 completed a tool round trip twice (9 s each; the
+    session rollout records the tool call and its output before the answer).
+  - **Retries can land on another backend.** In one longer run, after Codex's
+    stream reconnect ("Reconnecting... 1/5") AgentRouter answered "The
+    requested item was created under a different Azure OpenAI resource" and the
+    turn failed. Requests that refer to earlier response items only work on
+    the backend that created them, and AgentRouter does not keep a session on
+    one backend. Re-run the prompt; this cannot be fixed on the client side.
 
 ## Live re-check (2026-11-07)
 
@@ -143,6 +150,7 @@ reasoning policy.
 | Codex | Responses→Chat | NVIDIA NIM | `minimaxai/minimax-m3.1-flash` | pass (161 s) |
 | Codex | Responses→Chat | NVIDIA NIM | `deepseek-ai/deepseek-v4.1-flash` | pass (150 s) |
 | Codex | Responses→Chat | NVIDIA NIM | `z-ai/glm-5.3-flash` | pass (7 s) |
+| Codex | Responses, direct | AgentRouter | `gpt-5.6-sol` | pass, 2 of 2 (9 s each) |
 
 NIM's free tier was much slower than the day before (minimax and deepseek took
 two to three minutes per loop). Give long-running clients a generous timeout;
