@@ -46,6 +46,13 @@ output the client cannot represent is omitted, never fabricated.
   with its 4xx status (non-retryable) instead of a generic stream error.
 - **Strict stream contract.** Non-standard Chat streams are rejected; see
   [errors](errors.md#chat-stream-variants-that-translated-routes-reject).
+- **Claude Code auto mode needs Anthropic's server-side check (2.1.319+).**
+  Behind any third-party provider or the gateway, Claude Code 2.1.319 cannot
+  run auto mode's safety review and has no local classifier to fall back to,
+  so auto mode asks or denies tool calls. This is a Claude Code limit, not a
+  gateway one; use the default or accept-edits permission modes instead.
+  Evidence: the 2.1.319 changelog and the CLI's own messages ("no local one
+  judges in its place"); not exercised end to end with a live provider.
 
 ## OpenRouter
 

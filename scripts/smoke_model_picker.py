@@ -98,7 +98,7 @@ class Terminal:
 
 
 # Native CLI releases this fixture was exercised with; extend after review.
-FIXTURE_VERSIONS = {"codex": {"codex-cli 0.166.0", "codex-cli 0.167.0"}, "claude": {"2.1.308 (Claude Code)", "2.1.318 (Claude Code)"}}
+FIXTURE_VERSIONS = {"codex": {"codex-cli 0.166.0", "codex-cli 0.167.0"}, "claude": {"2.1.308 (Claude Code)", "2.1.318 (Claude Code)", "2.1.319 (Claude Code)"}}
 
 
 def worker(client, source, report, workspace):
