@@ -20,13 +20,15 @@ _LOCAL_LOCKS_GUARD = threading.Lock()
 
 
 class AdmissionDenied(Exception):
+    """The shared request budget is exhausted; ``retry_after`` says how many seconds to wait."""
+
     def __init__(self, retry_after: float) -> None:
         self.retry_after = max(1, math.ceil(retry_after))
         super().__init__("Shared provider request budget reached.")
 
 
 class AdmissionPolicyError(ValueError):
-    pass
+    """Two gateways use the same budget database and upstream account with different limits."""
 
 
 # How long a transaction waits for the database lock (SQLite busy timeout and
@@ -42,6 +44,13 @@ class AdmissionStorageError(RuntimeError):
 
 
 class SharedAdmission:
+    """A request-rate and concurrency budget shared by gateway processes through one SQLite file.
+
+    Scopes are hashes of the upstream prefix and key; no prompts or
+    credentials are stored. Busy storage fails closed with
+    ``AdmissionStorageError``.
+    """
+
     def __init__(
         self,
         path: str | PathLike[str],

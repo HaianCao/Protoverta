@@ -92,6 +92,15 @@ _PATHS = {
 
 @dataclass(frozen=True, slots=True)
 class GatewayConfig:
+    """Immutable configuration of one local gateway session.
+
+    The required fields are the upstream protocol, its base URL (HTTPS, or HTTP
+    on loopback), the upstream API key and the inbound token local clients must
+    send. Every other field is an explicit, validated policy with a
+    conservative default; see the gateway documentation for each one. Invalid
+    combinations raise ``ValueError`` when the object is created.
+    """
+
     upstream_protocol: Protocol
     upstream_base_url: str
     upstream_api_key: str = field(repr=False)
@@ -314,6 +323,12 @@ class _RedirectBlocker(HTTPRedirectHandler):
 
 
 def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observer | None = None) -> type[BaseHTTPRequestHandler]:
+    """Build the HTTP request handler class for ``config``.
+
+    ``upstream_open`` replaces the HTTPS opener (tests inject scripted
+    upstreams); ``observer`` receives one payload-free ``RequestObservation``
+    per request.
+    """
     model_identity_salt = secrets.token_bytes(32)
     opener = build_opener(_RedirectBlocker(), DeadlineHTTPHandler(), DeadlineHTTPSHandler())
     open_upstream = upstream_open or opener.open
@@ -1500,6 +1515,11 @@ class GatewayHTTPServer(ThreadingHTTPServer):
 
 
 def serve(config: GatewayConfig, host: str = "127.0.0.1", port: int = 0, *, observer: Observer | None = None) -> ThreadingHTTPServer:
+    """Create a gateway server bound to ``127.0.0.1`` (port 0 picks a free port).
+
+    Call ``serve_forever()`` on the result and ``server_close()`` when done;
+    :func:`gateway_session` does both for one CLI session.
+    """
     if host != "127.0.0.1":
         raise ValueError("this version only binds to 127.0.0.1")
     server = GatewayHTTPServer((host, port), make_handler(config, observer=observer))

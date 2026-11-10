@@ -14,6 +14,7 @@ Chat Completions <-> Messages <-> Responses
 One Gateway. Any Protocol. Any Model.
 
 <p>
+  <a href="https://haiancao.github.io/Protoverta/"><img alt="Documentation" src="https://img.shields.io/badge/docs-online-2f6f8f?style=flat-square"></a>
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-5a4fcf?style=flat-square"></a>
   <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-3776ab?style=flat-square&logo=python&logoColor=white">
   <img alt="Windows and Linux" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-0078d4?style=flat-square">
@@ -41,11 +42,13 @@ Tested providers and their limits: [provider compatibility](docs/compatibility/p
 
 ## Install
 
-Python 3.11+ is required.
+Python 3.11+ is required; there are no dependencies.
 
 ```powershell
-python -m pip install -e ".[test]"
+python -m pip install protoverta
 ```
+
+Full documentation — guides, the gateway's HTTP API, the command reference and the Python API — is at **[haiancao.github.io/Protoverta](https://haiancao.github.io/Protoverta/)**. To work on Protoverta itself, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Library
 

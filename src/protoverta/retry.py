@@ -20,15 +20,21 @@ from .error_classes import ErrorClass, RetryPolicy, classify, describe
 
 
 class RetryHeaders(Protocol):
+    """Anything with a case-insensitive ``get`` for response headers."""
+
     def get(self, key: str) -> str | None: ...
 
 
 class RetryBudget(Protocol):
+    """The part of a request budget retries use: time left and an interruptible wait."""
+
     def remaining(self) -> float: ...
     def wait(self, seconds: float) -> None: ...
 
 
 class Admission(Protocol):
+    """The part of a shared admission budget retries use."""
+
     def acquire(self) -> str: ...
     def release(self, identifier: str | None) -> None: ...
     def cooldown(self, seconds: float) -> None: ...
@@ -38,10 +44,13 @@ ResponseT_co = TypeVar("ResponseT_co", covariant=True)
 
 
 class UpstreamOpener(Protocol[ResponseT_co]):
+    """A callable that opens one upstream request with a timeout."""
+
     def __call__(self, request: Request, *, timeout: float) -> ResponseT_co: ...
 
 
 def retry_after(headers: RetryHeaders | None, *, now: float | None = None) -> float | None:
+    """Seconds to wait from a ``Retry-After`` header (delta seconds or an HTTP date), or ``None``."""
     raw = headers.get("Retry-After") if headers else None
     if raw is None:
         return None

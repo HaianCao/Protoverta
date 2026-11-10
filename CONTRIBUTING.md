@@ -16,6 +16,15 @@ python -m ruff format --check .
 python scripts/check_types.py
 ```
 
+Documentation is built with Sphinx; warnings are errors:
+
+```powershell
+python -m pip install -r docs/requirements.txt
+python -m sphinx -W --keep-going -b html docs docs/_build/html
+```
+
+Every name exported from `protoverta` needs a docstring; CI checks this.
+
 ## Pull requests
 
 - Add sanitized fixtures and tests for **both directions** of any protocol
@@ -29,6 +38,6 @@ python scripts/check_types.py
 
 ## Releases
 
-Releases are cut by the maintainer; see [docs/releasing.md](docs/releasing.md).
+Releases are cut by the maintainer; see [docs/releasing.md](https://github.com/HaianCao/Protoverta/blob/main/docs/releasing.md).
 Every code change ships under a new version; published tags and assets are
 never replaced.

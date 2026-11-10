@@ -50,6 +50,8 @@ class ModelTokenCounter:
 
 
 class NativeTokenCounter:
+    """Count input tokens with the provider's own endpoint (Messages ``count_tokens`` or Responses ``input_tokens``); never an estimate."""
+
     def __init__(self, config, *, upstream_open=None):
         self.config = config
         self.open = upstream_open or build_opener(_NoRedirect(), DeadlineHTTPHandler(), DeadlineHTTPSHandler()).open

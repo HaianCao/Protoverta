@@ -13,6 +13,8 @@ from .errors import ConversionError
 
 @dataclass(frozen=True, slots=True)
 class TokenCount:
+    """A token count and whether it is exact (an operator or provider count) rather than an estimate."""
+
     tokens: int
     exact: bool = False
 
@@ -23,6 +25,11 @@ class TokenCount:
 
 @dataclass(frozen=True, slots=True)
 class ContextAssessment:
+    """The result of a context-window preflight: counted input, reserved output, the model's window and a verdict.
+
+    :meth:`headers` renders it as ``X-Protoverta-Context-*`` response headers.
+    """
+
     input_tokens: int | None
     reserved_output_tokens: int | None
     context_window_tokens: int | None

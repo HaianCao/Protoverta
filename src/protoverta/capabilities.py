@@ -63,6 +63,8 @@ def route_policies(config) -> dict:
 
 @dataclass(frozen=True, slots=True)
 class RouteCapabilityRecord:
+    """Recorded evidence that one client protocol, route policy and feature set worked through this gateway against an exact upstream model."""
+
     base_url: str
     protocol: Protocol | str
     model: str
@@ -129,6 +131,8 @@ def _prefix(value: str) -> str:
 
 @dataclass(frozen=True, slots=True)
 class CapabilityRecord:
+    """Recorded capabilities of one exact upstream model: which features are ``supported``, ``unsupported`` or unknown, and its token limits."""
+
     base_url: str
     protocol: Protocol | str
     model: str
@@ -169,6 +173,8 @@ class CapabilityRecord:
 
 @dataclass(frozen=True, slots=True)
 class CapabilityReport:
+    """The outcome of checking requested features against a record; :meth:`require` raises ``UnsupportedFeatureError`` for an unsupported (or, when verified, unknown) feature."""
+
     supported: tuple[str, ...]
     unsupported: tuple[str, ...]
     unknown: tuple[str, ...]
@@ -343,6 +349,13 @@ def request_features(body: dict, protocol: Protocol | str) -> frozenset[str]:
 
 
 class CapabilityRegistry:
+    """Capability records keyed by API prefix, protocol and exact model ID.
+
+    Load one with :meth:`load` (JSON) and check requests with :meth:`assess`,
+    :meth:`preflight` or :meth:`assess_route`. Nothing is inferred from model
+    names or catalogs.
+    """
+
     def __init__(self, records: tuple[CapabilityRecord, ...] = (), routes: tuple[RouteCapabilityRecord, ...] = ()):
         index = {}
         for record in records:
