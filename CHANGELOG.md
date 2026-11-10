@@ -17,6 +17,14 @@ an sdist. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.
 - README badges, launcher links, package metadata (authors, keywords,
   classifiers, project URLs), contributor guide and issue templates.
 
+- `protoverta` console command (also `python -m protoverta`), `--version`,
+  `protoverta.__version__` and a `py.typed` marker (PEP 561).
+
+### Changed
+- `/v1/models` accepts requests that carry both `Authorization` and
+  `x-api-key` when every credential matches (Claude Code 2.1.248+ sends both).
+- The source distribution no longer includes internal development reports.
+
 ### Fixed
 - An unexpected gateway fault is answered with HTTP 500 `internal_error`
   and `x-should-retry: false` instead of a dropped connection, and no

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "protoverta"
-version = "0.3.0a11"
+version = "0.3.0rc1"
 description = "A strict, provider-neutral adapter for Chat Completions, Messages, and Responses"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -43,8 +43,15 @@ browser-test = ["playwright==1.64.1"]
 harness-test = ["pywinpty==3.1.2; sys_platform == 'win32'"]
 coverage-test = ["coverage==7.17.0"]
 
+[project.scripts]
+protoverta = "protoverta.__main__:main"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/protoverta"]
+
+[tool.hatch.build.targets.sdist]
+# Development reports and validation artifacts are not part of a release.
+exclude = ["docs/development", ".github", "fuzz_tests", "sdk_tests", "scripts"]
 
 [tool.ruff]
 # Formatter width; long literals that cannot wrap are left as written.

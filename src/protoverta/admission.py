@@ -29,10 +29,11 @@ class AdmissionPolicyError(ValueError):
     pass
 
 
-# Each transaction opens a connection and (in the default rollback-journal
-# mode) creates and deletes a journal file. On Windows, file scanners can hold
-# those briefly; a 1 s wait rejected healthy requests on CI runners. Contention
-# beyond this bound still fails closed with AdmissionStorageError.
+# How long a transaction waits for the database lock (SQLite busy timeout and
+# the local writer lock). One connection is kept per SharedAdmission in WAL
+# mode; on Windows, file scanners can still briefly hold the database or its
+# log, and a 1 s wait rejected healthy requests on CI runners. Contention beyond
+# this bound fails closed with AdmissionStorageError.
 STORAGE_WAIT_SECONDS = 5.0
 
 

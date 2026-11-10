@@ -6,8 +6,8 @@ import argparse
 import json
 import os
 import sys
-from dataclasses import replace
 
+from . import __version__
 from .capabilities import CapabilityRegistry
 from .core import Protocol
 from .error_classes import RetryPolicy
@@ -16,8 +16,10 @@ from .provider_profiles import ProviderProfiles
 from .server import GatewayConfig, serve
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Protoverta local LLM protocol gateway")
+def build_parser() -> argparse.ArgumentParser:
+    """The ``protoverta`` command-line parser (also used to document the CLI)."""
+    parser = argparse.ArgumentParser(prog="protoverta", description="Protoverta local LLM protocol gateway")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--upstream-protocol", choices=list(Protocol), required=True)
     parser.add_argument("--upstream-base-url", required=True)
     parser.add_argument("--upstream-key-env", required=True)
@@ -97,7 +99,12 @@ def main() -> int:
     parser.add_argument("--require-current-evidence", action="store_true")
     parser.add_argument("--evidence-max-age-days", type=int)
     parser.add_argument("--openrouter-provider", help="Opt-in single Chat provider/endpoint slug, no fallback, random per-gateway session affinity")
-    args = parser.parse_args()
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
     key = os.environ.get(args.upstream_key_env, "")
     token = os.environ.get(args.inbound_token_env, "")
     if not key or not token:
@@ -105,6 +112,16 @@ def main() -> int:
     try:
         capabilities = CapabilityRegistry.load(args.capabilities_file) if args.capabilities_file else None
         profiles = ProviderProfiles.load(args.provider_profiles_file) if args.provider_profiles_file else None
+        retry_policy = None
+        if args.retry_policy:
+            try:
+                raw_policy = json.loads(args.retry_policy)
+            except ValueError as exc:
+                raise ValueError(f"--retry-policy is not valid JSON: {exc}") from None
+            if not isinstance(raw_policy, dict):
+                raise ValueError("--retry-policy must be a JSON object")
+            retry_policy = RetryPolicy.from_mapping(raw_policy)
+        # One construction: GatewayConfig validates everything in __post_init__.
         config = GatewayConfig(
             Protocol(args.upstream_protocol),
             args.upstream_base_url,
@@ -124,9 +141,6 @@ def main() -> int:
             tool_names=args.tool_names,
             timeout=args.timeout,
             max_concurrent_requests=args.max_concurrent_requests,
-        )
-        config = replace(
-            config,
             total_timeout=args.total_timeout,
             progress_timeout=args.progress_timeout,
             max_stream_bytes=args.max_stream_bytes,
@@ -134,33 +148,21 @@ def main() -> int:
             max_tool_argument_bytes=args.max_tool_argument_bytes,
             client_tool_search=args.client_tool_search,
             provider_profiles=profiles,
-        )
-        config = replace(
-            config,
             shared_admission_db=args.shared_admission_db,
             shared_requests=args.shared_requests,
             shared_window=args.shared_window,
             shared_concurrency=args.shared_concurrency,
             retry_attempts=args.retry_attempts,
             retry_max_wait=args.retry_max_wait,
-        )
-        config = replace(config, require_verified_routes=args.require_verified_routes, context_preflight=args.context_preflight)
-        config = replace(
-            config,
+            require_verified_routes=args.require_verified_routes,
+            context_preflight=args.context_preflight,
             token_count_mode=args.token_count_mode,
             prompt_caching=args.prompt_caching,
             require_current_evidence=args.require_current_evidence,
             evidence_max_age_days=args.evidence_max_age_days,
+            openrouter_provider=args.openrouter_provider,
+            retry_policy=retry_policy,
         )
-        config = replace(config, openrouter_provider=args.openrouter_provider)
-        if args.retry_policy:
-            try:
-                raw_policy = json.loads(args.retry_policy)
-            except ValueError as exc:
-                raise ValueError(f"--retry-policy is not valid JSON: {exc}") from None
-            if not isinstance(raw_policy, dict):
-                raise ValueError("--retry-policy must be a JSON object")
-            config = replace(config, retry_policy=RetryPolicy.from_mapping(raw_policy))
     except (ValueError, TypeError, OSError) as exc:
         parser.error(str(exc))
     server = serve(config, port=args.port, observer=jsonl_observer(sys.stderr) if args.diagnostics else None)

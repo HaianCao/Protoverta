@@ -19,6 +19,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from . import __version__
 from .admission import (
     AdmissionDenied,
     AdmissionPolicyError,
@@ -334,7 +335,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
     )
 
     class Handler(BaseHTTPRequestHandler):
-        server_version = "Protoverta/0.3"
+        server_version = f"Protoverta/{__version__}"
         connection_limit = config.max_concurrent_requests
 
         @staticmethod
@@ -735,18 +736,17 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 if target.path != "/v1/models":
                     self._error(404, "unsupported endpoint", list_protocol, phase="request", path=target.path)
                     return
+                # Claude Code 2.1.248+ sends both Authorization and x-api-key on
+                # model discovery when both resolve (an apiKeyHelper value
+                # arrives in both). Every credential supplied must match.
                 tokens = self.headers.get_all("Authorization", [])
                 api_keys = self.headers.get_all("x-api-key", [])
-                bearer = tokens[0][7:] if len(tokens) == 1 and tokens[0].startswith("Bearer ") else None
-                supplied = bearer if tokens else api_keys[0] if len(api_keys) == 1 else None
+                supplied = [token[7:] if token.startswith("Bearer ") else None for token in tokens] + list(api_keys)
                 if (
                     len(tokens) > 1
                     or len(api_keys) > 1
-                    or tokens
-                    and api_keys
-                    or supplied is None
-                    or not supplied.isascii()
-                    or not secrets.compare_digest(supplied, config.inbound_token)
+                    or not supplied
+                    or any(value is None or not value.isascii() or not secrets.compare_digest(value, config.inbound_token) for value in supplied)
                 ):
                     self._error(401, "unauthorized", list_protocol, phase="request", path=target.path)
                     return

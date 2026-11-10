@@ -252,3 +252,27 @@ def test_catalog_obeys_local_admission_while_inference_is_active():
         assert pending.result(3) == 200
         with get(url) as response:
             assert response.status == 200
+
+
+@pytest.mark.parametrize(
+    ("headers", "status"),
+    [
+        ({"Authorization": "Bearer local", "x-api-key": "local"}, 200),
+        ({"x-api-key": "local"}, 200),
+        ({"Authorization": "Bearer local", "x-api-key": "other"}, 401),
+        ({"Authorization": "Bearer other", "x-api-key": "local"}, 401),
+        ({"Authorization": "Basic local"}, 401),
+    ],
+)
+def test_model_discovery_accepts_both_credential_headers_when_all_match(headers, status):
+    # Claude Code 2.1.248+ sends both headers when both resolve.
+    config = GatewayConfig("chat", BASE, "secret-key", "local", model_snapshot=snapshot("a"))
+    with listener(config, unavailable) as url:
+        request = Request(url.replace("/responses", "/models"), headers=headers)
+        if status == 200:
+            with urlopen(request, timeout=3) as response:
+                assert response.status == 200
+        else:
+            with pytest.raises(HTTPError) as exc:
+                urlopen(request, timeout=3)
+            assert exc.value.code == status
