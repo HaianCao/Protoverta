@@ -7,8 +7,20 @@ an sdist. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.
 ## [Unreleased]
 
 ### Added
+- Error-class retry policy (`GatewayConfig.retry_policy`, `--retry-policy`):
+  failed provider attempts are classified (rate limit, overloaded, server,
+  network, stream interrupted, backend mismatch, auth, billing, model not
+  found, context length, content policy, invalid request, unknown) and
+  transient classes are resent after a configurable wait. Streams are only
+  retried before any output. `protoverta.error_classes` exposes the
+  classifier for the launchers' direct-mode relay.
 - README badges, launcher links, package metadata (authors, keywords,
   classifiers, project URLs), contributor guide and issue templates.
+
+### Fixed
+- An unexpected gateway fault is answered with HTTP 500 `internal_error`
+  and `x-should-retry: false` instead of a dropped connection, and no
+  traceback is printed into the client's terminal.
 
 ## [0.3.0a11] - 2026-11-07
 

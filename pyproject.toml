@@ -64,6 +64,7 @@ files = [
   "src/protoverta/automatic_reasoning.py",
   "src/protoverta/custom_tools.py",
   "src/protoverta/documents.py",
+  "src/protoverta/error_classes.py",
   "src/protoverta/errors.py",
   "src/protoverta/evidence_identity.py",
   "src/protoverta/failures.py",

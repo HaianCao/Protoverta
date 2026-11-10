@@ -137,3 +137,37 @@ bodies also fail explicitly; partial HTTP payload bytes are not copied into
 generated error messages.
 
 Reference: [OpenAI Responses error events](https://developers.openai.com/api/reference/resources/responses/streaming-events).
+
+## Error-class retry policy
+
+`GatewayConfig.retry_policy` (CLI: `--retry-policy '{"max_retries": 10, "delay_seconds": 60}'`) makes the gateway resend a request whose provider attempt failed, before the client sees the failure. It supersedes `retry_attempts`/`retry_max_wait`.
+
+Each failed attempt is classified by `protoverta.error_classes.classify` from the HTTP status, the structured `error.type`/`error.code` and a small set of message patterns seen from real providers:
+
+| Class | Typical signal | Retried by default |
+|---|---|---|
+| `rate_limit` | 429, `rate_limit_error` | yes, waiting at least `Retry-After` |
+| `overloaded` | 503, 529, `overloaded_error`, "no available channel" | yes |
+| `server` | 500, 502, 504, `api_error` | yes |
+| `network` | connection refused/reset, DNS failure, socket timeout | yes |
+| `stream_interrupted` | a stream that fails or ends before any output | yes |
+| `backend_mismatch` | "created under a different Azure OpenAI resource" | yes |
+| `unknown` | anything not recognised below | yes |
+| `auth` | 401, 403, "invalid api key", "unauthorized client" | no |
+| `billing` | 402, "insufficient credits/quota" | no |
+| `model_not_found` | 404, "not a valid model ID", "model … not found" | no |
+| `context_length` | 413, "maximum context length" | no |
+| `content_policy` | content filter, "flagged by the safety system" | no |
+| `invalid_request` | other 400/422 `invalid_request_error` | no |
+
+Rules:
+
+- A stream is read until it produces output. Output is never resent; a stream that fails after output reaches the client as it is.
+- An upstream `x-should-retry` header wins over the class: `false` is never retried, `true` always is.
+- Waits are `delay_seconds` ± `jitter` (a fraction), at least the provider's `Retry-After`, and stop after `max_retries` retries, `max_total_seconds` of waiting or the request's total deadline. A deliberate wait does not count against `progress_timeout`.
+- Local deadlines and client disconnects are never retried. Cancelling the request in the client stops the wait.
+- The last failure reaches the client with `x-should-retry: false`, so the client does not retry it again on top. For `give_up_window_seconds` (30 s) after giving up, further failures are answered at once: clients that resend immediately (Codex reconnects, Claude Code resending a 400 with fewer features) do not run another full cycle each.
+- `retry_classes`/`no_retry_classes` add or remove classes; `skip_status` lists statuses that are never retried.
+- `retry_log` (a callable) receives one line per decision with the class, status and provider message; no request content is logged.
+
+Network retries resend a request whose generation may already have started upstream; providers can bill such attempts. Remove `network` from the retried classes where that matters.

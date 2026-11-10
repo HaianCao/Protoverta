@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from dataclasses import replace
 
 from .capabilities import CapabilityRegistry
 from .core import Protocol
+from .error_classes import RetryPolicy
 from .observability import jsonl_observer
 from .provider_profiles import ProviderProfiles
 from .server import GatewayConfig, serve
@@ -61,6 +63,10 @@ def main() -> int:
     parser.add_argument("--shared-concurrency", type=int, default=5)
     parser.add_argument("--retry-attempts", type=int, default=1, help="1 disables retries; at most 4 explicit HTTP-rejection attempts")
     parser.add_argument("--retry-max-wait", type=float, default=5)
+    parser.add_argument(
+        "--retry-policy",
+        help='Error-class retry as a JSON object, for example {"max_retries": 10, "delay_seconds": 60}; supersedes --retry-attempts',
+    )
     parser.add_argument(
         "--require-verified-capabilities",
         action="store_true",
@@ -147,6 +153,14 @@ def main() -> int:
             evidence_max_age_days=args.evidence_max_age_days,
         )
         config = replace(config, openrouter_provider=args.openrouter_provider)
+        if args.retry_policy:
+            try:
+                raw_policy = json.loads(args.retry_policy)
+            except ValueError as exc:
+                raise ValueError(f"--retry-policy is not valid JSON: {exc}") from None
+            if not isinstance(raw_policy, dict):
+                raise ValueError("--retry-policy must be a JSON object")
+            config = replace(config, retry_policy=RetryPolicy.from_mapping(raw_policy))
     except (ValueError, TypeError, OSError) as exc:
         parser.error(str(exc))
     server = serve(config, port=args.port, observer=jsonl_observer(sys.stderr) if args.diagnostics else None)

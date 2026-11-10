@@ -34,6 +34,7 @@ from .core import (
     convert_request,
     convert_response,
 )
+from .error_classes import RetryPolicy
 from .errors import UnsupportedFeatureError
 from .failures import FailurePhase, gateway_failure
 from .json_wire import decode_json, encode_json
@@ -52,7 +53,7 @@ from .resources import (
     StreamLimits,
     positive_number,
 )
-from .retry import open_with_retry, retry_after
+from .retry import RetryState, open_with_policy, open_with_retry, retry_after
 from .sse import encode_sse
 from .stream_pipe import StreamTranscoder, StreamValidator
 from .stream_writer import StreamHeartbeatWriter
@@ -133,8 +134,15 @@ class GatewayConfig:
     shared_token_limit: int | None = None
     codex_model_safe_resume: bool = False
     model_snapshot: ModelSnapshot | None = field(default=None, repr=False)
+    # Error-class retry (supersedes retry_attempts/retry_max_wait when set).
+    retry_policy: RetryPolicy | None = None
+    retry_log: object = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
+        if self.retry_policy is not None and not isinstance(self.retry_policy, RetryPolicy):
+            raise ValueError("retry_policy must be a RetryPolicy")
+        if self.retry_log is not None and not callable(self.retry_log):
+            raise ValueError("retry_log must be callable")
         if self.model_snapshot is not None and (
             not isinstance(self.model_snapshot, ModelSnapshot) or not self.model_snapshot.matches(self.upstream_base_url, self.upstream_protocol)
         ):
@@ -310,6 +318,8 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
     open_upstream = upstream_open or opener.open
     admission = threading.BoundedSemaphore(config.max_concurrent_requests)
     route_session_id = secrets.token_hex(16)
+    retry_policy = config.retry_policy if config.retry_policy is not None and config.retry_policy.enabled else None
+    retry_state = RetryState()
     shared_admission = (
         SharedAdmission(
             config.shared_admission_db,
@@ -694,9 +704,9 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                             or unsupported
                             or limited
                             or isinstance(exc, DeadlineExceeded)
-                            or reported
-                            and 400 <= status < 500
-                            and status not in (408, 409, 429)
+                            or (reported and 400 <= status < 500 and status not in (408, 409, 429))
+                            # The gateway already retried per its policy.
+                            or retry_policy is not None
                             else None,
                         )
                     else:
@@ -1144,9 +1154,23 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 watch = DisconnectWatch(self.connection, budget.cancel)
                 watch.__enter__()
                 request.protoverta_budget = budget
-                response, lease = open_with_retry(
-                    open_accounted, request, budget, attempts=config.retry_attempts, max_wait=config.retry_max_wait, admission=shared_admission
-                )
+                if retry_policy is not None:
+                    response, lease = open_with_policy(
+                        open_accounted,
+                        request,
+                        budget,
+                        retry_policy,
+                        config.upstream_protocol.value,
+                        streaming=streaming,
+                        state=retry_state,
+                        admission=shared_admission,
+                        log=config.retry_log,
+                        max_prefetch_bytes=config.max_body_bytes,
+                    )
+                else:
+                    response, lease = open_with_retry(
+                        open_accounted, request, budget, attempts=config.retry_attempts, max_wait=config.retry_max_wait, admission=shared_admission
+                    )
                 with response:
                     budget.remaining()
                     if streaming:
@@ -1289,7 +1313,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                     code=cause.kind if isinstance(cause, DeadlineExceeded) else "upstream_timeout" if timeout else "upstream_transport",
                     phase="upstream",
                     path=target_url.path,
-                    headers={"x-should-retry": "false"} if isinstance(cause, DeadlineExceeded) else None,
+                    headers={"x-should-retry": "false"} if isinstance(cause, DeadlineExceeded) or retry_policy is not None else None,
                 )
             except ToolPolicyViolation as exc:
                 self._error(
