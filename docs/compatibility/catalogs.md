@@ -9,7 +9,7 @@ normalized format preserves exact IDs/names with unknown capability status.
 Explicit vendor projections reject missing required facts rather than inventing
 them. Messages listing honors the selected API version; strict OpenAI listing
 requires reported creation time/owner. See the
-[session catalog contract and native picker acceptance](../development/p07-catalogs-and-picker-2026-11-04.md).
+[session catalog contract and native picker acceptance](https://github.com/HaianCao/Protoverta/blob/812134e/docs/development/p07-catalogs-and-picker-2026-11-04.md).
 
 Current launcher snapshots contain selected/auxiliary IDs only. Fresh,
 identity-checked cache data may enrich names, without adding every discovered

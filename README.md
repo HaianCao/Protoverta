@@ -252,6 +252,6 @@ Operational contracts: [HTTP boundaries and count errors](docs/compatibility/req
 [explicit routing and token quotas](docs/compatibility/routing-and-token-quotas.md).
 Development evidence: [versioned validation matrix](docs/development/validation-matrix.md)
 and [current OpenResponses schema gaps](docs/development/openresponses-audit.md).
-Latest local source/wheel acceptance: [P14 results and remaining gates](docs/development/p14-packaging-acceptance-2026-11-04.md).
+Latest local source/wheel acceptance: [P14 results and remaining gates](https://github.com/HaianCao/Protoverta/blob/812134e/docs/development/p14-packaging-acceptance-2026-11-04.md).
 Isolated acceptance: [local preview](docs/development/local-preview.md),
 [harness tools and session MCP](docs/development/harness-tools.md).

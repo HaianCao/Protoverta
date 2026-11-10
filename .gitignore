@@ -1,12 +1,28 @@
+# Python
 __pycache__/
 *.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Tool caches and reports
 .pytest_cache/
 .mypy_cache/
-.venv/
-dist/
-build/
-*.egg-info/
+.ruff_cache/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+docs/_build/
+
+# Secrets, logs and local tool settings
 .env
 .env.*
 !.env.example
+*.log
+.claude/
+
+# Local notes
 ROADMAP.md

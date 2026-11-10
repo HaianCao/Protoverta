@@ -35,19 +35,19 @@ Keep its hash with the test record. No foreign source/validator is vendored.
 
 ## Latest result, 2026-11-04 (effective tool policy)
 
-Latest local rerun after [generation profiles](generation-profiles-2026-11-04.md):
+Latest local rerun after [generation profiles](https://github.com/HaianCao/Protoverta/blob/812134e/docs/development/generation-profiles-2026-11-04.md):
 the unchanged baseline still fails **12/12** cases with **78** field findings.
 Sampling defaults can now be declared for all three upstream protocols, and an
 exact Responses penalty dialect can be explicitly enabled. The baseline declares
 neither; these additions do not infer its omitted values. Bounded real-provider
-logprob probes [did not certify either tested route](live-logprobs-2026-11-04.md).
+logprob probes [did not certify either tested route](https://github.com/HaianCao/Protoverta/blob/812134e/docs/development/live-logprobs-2026-11-04.md).
 
-Follow-up: [reported service-tier preservation](reported-tier-2026-11-04.md)
+Follow-up: [reported service-tier preservation](https://github.com/HaianCao/Protoverta/blob/812134e/docs/development/reported-tier-2026-11-04.md)
 retains actual Chat/Responses tier observations. The same pinned baseline was
 rerun unchanged and still has 78 field findings, because it supplies no tier.
 This follow-up is not full-schema acceptance.
 
-The [generation-control follow-up](generation-controls-2026-11-04.md) additionally
+The [generation-control follow-up](https://github.com/HaianCao/Protoverta/blob/812134e/docs/development/generation-controls-2026-11-04.md) additionally
 accepts explicit penalties for a Chat target and explicitly disabled logprobs.
 The baseline omits these controls, so their findings still remain. The report's
 coarse `controls_outside_portable_subset`/`unavailable` labels describe missing
@@ -82,8 +82,8 @@ profile in a different test would not establish real provider support or repair
 the remaining serving-tier, usage or control gaps. No schema validator, official
 case, native Responses body or reasoning contract was relaxed.
 
-Evidence: [audit report](tool-policy-audit-2026-11-04.json) and
-[implementation and validation](effective-tool-policy-2026-11-04.md).
+Evidence: [audit report](https://github.com/HaianCao/Protoverta/blob/812134e/docs/development/tool-policy-audit-2026-11-04.json) and
+[implementation and validation](https://github.com/HaianCao/Protoverta/blob/812134e/docs/development/effective-tool-policy-2026-11-04.md).
 
 ## Previous result, 2026-11-04 (snapshot consistency follow-up)
 
@@ -115,8 +115,8 @@ they are still failures, not repaired values. The standalone encoder has no
 request provenance and no longer advertises an assumed text format; the gateway
 can supply this fact because it holds the actual outbound request.
 
-Evidence: [actual pinned-runner report](response-snapshot-audit-2026-11-04.json),
-[changes, source/wheel identity and validation](response-snapshot-fixes-2026-11-04.md).
+Evidence: [actual pinned-runner report](https://github.com/HaianCao/Protoverta/blob/812134e/docs/development/response-snapshot-audit-2026-11-04.json),
+[changes, source/wheel identity and validation](https://github.com/HaianCao/Protoverta/blob/812134e/docs/development/response-snapshot-fixes-2026-11-04.md).
 No official validator, fixture expectations or selected cases were patched.
 
 ## Previous result, 2026-11-04 (P13 Re-audit)

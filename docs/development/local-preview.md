@@ -1,7 +1,7 @@
 # Chạy thử bản mới mà không thay thế bản đang dùng
 
-Đợt kiểm tra local mới nhất: [generation profile](generation-profiles-2026-11-04.md)
-và [cài/cập nhật/gỡ bỏ cô lập](generation-local-acceptance-2026-11-04.md).
+Đợt kiểm tra local mới nhất: [generation profile](https://github.com/HaianCao/Protoverta/blob/812134e/docs/development/generation-profiles-2026-11-04.md)
+và [cài/cập nhật/gỡ bỏ cô lập](https://github.com/HaianCao/Protoverta/blob/812134e/docs/development/generation-local-acceptance-2026-11-04.md).
 Các bản preview cũ không tự cập nhật khi source thay đổi; muốn thử thay đổi mới,
 hãy build một preview mới theo các bước dưới đây. Chưa push/release trong đợt này.
 
@@ -22,7 +22,7 @@ Cần Python 3.11 trở lên, Git, Codex CLI và Claude Code CLI đã cài.
 Đợt kiểm chứng P14 ngày 04/11/2026 dùng Python 3.13.9, Codex CLI 0.166.0 và Claude Code 2.1.308;
 phiên bản CLI khác có thể thay đổi cờ lệnh.
 
-Xem [báo cáo P14](p14-packaging-acceptance-2026-11-04.md) để phân biệt test
+Xem [báo cáo P14](https://github.com/HaianCao/Protoverta/blob/812134e/docs/development/p14-packaging-acceptance-2026-11-04.md) để phân biệt test
 source, wheel đã cài và các gate còn pending. Các artifact preview của đợt
 cũ không tự chứng minh source mới đã đạt.
 
@@ -319,8 +319,8 @@ vẫn sống và mã thoát truyền về đúng. Không gọi provider thật h
 Các nhóm SDK, property, kiểu dữ liệu, tải/hủy kết nối và schema có mục đích khác
 nhau; không gộp thành tuyên bố “đã hỗ trợ mọi thứ”. Xem
 [ma trận kiểm thử](validation-matrix.md), [conformance](conformance.md),
-[kết quả kiểm thử](validation-2026-10-26.md) và
-[đợt bổ sung coverage](coverage-expansion-2026-10-26.md).
+[kết quả kiểm thử](https://github.com/HaianCao/Protoverta/blob/812134e/docs/development/validation-2026-10-26.md) và
+[đợt bổ sung coverage](https://github.com/HaianCao/Protoverta/blob/812134e/docs/development/coverage-expansion-2026-10-26.md).
 Full schema OpenResponses và một số usage/reasoning state vẫn có giới hạn.
 
 ## 7. Kết thúc preview và quay lại bản đang dùng
