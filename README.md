@@ -20,7 +20,7 @@ One Gateway. Any Protocol. Any Model.
   <img alt="Windows and Linux" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-0078d4?style=flat-square">
   <img alt="No dependencies" src="https://img.shields.io/badge/dependencies-none-2e7d32?style=flat-square">
   <a href="https://github.com/HaianCao/Protoverta/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/HaianCao/Protoverta/ci.yml?branch=main&style=flat-square&label=tests"></a>
-  <a href="https://github.com/HaianCao/Protoverta/releases"><img alt="Latest preview" src="https://img.shields.io/github/v/release/HaianCao/Protoverta?include_prereleases&style=flat-square&label=preview"></a>
+  <a href="https://github.com/HaianCao/Protoverta/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/HaianCao/Protoverta?style=flat-square&label=release"></a>
 </p>
 
 </div>
