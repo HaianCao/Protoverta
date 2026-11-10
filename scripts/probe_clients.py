@@ -36,8 +36,8 @@ def _probe_codex_goal(
     import sys
 
     sys.path.insert(0, str(adapter_source.resolve() / "src"))
-    from codex_adapter.config import Config, Provider, SecretReference
-    from codex_adapter.launcher import launch
+    from codexapter.config import Config, Provider, SecretReference
+    from codexapter.launcher import launch
 
     from protoverta import server
 
@@ -95,7 +95,7 @@ def _probe_codex_goal(
         diagnostics.capture(observe_transport=False) if diagnostics is not None else nullcontext(),
         patch.dict(os.environ, env, clear=True),
         patch("protoverta.server.make_handler", side_effect=lambda config, **options: real_handler(config, upstream_open=observed_open, **options)),
-        patch("codex_adapter.launcher.subprocess.run", side_effect=run),
+        patch("codexapter.launcher.subprocess.run", side_effect=run),
     ):
         marker = nonce or "PROTOVERTA_SMOKE_OK"
         launch(

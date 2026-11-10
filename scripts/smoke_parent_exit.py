@@ -202,7 +202,7 @@ def run(client, upstream, adapter_source, mode):
     original = smoke_clients.run_process
 
     def process(args, **kwargs):
-        if not any(item in args for item in ("codex_adapter.cli", "claudapter.cli")):
+        if not any(item in args for item in ("codexapter.cli", "claudapter.cli")):
             return original(args, **kwargs)
         root = Path(kwargs["cwd"])
         path = root / "console-input.json"

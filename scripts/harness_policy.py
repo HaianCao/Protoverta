@@ -41,9 +41,9 @@ def _prefix(package, name, prefix, source):
 
 
 def codex_settings(executable, source=None):
-    policy = _policy("codex_adapter", source)
+    policy = _policy("codexapter", source)
     settings = (
-        policy.cross_protocol_overrides(_prefix("codex_adapter", "codex", [executable], source))
+        policy.cross_protocol_overrides(_prefix("codexapter", "codex", [executable], source))
         if policy
         else [
             'model_reasoning_summary="none"',

@@ -73,6 +73,13 @@ def _reported_error(body: dict, *, status: Any = None) -> UpstreamReportedError:
 
 @dataclass(frozen=True, slots=True)
 class Delta:
+    """One portable stream event decoded from any protocol.
+
+    ``kind`` names the event (for example ``start``, ``text``, ``tool_start``,
+    ``tool_arguments``, ``finish``); the other fields are set as that kind needs.
+    Token counts are only the provider's own numbers.
+    """
+
     kind: str
     model: str | None = None
     index: int | None = None

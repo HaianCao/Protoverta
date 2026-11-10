@@ -146,7 +146,7 @@ Arbitrary injected callbacks must honor their timeout and cancellation contract;
 Python does not forcibly interrupt trusted embedding code.
 
 The client parser checks and remaining scope limits are recorded in
-[the P03 validation report](../development/p03-stream-heartbeat-2026-11-03.md).
+[the P03 validation report](https://github.com/HaianCao/Protoverta/blob/812134e/docs/development/p03-stream-heartbeat-2026-11-03.md).
 SSE comments are transport-only under the
 [SSE specification](https://html.spec.whatwg.org/multipage/server-sent-events.html).
 Claude's gateway protocol also describes the purpose of streaming pings and

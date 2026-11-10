@@ -420,7 +420,7 @@ def run_client(
             args = [
                 sys.executable,
                 "-m",
-                "codex_adapter.cli",
+                "codexapter.cli",
                 "--config",
                 str(config_path),
                 "exec",

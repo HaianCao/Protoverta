@@ -16,8 +16,8 @@ FIXTURE = """
 import hashlib,importlib.metadata,json,sys
 from pathlib import Path
 from unittest.mock import patch
-from codex_adapter.config import load as codex_load
-from codex_adapter.launcher import _gateway as codex_gateway
+from codexapter.config import load as codex_load
+from codexapter.launcher import _gateway as codex_gateway
 from claudapter.config import load as claude_load
 from claudapter.launcher import _gateway as claude_gateway
 root,stage,version=Path(sys.argv[1]),sys.argv[2],sys.argv[3]
@@ -28,12 +28,13 @@ if stage=='legacy':
     claude.write_text('schema_version = 1\\n[[providers]]\\nid = "fixture"\\ndisplay_name = "Legacy Claude"\\nbase_url = "https://example.test/v1"\\nprotocol = "chat"\\nexecution_mode = "gateway"\\nauth_mode = "bearer"\\n',encoding='utf-8')
     key.write_text('FIXTURE_TOKEN=synthetic-upgrade-key\\n',encoding='utf-8')
     (root/'fingerprints.json').write_text(json.dumps({p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in (codex,claude,key)}),encoding='utf-8')
-for path,load,gateway,token_patch,label in [(codex,codex_load,codex_gateway,'codex_adapter.launcher.resolve_token','Legacy Codex'),(claude,claude_load,claude_gateway,'claudapter.launcher.get_token','Legacy Claude')]:
+for path,load,gateway,token_patch,label in [(codex,codex_load,codex_gateway,'codexapter.launcher.resolve_token','Legacy Codex'),(claude,claude_load,claude_gateway,'claudapter.launcher.get_token','Legacy Claude')]:
     config=load(path);provider=config.providers['fixture'];assert provider.display_name==label
-    with patch(token_patch,return_value='synthetic-upgrade-key'):
-        before,_=gateway(config,provider)
-        assert before.upstream_base_url=='https://example.test/v1'
-        if stage=='upgraded':
+    # Launchers pin the core exactly, so the gateway is only built after the upgrade.
+    if stage=='upgraded':
+        with patch(token_patch,return_value='synthetic-upgrade-key'):
+            before,_=gateway(config,provider)
+            assert before.upstream_base_url=='https://example.test/v1'
             provider.gateway_runtime={'retry_attempts':2}
             after,_=gateway(config,provider)
             assert after.retry_attempts==2

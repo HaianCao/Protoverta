@@ -17,11 +17,17 @@ from .transport import DeadlineHTTPHandler, DeadlineHTTPSHandler
 
 
 class CatalogError(ValueError):
-    pass
+    """A provider model catalog could not be fetched or failed validation."""
 
 
 @dataclass(frozen=True)
 class CatalogPolicy:
+    """How to read one provider's model catalog: path, pagination, field names and size limits.
+
+    Defaults match the OpenAI-style ``GET /models`` list. Token limits are only
+    read when ``context_field``/``output_field`` name the provider's fields.
+    """
+
     pagination: str = "none"
     max_pages: int = 100
     max_models: int = 10000
@@ -113,6 +119,8 @@ class CatalogPolicy:
 
 @dataclass(frozen=True)
 class ModelInfo:
+    """One model from a provider catalog, with the limits and input modalities the provider itself reported."""
+
     id: str
     display_name: str
     context_window_tokens: int | None = None
@@ -140,6 +148,7 @@ def _surrogate(char):
 
 
 def parse_page(body, policy):
+    """Validate one catalog page against ``policy``; return its models and the next-page cursor (or ``None``)."""
     data = _field(body, policy.collection_field) if policy.collection_field else body
     if not isinstance(data, list):
         raise CatalogError("model catalog must contain a data array")
@@ -196,6 +205,12 @@ class _NoRedirect(HTTPRedirectHandler):
 
 
 def fetch_catalog(base_url, headers, policy=None, *, upstream_open=None):
+    """Fetch and validate a provider's complete model catalog.
+
+    Redirects are refused so credentials never reach another host. Pages,
+    models and bytes are bounded by ``policy``; returns models sorted by ID or
+    raises :class:`CatalogError`.
+    """
     policy = policy or CatalogPolicy()
     if not isinstance(policy, CatalogPolicy):
         raise TypeError("expected CatalogPolicy")

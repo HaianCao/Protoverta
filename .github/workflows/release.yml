@@ -49,6 +49,8 @@ jobs:
         with:
           name: release-wheel-sdk
           path: release-wheel-sdk
+      - name: Write SHA-256 checksums
+        run: cd dist && sha256sum -- * > SHA256SUMS && cat SHA256SUMS
       - uses: actions/upload-artifact@v7
         with:
           name: distributions
@@ -60,12 +62,20 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/download-artifact@v7
         with:
           name: distributions
           path: dist
-      - name: Publish immutable versioned release assets
+      - name: Verify checksums
+        run: cd dist && sha256sum --check SHA256SUMS
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist/*.whl, dist/*.tar.gz
+      - name: Publish versioned release assets
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -73,3 +83,23 @@ jobs:
           flags=()
           if [[ "$GITHUB_REF_NAME" =~ (a|b|rc)[0-9]+$ ]]; then flags+=(--prerelease); fi
           gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes "${flags[@]}"
+
+  pypi:
+    # Trusted Publishing: configure a PyPI publisher for this repository,
+    # workflow "release.yml" and environment "pypi", then set the repository
+    # variable PYPI_PUBLISH to "true".
+    needs: publish
+    if: vars.PYPI_PUBLISH == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: distributions
+          path: dist
+      - name: Keep only the distributions
+        run: rm -f dist/SHA256SUMS
+      - uses: pypa/gh-action-pypi-publish@release/v1

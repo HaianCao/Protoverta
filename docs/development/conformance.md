@@ -127,5 +127,5 @@ gate keep their exact SDK pins. Candidate artifacts record actual/baseline
 versions, `sdk_version_drift`, verdict and workflow stage outcomes. A pass with
 no drift is baseline evidence, not certification of a newer version. Dependency
 installation failures remain failures, not semantic incompatibility verdicts.
-See [the CI job review](ci-jobs-review-2026-11-04.md) for local evidence and
+See [the CI job review](https://github.com/HaianCao/Protoverta/blob/812134e/docs/development/ci-jobs-review-2026-11-04.md) for local evidence and
 remote/candidate gates still pending.

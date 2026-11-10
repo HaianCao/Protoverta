@@ -1,5 +1,13 @@
 """Protocol conversion primitives for LLM APIs."""
 
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _version
+
+try:
+    __version__ = _version("protoverta")
+except PackageNotFoundError:  # Imported from a source tree without installation.
+    __version__ = "0+unknown"
+
 from .capabilities import (
     CapabilityRecord,
     CapabilityRegistry,
@@ -41,6 +49,7 @@ __all__ = [
     "ToolNameMap",
     "UnsupportedFeatureError",
     "UnsupportedStreamFeatureError",
+    "__version__",
     "assess_context",
     "bind_response_context",
     "convert_request",

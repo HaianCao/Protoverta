@@ -28,7 +28,7 @@ verified across all six CLI routes (`codex` 0.166.0 and `claude` 2.1.308 each to
   `codex_model_safe_resume=True` (`UnsupportedFeatureError("codex_closed_resume")`)
   so a closed child configured with custom model B cannot silently reopen on
   parent model A. See
-  [the P08 report](../development/p08-context-compaction-resume-2026-11-04.md).
+  [the P08 report](https://github.com/HaianCao/Protoverta/blob/812134e/docs/development/p08-context-compaction-resume-2026-11-04.md).
 
 ## Follow-up on 2026-10-26
 
@@ -41,7 +41,7 @@ changes. The Codex Responses initial turn explicitly used
 caused replay to be rejected before forwarding. This does not make existing
 reasoning summaries or opaque state portable. The resume probe now sets this
 policy from the initial turn and its optional shape trace preserves the gateway
-observer. See [the current validation report](../development/validation-2026-10-26.md).
+observer. See [the current validation report](https://github.com/HaianCao/Protoverta/blob/812134e/docs/development/validation-2026-10-26.md).
 
 ## Earlier matrix and scope
 

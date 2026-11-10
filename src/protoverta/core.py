@@ -30,6 +30,8 @@ from .response_context import generated_response_metadata
 
 
 class Protocol(StrEnum):
+    """Wire protocol of a request or response: ``chat`` (Chat Completions), ``messages`` (Anthropic Messages) or ``responses`` (OpenAI Responses)."""
+
     CHAT = "chat"
     MESSAGES = "messages"
     RESPONSES = "responses"
@@ -37,6 +39,8 @@ class Protocol(StrEnum):
 
 @dataclass(slots=True)
 class Part:
+    """One portable content item of a turn: text, an image, a document, a tool call or a tool result."""
+
     kind: str
     text: str = ""
     call_id: str = ""
@@ -51,12 +55,20 @@ class Part:
 
 @dataclass(slots=True)
 class Turn:
+    """One conversation turn: a role (``system``, ``developer``, ``user``, ``assistant``, ``tool``) and its parts."""
+
     role: str
     parts: list[Part] = field(default_factory=list)
 
 
 @dataclass(slots=True)
 class Request:
+    """A request decoded into the portable model shared by every protocol.
+
+    Only fields whose meaning survives every supported protocol are represented;
+    everything else is rejected by the decoders.
+    """
+
     model: str
     turns: list[Turn]
     tools: list[dict[str, Any]] = field(default_factory=list)
@@ -77,6 +89,8 @@ class Request:
 
 @dataclass(slots=True)
 class Result:
+    """A completed response decoded into the portable model: output parts, finish reason and real token usage."""
+
     model: str
     parts: list[Part]
     finish_reason: str

@@ -109,7 +109,7 @@ def worker(client, source, report, workspace):
     from protoverta.streaming import Delta
 
     sys.path.insert(0, str(source.resolve() / "src"))
-    package = "codex_adapter" if client == "codex" else "claudapter"
+    package = "codexapter" if client == "codex" else "claudapter"
     launcher = importlib.import_module(package + ".launcher")
     config_module = importlib.import_module(package + ".config")
     observed = []

@@ -14,12 +14,13 @@ Chat Completions <-> Messages <-> Responses
 One Gateway. Any Protocol. Any Model.
 
 <p>
+  <a href="https://haiancao.github.io/Protoverta/"><img alt="Documentation" src="https://img.shields.io/badge/docs-online-2f6f8f?style=flat-square"></a>
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-5a4fcf?style=flat-square"></a>
   <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-3776ab?style=flat-square&logo=python&logoColor=white">
   <img alt="Windows and Linux" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-0078d4?style=flat-square">
   <img alt="No dependencies" src="https://img.shields.io/badge/dependencies-none-2e7d32?style=flat-square">
   <a href="https://github.com/HaianCao/Protoverta/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/HaianCao/Protoverta/ci.yml?branch=main&style=flat-square&label=tests"></a>
-  <a href="https://github.com/HaianCao/Protoverta/releases"><img alt="Latest preview" src="https://img.shields.io/github/v/release/HaianCao/Protoverta?include_prereleases&style=flat-square&label=preview"></a>
+  <a href="https://github.com/HaianCao/Protoverta/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/HaianCao/Protoverta?style=flat-square&label=release"></a>
 </p>
 
 </div>
@@ -41,11 +42,13 @@ Tested providers and their limits: [provider compatibility](docs/compatibility/p
 
 ## Install
 
-Python 3.11+ is required.
+Python 3.11+ is required; there are no dependencies.
 
 ```powershell
-python -m pip install -e ".[test]"
+python -m pip install protoverta
 ```
+
+Full documentation — guides, the gateway's HTTP API, the command reference and the Python API — is at **[haiancao.github.io/Protoverta](https://haiancao.github.io/Protoverta/)**. To work on Protoverta itself, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Library
 
@@ -252,6 +255,6 @@ Operational contracts: [HTTP boundaries and count errors](docs/compatibility/req
 [explicit routing and token quotas](docs/compatibility/routing-and-token-quotas.md).
 Development evidence: [versioned validation matrix](docs/development/validation-matrix.md)
 and [current OpenResponses schema gaps](docs/development/openresponses-audit.md).
-Latest local source/wheel acceptance: [P14 results and remaining gates](docs/development/p14-packaging-acceptance-2026-11-04.md).
+Latest local source/wheel acceptance: [P14 results and remaining gates](https://github.com/HaianCao/Protoverta/blob/812134e/docs/development/p14-packaging-acceptance-2026-11-04.md).
 Isolated acceptance: [local preview](docs/development/local-preview.md),
 [harness tools and session MCP](docs/development/harness-tools.md).

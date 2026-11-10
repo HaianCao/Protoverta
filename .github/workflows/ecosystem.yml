@@ -85,7 +85,7 @@ jobs:
       - name: Browser E2E against installed assets and synthetic foreground CLI
         shell: pwsh
         run: |
-          & .\validation\installed\Scripts\python.exe protoverta/scripts/browser_setup_smoke.py --source free-codex-cli --package codex_adapter --installed --launch-fixture --screenshots validation/screenshots
+          & .\validation\installed\Scripts\python.exe protoverta/scripts/browser_setup_smoke.py --source free-codex-cli --package codexapter --installed --launch-fixture --screenshots validation/screenshots
           if ($LASTEXITCODE) { throw 'Codex browser E2E failed' }
           & .\validation\installed\Scripts\python.exe protoverta/scripts/browser_setup_smoke.py --source free-claude-cli --package claudapter --installed --launch-fixture --screenshots validation/screenshots
           if ($LASTEXITCODE) { throw 'Claude browser E2E failed' }

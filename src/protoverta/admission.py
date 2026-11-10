@@ -20,19 +20,22 @@ _LOCAL_LOCKS_GUARD = threading.Lock()
 
 
 class AdmissionDenied(Exception):
+    """The shared request budget is exhausted; ``retry_after`` says how many seconds to wait."""
+
     def __init__(self, retry_after: float) -> None:
         self.retry_after = max(1, math.ceil(retry_after))
         super().__init__("Shared provider request budget reached.")
 
 
 class AdmissionPolicyError(ValueError):
-    pass
+    """Two gateways use the same budget database and upstream account with different limits."""
 
 
-# Each transaction opens a connection and (in the default rollback-journal
-# mode) creates and deletes a journal file. On Windows, file scanners can hold
-# those briefly; a 1 s wait rejected healthy requests on CI runners. Contention
-# beyond this bound still fails closed with AdmissionStorageError.
+# How long a transaction waits for the database lock (SQLite busy timeout and
+# the local writer lock). One connection is kept per SharedAdmission in WAL
+# mode; on Windows, file scanners can still briefly hold the database or its
+# log, and a 1 s wait rejected healthy requests on CI runners. Contention beyond
+# this bound fails closed with AdmissionStorageError.
 STORAGE_WAIT_SECONDS = 5.0
 
 
@@ -41,6 +44,13 @@ class AdmissionStorageError(RuntimeError):
 
 
 class SharedAdmission:
+    """A request-rate and concurrency budget shared by gateway processes through one SQLite file.
+
+    Scopes are hashes of the upstream prefix and key; no prompts or
+    credentials are stored. Busy storage fails closed with
+    ``AdmissionStorageError``.
+    """
+
     def __init__(
         self,
         path: str | PathLike[str],

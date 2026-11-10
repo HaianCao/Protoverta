@@ -69,7 +69,7 @@ request. `finish()` remains mandatory at upstream EOF.
 
 The official baseline omits these controls. Supporting requested probabilities
 does not fill omitted fields or establish full-schema compliance. See
-[validation](../development/text-logprobs-2026-11-04.md).
+[validation](https://github.com/HaianCao/Protoverta/blob/812134e/docs/development/text-logprobs-2026-11-04.md).
 
 Primary sources checked 2026-11-04:
 [Chat API](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create),

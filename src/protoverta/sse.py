@@ -12,12 +12,16 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True, slots=True)
 class SSEEvent:
+    """One server-sent event: its ``event`` name, ``data`` text and optional ``id``."""
+
     event: str
     data: str
     id: str | None = None
 
 
 class SSEParser:
+    """Incremental server-sent-events parser; feed it arbitrary byte chunks and receive complete events."""
+
     def __init__(self, *, max_event_chars: int = 1_000_000) -> None:
         if max_event_chars <= 0:
             raise ValueError("max_event_chars must be positive")
@@ -93,6 +97,7 @@ class SSEParser:
 
 
 def encode_sse(event: str, data: str, *, id: str | None = None) -> bytes:
+    """Encode one server-sent event as bytes (multi-line data becomes several ``data:`` lines)."""
     if not event or any(char in event for char in "\r\n\x00"):
         raise ValueError("invalid SSE event name")
     lines = [f"event: {event}"]

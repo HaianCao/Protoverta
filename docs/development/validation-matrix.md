@@ -2,16 +2,16 @@
 
 ## Latest local acceptance — 2026-11-04
 
-Latest runtime follow-up: [Responses snapshot consistency](response-snapshot-fixes-2026-11-04.md),
+Latest runtime follow-up: [Responses snapshot consistency](https://github.com/HaianCao/Protoverta/blob/812134e/docs/development/response-snapshot-fixes-2026-11-04.md),
 with its own final source/wheel hashes and fresh SDK/CLI/full-suite results.
 It removes `truncation`/`text` audit findings; full OpenResponses schema still
 fails. The CI/P14 records below remain distinct historical checkpoints.
 
-The subsequent [CI job review](ci-jobs-review-2026-11-04.md) adds candidate
+The subsequent [CI job review](https://github.com/HaianCao/Protoverta/blob/812134e/docs/development/ci-jobs-review-2026-11-04.md) adds candidate
 evaluation, installed-wheel and artifact gates, fixes standalone-core test
 isolation, and records local validation separately from pending remote jobs.
 
-See [P14 source/wheel acceptance](p14-packaging-acceptance-2026-11-04.md): core
+See [P14 source/wheel acceptance](https://github.com/HaianCao/Protoverta/blob/812134e/docs/development/p14-packaging-acceptance-2026-11-04.md): core
 0.3.0a8 at `52b201c` plus the uncommitted Responses SSE parameter correction;
 consumers 0.2.0a2 at `e757fd3` / `1d727fa`. It records runtime/wheel hashes,
 all three full source suites, installed SDK/property gates, six real CLI tool
@@ -26,10 +26,10 @@ SNAPSHOT.json`. It captures each project's version, Git HEAD, dirty flag and has
 of runtime Python/HTML bytes, plus local interpreter/platform and installed test
 dependency versions. A dirty checkout needs its hash: HEAD alone does not identify
 the tested code. A snapshot is not a test or provider capability record.
-The earlier [identity snapshot](validation-2026-10-25.json) and
-[validation results](validation-results-2026-10-25.json) keep passes and the
+The earlier [identity snapshot](https://github.com/HaianCao/Protoverta/blob/812134e/docs/development/validation-2026-10-25.json) and
+[validation results](https://github.com/HaianCao/Protoverta/blob/812134e/docs/development/validation-results-2026-10-25.json) keep passes and the
 full-schema audit failures separate.
-The later [three regression fixes](review-fixes-2026-10-25.md) have their own
+The later [three regression fixes](https://github.com/HaianCao/Protoverta/blob/812134e/docs/development/review-fixes-2026-10-25.md) have their own
 validation scope and do not overwrite that historical identity.
 
 ## Current scope (2026-10-25, Windows / Python 3.13.9)
@@ -59,7 +59,7 @@ matching Chromium into a dedicated test cache. Set `PLAYWRIGHT_BROWSERS_PATH`
 explicitly if using a cache outside the usual location. Then run:
 
 ```text
-python scripts/browser_setup_smoke.py --source ../free-codex-cli --package codex_adapter --screenshots TEMP_DIRECTORY
+python scripts/browser_setup_smoke.py --source ../free-codex-cli --package codexapter --screenshots TEMP_DIRECTORY
 python scripts/browser_setup_smoke.py --source ../free-claude-cli --package claudapter --screenshots TEMP_DIRECTORY
 ```
 

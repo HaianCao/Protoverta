@@ -15,7 +15,7 @@ from protoverta import server
 
 def main():
     module, destination = sys.argv[1:3]
-    if module not in {"codex_adapter.cli", "claudapter.cli"}:
+    if module not in {"codexapter.cli", "claudapter.cli"}:
         raise ValueError("Synthetic launcher observation only")
     path = Path(destination).resolve()
     if path.parent != Path.cwd().resolve() or path.exists():

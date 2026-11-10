@@ -24,7 +24,7 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
         sys.path.insert(0, str(source.resolve() / "src"))
     web = importlib.import_module(package + ".web")
     config_module = importlib.import_module(package + ".config")
-    codex = package == "codex_adapter"
+    codex = package == "codexapter"
     urls, servers, launches, failures = queue.Queue(), [], [], []
     with tempfile.TemporaryDirectory(prefix="protoverta-browser-") as temporary, ExitStack() as stack:
         root = Path(temporary)
@@ -102,6 +102,8 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
                     page.locator(select).wait_for()
                     assert page.locator(select).is_disabled()
                     page.locator("#addBtn" if codex else "#add").click()
+                    # Name, ID, authentication and mode sit under "Advanced: connection details".
+                    page.locator("#connectionDetails summary").click()
                     page.locator("#providerId" if codex else "#id").fill("fixture")
                     page.locator("#displayName").fill("Fixture <b>Provider</b>")
                     page.locator("#baseUrl").fill("https://example.invalid/v1")
@@ -191,6 +193,7 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
                     if screenshots:
                         screenshots.mkdir(parents=True, exist_ok=True)
                         page.screenshot(path=str(screenshots / (package + "-agent-editor.png")), full_page=True)
+                    page.locator("#connectionDetails").evaluate("(el) => el.open = true")
                     page.locator("#authMode").select_option("api_key")
                     with page.expect_response(lambda response: "/api/provider" in response.url and response.request.method == "POST") as saved:
                         # Same-task assertions cannot race the HTTP response: both
@@ -271,7 +274,7 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, required=True)
-    parser.add_argument("--package", choices=["codex_adapter", "claudapter"], required=True)
+    parser.add_argument("--package", choices=["codexapter", "claudapter"], required=True)
     parser.add_argument("--browser-executable")
     parser.add_argument("--installed", action="store_true", help="Test the installed wheel, not checkout imports")
     parser.add_argument("--screenshots", type=Path, help="Optional synthetic-fixture screenshots directory")

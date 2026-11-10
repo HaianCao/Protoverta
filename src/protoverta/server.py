@@ -19,6 +19,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from . import __version__
 from .admission import (
     AdmissionDenied,
     AdmissionPolicyError,
@@ -34,6 +35,7 @@ from .core import (
     convert_request,
     convert_response,
 )
+from .error_classes import RetryPolicy
 from .errors import UnsupportedFeatureError
 from .failures import FailurePhase, gateway_failure
 from .json_wire import decode_json, encode_json
@@ -52,7 +54,7 @@ from .resources import (
     StreamLimits,
     positive_number,
 )
-from .retry import open_with_retry, retry_after
+from .retry import RetryState, open_with_policy, open_with_retry, retry_after
 from .sse import encode_sse
 from .stream_pipe import StreamTranscoder, StreamValidator
 from .stream_writer import StreamHeartbeatWriter
@@ -90,6 +92,15 @@ _PATHS = {
 
 @dataclass(frozen=True, slots=True)
 class GatewayConfig:
+    """Immutable configuration of one local gateway session.
+
+    The required fields are the upstream protocol, its base URL (HTTPS, or HTTP
+    on loopback), the upstream API key and the inbound token local clients must
+    send. Every other field is an explicit, validated policy with a
+    conservative default; see the gateway documentation for each one. Invalid
+    combinations raise ``ValueError`` when the object is created.
+    """
+
     upstream_protocol: Protocol
     upstream_base_url: str
     upstream_api_key: str = field(repr=False)
@@ -133,8 +144,15 @@ class GatewayConfig:
     shared_token_limit: int | None = None
     codex_model_safe_resume: bool = False
     model_snapshot: ModelSnapshot | None = field(default=None, repr=False)
+    # Error-class retry (supersedes retry_attempts/retry_max_wait when set).
+    retry_policy: RetryPolicy | None = None
+    retry_log: object = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
+        if self.retry_policy is not None and not isinstance(self.retry_policy, RetryPolicy):
+            raise ValueError("retry_policy must be a RetryPolicy")
+        if self.retry_log is not None and not callable(self.retry_log):
+            raise ValueError("retry_log must be callable")
         if self.model_snapshot is not None and (
             not isinstance(self.model_snapshot, ModelSnapshot) or not self.model_snapshot.matches(self.upstream_base_url, self.upstream_protocol)
         ):
@@ -305,11 +323,19 @@ class _RedirectBlocker(HTTPRedirectHandler):
 
 
 def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observer | None = None) -> type[BaseHTTPRequestHandler]:
+    """Build the HTTP request handler class for ``config``.
+
+    ``upstream_open`` replaces the HTTPS opener (tests inject scripted
+    upstreams); ``observer`` receives one payload-free ``RequestObservation``
+    per request.
+    """
     model_identity_salt = secrets.token_bytes(32)
     opener = build_opener(_RedirectBlocker(), DeadlineHTTPHandler(), DeadlineHTTPSHandler())
     open_upstream = upstream_open or opener.open
     admission = threading.BoundedSemaphore(config.max_concurrent_requests)
     route_session_id = secrets.token_hex(16)
+    retry_policy = config.retry_policy if config.retry_policy is not None and config.retry_policy.enabled else None
+    retry_state = RetryState()
     shared_admission = (
         SharedAdmission(
             config.shared_admission_db,
@@ -324,7 +350,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
     )
 
     class Handler(BaseHTTPRequestHandler):
-        server_version = "Protoverta/0.3"
+        server_version = f"Protoverta/{__version__}"
         connection_limit = config.max_concurrent_requests
 
         @staticmethod
@@ -366,6 +392,33 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
         def log_message(self, format: str, *args: object) -> None:
             # Avoid logging paths, request bodies, or credentials by default.
             return
+
+        def send_response(self, code, message=None):
+            self._response_started = True
+            super().send_response(code, message)
+
+        def _internal_error(self, protocol: Protocol) -> None:
+            """Answer an unexpected gateway fault instead of resetting the client.
+
+            Without a response the CLI sees a dropped connection and resends
+            the same request. Once a response has started, closing the
+            connection is the only signal that cannot corrupt it.
+            """
+            self.close_connection = True
+            if getattr(self, "_response_started", False):
+                return
+            try:
+                self._error(
+                    500,
+                    "Protoverta internal error; the request was not completed.",
+                    protocol,
+                    code="internal_error",
+                    path=getattr(self, "_request_path", None),
+                    headers={"x-should-retry": "false"},
+                )
+            except OSError:
+                pass  # The client is gone; there is nobody to answer.
+            self._trace.outcome = "internal_error"
 
         def _json(self, status: int, payload: dict[str, object], headers=None) -> None:
             raw = encode_json(payload)
@@ -667,9 +720,9 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                             or unsupported
                             or limited
                             or isinstance(exc, DeadlineExceeded)
-                            or reported
-                            and 400 <= status < 500
-                            and status not in (408, 409, 429)
+                            or (reported and 400 <= status < 500 and status not in (408, 409, 429))
+                            # The gateway already retried per its policy.
+                            or retry_policy is not None
                             else None,
                         )
                     else:
@@ -682,6 +735,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 writer.close()
 
         def do_GET(self) -> None:
+            self._response_started = False
             self._trace = RequestTrace("models", config.upstream_protocol.value)
             self._context_headers = {}
             self._request_path = "/v1/models"
@@ -697,18 +751,17 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 if target.path != "/v1/models":
                     self._error(404, "unsupported endpoint", list_protocol, phase="request", path=target.path)
                     return
+                # Claude Code 2.1.248+ sends both Authorization and x-api-key on
+                # model discovery when both resolve (an apiKeyHelper value
+                # arrives in both). Every credential supplied must match.
                 tokens = self.headers.get_all("Authorization", [])
                 api_keys = self.headers.get_all("x-api-key", [])
-                bearer = tokens[0][7:] if len(tokens) == 1 and tokens[0].startswith("Bearer ") else None
-                supplied = bearer if tokens else api_keys[0] if len(api_keys) == 1 else None
+                supplied = [token[7:] if token.startswith("Bearer ") else None for token in tokens] + list(api_keys)
                 if (
                     len(tokens) > 1
                     or len(api_keys) > 1
-                    or tokens
-                    and api_keys
-                    or supplied is None
-                    or not supplied.isascii()
-                    or not secrets.compare_digest(supplied, config.inbound_token)
+                    or not supplied
+                    or any(value is None or not value.isascii() or not secrets.compare_digest(value, config.inbound_token) for value in supplied)
                 ):
                     self._error(401, "unauthorized", list_protocol, phase="request", path=target.path)
                     return
@@ -741,13 +794,19 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 self._json(200, payload)
             except (ConnectionError, TimeoutError):
                 self._trace.outcome = "client_disconnected"
+            except Exception:  # noqa: BLE001 - last-resort answer for an unexpected fault
+                self._internal_error(list_protocol)
             finally:
                 if acquired:
                     admission.release()
                 self._trace.emit(observer)
 
         def do_POST(self) -> None:
-            protocol = _PATHS.get(urlsplit(self.path).path)
+            self._response_started = False
+            try:
+                protocol = _PATHS.get(urlsplit(self.path).path)
+            except ValueError:
+                protocol = None
             self._trace = RequestTrace(protocol.value if protocol is not None else "unknown", config.upstream_protocol.value)
             self._context_headers = {}
             self._request_path = None
@@ -755,14 +814,17 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 self._dispatch_post()
             except ConnectionError:
                 self._trace.outcome = "client_disconnected"
-            except Exception:
-                self._trace.outcome = "internal_error"
-                raise
+            except Exception:  # noqa: BLE001 - last-resort answer for an unexpected fault
+                self._internal_error(protocol or Protocol.CHAT)
             finally:
                 self._trace.emit(observer)
 
         def _dispatch_post(self) -> None:
-            target_url = urlsplit(self.path)
+            try:
+                target_url = urlsplit(self.path)
+            except ValueError:
+                self._error(400, "invalid request target", Protocol.CHAT, phase="request")
+                return
             self._request_path = target_url.path
             protocol = _PATHS.get(target_url.path)
             if protocol is None:
@@ -1107,9 +1169,23 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 watch = DisconnectWatch(self.connection, budget.cancel)
                 watch.__enter__()
                 request.protoverta_budget = budget
-                response, lease = open_with_retry(
-                    open_accounted, request, budget, attempts=config.retry_attempts, max_wait=config.retry_max_wait, admission=shared_admission
-                )
+                if retry_policy is not None:
+                    response, lease = open_with_policy(
+                        open_accounted,
+                        request,
+                        budget,
+                        retry_policy,
+                        config.upstream_protocol.value,
+                        streaming=streaming,
+                        state=retry_state,
+                        admission=shared_admission,
+                        log=config.retry_log,
+                        max_prefetch_bytes=config.max_body_bytes,
+                    )
+                else:
+                    response, lease = open_with_retry(
+                        open_accounted, request, budget, attempts=config.retry_attempts, max_wait=config.retry_max_wait, admission=shared_admission
+                    )
                 with response:
                     budget.remaining()
                     if streaming:
@@ -1252,7 +1328,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                     code=cause.kind if isinstance(cause, DeadlineExceeded) else "upstream_timeout" if timeout else "upstream_transport",
                     phase="upstream",
                     path=target_url.path,
-                    headers={"x-should-retry": "false"} if isinstance(cause, DeadlineExceeded) else None,
+                    headers={"x-should-retry": "false"} if isinstance(cause, DeadlineExceeded) or retry_policy is not None else None,
                 )
             except ToolPolicyViolation as exc:
                 self._error(
@@ -1384,6 +1460,13 @@ class GatewayHTTPServer(ThreadingHTTPServer):
             finally:
                 self._rejections.release()
 
+    def handle_error(self, request, client_address):
+        """Never print tracebacks: the gateway shares the terminal with the CLI.
+
+        Handlers answer their own faults (500 ``internal_error``); anything left
+        is a connection-level failure with no client to report to.
+        """
+
     def _client_finished(self, request):
         self._connections.release()
         with self._clients_changed:
@@ -1432,6 +1515,11 @@ class GatewayHTTPServer(ThreadingHTTPServer):
 
 
 def serve(config: GatewayConfig, host: str = "127.0.0.1", port: int = 0, *, observer: Observer | None = None) -> ThreadingHTTPServer:
+    """Create a gateway server bound to ``127.0.0.1`` (port 0 picks a free port).
+
+    Call ``serve_forever()`` on the result and ``server_close()`` when done;
+    :func:`gateway_session` does both for one CLI session.
+    """
     if host != "127.0.0.1":
         raise ValueError("this version only binds to 127.0.0.1")
     server = GatewayHTTPServer((host, port), make_handler(config, observer=observer))
