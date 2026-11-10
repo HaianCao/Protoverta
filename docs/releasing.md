@@ -1,4 +1,4 @@
-# Coordinated preview validation and release
+# Validation and release
 
 Published previews: Protoverta **0.3.0a8** (2026-11-06), **0.3.0a10**
 (2026-11-07) and **0.3.0a11** (2026-11-07; Responses streams without
@@ -61,19 +61,35 @@ runtime API works. It never edits a real installation or configuration.
 
 ## Publication order (requires an explicit user release/push request)
 
-1. Review/commit the three source snapshots and run all local gates. Record refs
-   and artifact hashes. Consumer integration commits must be available remotely
-   before dispatching the ecosystem workflow against those exact refs.
-2. Run core platform CI and the ecosystem job. Do not merge integration into
-   launcher main as part of validation.
-3. Only after passing gates, publish a NEW version tag and assets through the release
-   workflow. The tag must match pyproject.toml. Never force/reuse an old tag.
-4. Verify the new asset is downloadable, then run both consumer pinned-gateway CI jobs
-   and one-line preview install/update/uninstall checks. Do not publish a consumer
-   preview relying on an unavailable core release.
-5. Real-provider certification is opt-in, model/endpoint/feature-specific and
+Versions are plain `x.y.z`. Protoverta is released first; the launchers pin
+it exactly and verify its wheel by SHA-256.
+
+1. Run all local gates on the three release branches and record their SHAs.
+   Push the branches and run core CI plus the ecosystem workflow against the
+   exact launcher SHAs.
+2. Merge Protoverta's release branch into `main` and push a NEW tag `vX.Y.Z`
+   that matches `pyproject.toml` (never move or reuse a tag). The release
+   workflow re-runs CI, builds the wheel and sdist, writes `SHA256SUMS`,
+   attests build provenance, creates the GitHub release and, when the
+   repository variable `PYPI_PUBLISH` is `true`, publishes to PyPI through
+   Trusted Publishing (environment `pypi`).
+3. Download the published wheel, check it against `SHA256SUMS`, and set that
+   hash as `$protovertaSha256` in both launchers' `scripts/install.ps1`
+   (replacing `PENDING-RELEASE`). The launchers' release workflow refuses to
+   run without a real hash.
+4. Push the launchers' release branches, open a pull request into `main`, wait
+   for CI (it installs the published Protoverta wheel), merge, and push their
+   tags `vX.Y.Z`; their release workflow publishes the same way.
+5. Check the one-line install, update from the previous release and uninstall
+   on Windows, and the setup page in a browser.
+6. Real-provider certification is opt-in, model/endpoint/feature-specific and
    separate from local fixtures; it requires approved keys/models and quota.
    See [the certification checklist](compatibility/certification.md).
+
+PyPI setup (once per project, by the account owner): on pypi.org add a
+"pending publisher" for `protoverta`, `claudapter` and `codexapter` with owner
+`HaianCao`, the repository, workflow `release.yml` and environment `pypi`;
+create the `pypi` environment in each repository and set `PYPI_PUBLISH=true`.
 
 Keep signed/hidden reasoning and unsupported protocol features strict. No
 automatic fallback, production state mutation or release is authorized by this
