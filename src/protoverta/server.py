@@ -367,6 +367,33 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
             # Avoid logging paths, request bodies, or credentials by default.
             return
 
+        def send_response(self, code, message=None):
+            self._response_started = True
+            super().send_response(code, message)
+
+        def _internal_error(self, protocol: Protocol) -> None:
+            """Answer an unexpected gateway fault instead of resetting the client.
+
+            Without a response the CLI sees a dropped connection and resends
+            the same request. Once a response has started, closing the
+            connection is the only signal that cannot corrupt it.
+            """
+            self.close_connection = True
+            if getattr(self, "_response_started", False):
+                return
+            try:
+                self._error(
+                    500,
+                    "Protoverta internal error; the request was not completed.",
+                    protocol,
+                    code="internal_error",
+                    path=getattr(self, "_request_path", None),
+                    headers={"x-should-retry": "false"},
+                )
+            except OSError:
+                pass  # The client is gone; there is nobody to answer.
+            self._trace.outcome = "internal_error"
+
         def _json(self, status: int, payload: dict[str, object], headers=None) -> None:
             raw = encode_json(payload)
             self._raw_json(status, raw, headers)
@@ -682,6 +709,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 writer.close()
 
         def do_GET(self) -> None:
+            self._response_started = False
             self._trace = RequestTrace("models", config.upstream_protocol.value)
             self._context_headers = {}
             self._request_path = "/v1/models"
@@ -741,13 +769,19 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 self._json(200, payload)
             except (ConnectionError, TimeoutError):
                 self._trace.outcome = "client_disconnected"
+            except Exception:  # noqa: BLE001 - last-resort answer for an unexpected fault
+                self._internal_error(list_protocol)
             finally:
                 if acquired:
                     admission.release()
                 self._trace.emit(observer)
 
         def do_POST(self) -> None:
-            protocol = _PATHS.get(urlsplit(self.path).path)
+            self._response_started = False
+            try:
+                protocol = _PATHS.get(urlsplit(self.path).path)
+            except ValueError:
+                protocol = None
             self._trace = RequestTrace(protocol.value if protocol is not None else "unknown", config.upstream_protocol.value)
             self._context_headers = {}
             self._request_path = None
@@ -755,14 +789,17 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 self._dispatch_post()
             except ConnectionError:
                 self._trace.outcome = "client_disconnected"
-            except Exception:
-                self._trace.outcome = "internal_error"
-                raise
+            except Exception:  # noqa: BLE001 - last-resort answer for an unexpected fault
+                self._internal_error(protocol or Protocol.CHAT)
             finally:
                 self._trace.emit(observer)
 
         def _dispatch_post(self) -> None:
-            target_url = urlsplit(self.path)
+            try:
+                target_url = urlsplit(self.path)
+            except ValueError:
+                self._error(400, "invalid request target", Protocol.CHAT, phase="request")
+                return
             self._request_path = target_url.path
             protocol = _PATHS.get(target_url.path)
             if protocol is None:
@@ -1383,6 +1420,13 @@ class GatewayHTTPServer(ThreadingHTTPServer):
                 request.close()
             finally:
                 self._rejections.release()
+
+    def handle_error(self, request, client_address):
+        """Never print tracebacks: the gateway shares the terminal with the CLI.
+
+        Handlers answer their own faults (500 ``internal_error``); anything left
+        is a connection-level failure with no client to report to.
+        """
 
     def _client_finished(self, request):
         self._connections.release()

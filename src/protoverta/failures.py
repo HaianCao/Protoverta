@@ -30,6 +30,7 @@ _RECOGNIZED_CODES = frozenset(
         "request_deadline",
         "progress_timeout",
         "stream_limit",
+        "internal_error",
     }
 )
 _RECOGNIZED_PHASES = frozenset({"request", "preflight", "admission", "upstream", "response", "stream"})
