@@ -30,10 +30,11 @@ if stage=='legacy':
     (root/'fingerprints.json').write_text(json.dumps({p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in (codex,claude,key)}),encoding='utf-8')
 for path,load,gateway,token_patch,label in [(codex,codex_load,codex_gateway,'codexapter.launcher.resolve_token','Legacy Codex'),(claude,claude_load,claude_gateway,'claudapter.launcher.get_token','Legacy Claude')]:
     config=load(path);provider=config.providers['fixture'];assert provider.display_name==label
-    with patch(token_patch,return_value='synthetic-upgrade-key'):
-        before,_=gateway(config,provider)
-        assert before.upstream_base_url=='https://example.test/v1'
-        if stage=='upgraded':
+    # Launchers pin the core exactly, so the gateway is only built after the upgrade.
+    if stage=='upgraded':
+        with patch(token_patch,return_value='synthetic-upgrade-key'):
+            before,_=gateway(config,provider)
+            assert before.upstream_base_url=='https://example.test/v1'
             provider.gateway_runtime={'retry_attempts':2}
             after,_=gateway(config,provider)
             assert after.retry_attempts==2
