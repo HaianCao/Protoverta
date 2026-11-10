@@ -46,7 +46,7 @@ def pytest_configure(config):
             module = command[at] if at < len(command) else None
         child_env.pop("COVERAGE_PROCESS_CONFIG", None)
         child_env.pop("COVERAGE_PROCESS_START", None)
-        if module in {"protoverta", "codex_adapter.cli", "claudapter.cli"}:
+        if module in {"protoverta", "codexapter.cli", "claudapter.cli"}:
             child_config = copy.copy(active.config)
             child_config.context = "python-cli:" + module
             child_env["COVERAGE_PROCESS_CONFIG"] = child_config.serialize()
@@ -62,7 +62,7 @@ def pytest_sessionstart(session):
     from test_environment import sanitized_environment
 
     package = session.config.getoption("--coverage-canary-package")
-    if package not in {"protoverta", "codex_adapter.cli", "claudapter.cli"}:
+    if package not in {"protoverta", "codexapter.cli", "claudapter.cli"}:
         raise pytest.UsageError("Unsupported coverage canary")
     env = sanitized_environment()
     env["PYTHONPATH"] = _source_path

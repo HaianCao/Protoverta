@@ -305,7 +305,7 @@ if ($LASTEXITCODE -ne 0) { throw "Không cài được công cụ test trình du
 $env:PLAYWRIGHT_BROWSERS_PATH = "$previewRoot\browsers"
 & $previewPython -m playwright install chromium --only-shell
 if ($LASTEXITCODE -ne 0) { throw "Không tải được Chromium dùng cho test" }
-& $previewPython "$workspace\protoverta\scripts\browser_setup_smoke.py" --source "$workspace\free-codex-cli" --package codex_adapter --installed --launch-fixture
+& $previewPython "$workspace\protoverta\scripts\browser_setup_smoke.py" --source "$workspace\free-codex-cli" --package codexapter --installed --launch-fixture
 if ($LASTEXITCODE -ne 0) { throw "Test giao diện/foreground Codex thất bại" }
 & $previewPython "$workspace\protoverta\scripts\browser_setup_smoke.py" --source "$workspace\free-claude-cli" --package claudapter --installed --launch-fixture
 if ($LASTEXITCODE -ne 0) { throw "Test giao diện/foreground Claude thất bại" }

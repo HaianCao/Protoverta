@@ -24,7 +24,7 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
         sys.path.insert(0, str(source.resolve() / "src"))
     web = importlib.import_module(package + ".web")
     config_module = importlib.import_module(package + ".config")
-    codex = package == "codex_adapter"
+    codex = package == "codexapter"
     urls, servers, launches, failures = queue.Queue(), [], [], []
     with tempfile.TemporaryDirectory(prefix="protoverta-browser-") as temporary, ExitStack() as stack:
         root = Path(temporary)
@@ -271,7 +271,7 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, required=True)
-    parser.add_argument("--package", choices=["codex_adapter", "claudapter"], required=True)
+    parser.add_argument("--package", choices=["codexapter", "claudapter"], required=True)
     parser.add_argument("--browser-executable")
     parser.add_argument("--installed", action="store_true", help="Test the installed wheel, not checkout imports")
     parser.add_argument("--screenshots", type=Path, help="Optional synthetic-fixture screenshots directory")

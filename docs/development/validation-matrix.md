@@ -59,7 +59,7 @@ matching Chromium into a dedicated test cache. Set `PLAYWRIGHT_BROWSERS_PATH`
 explicitly if using a cache outside the usual location. Then run:
 
 ```text
-python scripts/browser_setup_smoke.py --source ../free-codex-cli --package codex_adapter --screenshots TEMP_DIRECTORY
+python scripts/browser_setup_smoke.py --source ../free-codex-cli --package codexapter --screenshots TEMP_DIRECTORY
 python scripts/browser_setup_smoke.py --source ../free-claude-cli --package claudapter --screenshots TEMP_DIRECTORY
 ```
 

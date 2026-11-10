@@ -85,20 +85,20 @@ def validate(core, codex, claude, output):
     script = """
 import importlib,sys
 from pathlib import Path
-for name in ('protoverta','codex_adapter','claudapter'):
+for name in ('protoverta','codexapter','claudapter'):
     origin=Path(importlib.import_module(name).__file__).resolve()
     assert origin.is_relative_to(Path(sys.prefix).resolve()) and 'site-packages' in origin.parts, str(origin)
 from unittest.mock import patch
 from protoverta.server import GatewayConfig
-from codex_adapter.config import Config, Provider
-from codex_adapter.launcher import _gateway
+from codexapter.config import Config, Provider
+from codexapter.launcher import _gateway
 from claudapter.config import Config as ClaudeConfig, Provider as ClaudeProvider
 from claudapter.launcher import _gateway as claude_gateway
 from protoverta.provider_profiles import ProviderProfiles
 GatewayConfig('chat','https://example.test/v1','fixture','local',client_tool_search='function',provider_profiles=ProviderProfiles(),retry_attempts=2)
 p=Provider('demo','Demo','https://example.test/v1',protocol='chat_completions',execution_mode='gateway',client_tool_search='function')
 p.gateway_runtime={'retry_attempts':2}
-with patch('codex_adapter.launcher.resolve_token',return_value='fixture'):
+with patch('codexapter.launcher.resolve_token',return_value='fixture'):
     config,_=_gateway(Config(path=Path('fixture.toml')),p)
 assert config.client_tool_search=='function' and config.retry_attempts==2
 p=ClaudeProvider('demo','Demo','https://example.test/v1',protocol='messages',execution_mode='gateway')

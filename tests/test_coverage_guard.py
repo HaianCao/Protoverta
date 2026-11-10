@@ -25,7 +25,7 @@ def test_coverage_guard_never_restores_scrubbed_credentials(monkeypatch, active)
     environment = {"SAFE": "fixture"}
     try:
         module.pytest_configure(None)
-        module.subprocess.Popen([sys.executable, "-m", "codex_adapter.cli", "--help"], env=environment)
+        module.subprocess.Popen([sys.executable, "-m", "codexapter.cli", "--help"], env=environment)
         assert original.call_args.kwargs["env"] == {"SAFE": "fixture", "COVERAGE_PROCESS_CONFIG": "synthetic-measurement-config"}
         assert environment == {"SAFE": "fixture"}
         module.subprocess.Popen([sys.executable, "-c", "pass"], env=environment)

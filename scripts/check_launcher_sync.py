@@ -14,12 +14,14 @@ from pathlib import Path
 SHARED_MODULES = (
     "command.py",
     "http_deadline.py",
+    "retry_log.py",
+    "retry_relay.py",
     "settings_store.py",
     "toml_text.py",
     "web_http.py",
     "web_security.py",
 )
-PACKAGES = {"codex": "codex_adapter", "claude": "claudapter"}
+PACKAGES = {"codex": "codexapter", "claude": "claudapter"}
 
 
 def _normalized(path: Path, package: str) -> list[str]:

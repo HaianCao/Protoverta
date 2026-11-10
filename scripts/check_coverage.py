@@ -96,7 +96,7 @@ def main():
     if any(output.iterdir()):
         parser.error("Use an empty output directory")
     results = []
-    for project, package in [(core, "protoverta"), (args.codex_source.resolve(), "codex_adapter"), (args.claude_source.resolve(), "claudapter")]:
+    for project, package in [(core, "protoverta"), (args.codex_source.resolve(), "codexapter"), (args.claude_source.resolve(), "claudapter")]:
         print(f"Running source tests: {project.name} (may take several minutes)", flush=True)
         try:
             record = measure(project, package, output / package, core)

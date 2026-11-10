@@ -21,7 +21,7 @@ def test_fixture_claude_environment_uses_launcher_decisions(monkeypatch):
 
 
 def test_source_policy_is_loaded_from_selected_checkout(tmp_path):
-    path = tmp_path / "src" / "codex_adapter" / "harness.py"
+    path = tmp_path / "src" / "codexapter" / "harness.py"
     path.parent.mkdir(parents=True)
     path.write_text("def cross_protocol_overrides(prefix):\n    return ['agents.enabled=false']\n", encoding="utf-8")
     assert harness_policy.codex_settings("fixture", tmp_path) == {"agents.enabled": False}

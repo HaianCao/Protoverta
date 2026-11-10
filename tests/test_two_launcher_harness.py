@@ -132,7 +132,7 @@ def test_gateway_observer_keeps_original_context_and_only_records_owned_syntheti
 
     monkeypatch.setattr(observer.server, "gateway_session", original)
     monkeypatch.setattr(observer.importlib, "import_module", lambda _: SimpleNamespace(main=main))
-    monkeypatch.setattr(observer.sys, "argv", ["observer", "codex_adapter.cli", str(output)])
+    monkeypatch.setattr(observer.sys, "argv", ["observer", "codexapter.cli", str(output)])
     assert observer.main() == 0
     assert observed == [config] and output.with_suffix(".closed").exists()
     assert observer.server.gateway_session is original
