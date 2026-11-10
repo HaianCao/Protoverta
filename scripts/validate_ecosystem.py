@@ -33,7 +33,9 @@ def validate(core, codex, claude, output):
         if not (project / "pyproject.toml").is_file():
             raise ValueError("Expected project checkout: " + str(project))
         if project != projects[0]:
-            requirements = tomllib.loads((project / "pyproject.toml").read_text(encoding="utf-8"))["project"]["optional-dependencies"]["gateway"]
+            metadata = tomllib.loads((project / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+            # Launchers depend on the core directly; older ones used a gateway extra.
+            requirements = metadata.get("dependencies", []) + metadata.get("optional-dependencies", {}).get("gateway", [])
             if "protoverta==" + version not in requirements:
                 raise ValueError("Consumer gateway pin does not match this core snapshot: " + project.name)
         env = sanitized_environment()

@@ -76,7 +76,8 @@ def exercise(source: Path, wheel: Path, root: Path, *, command: str, skip: str, 
     install_root = local / "Programs" / install_name
     executable = install_root / "bin" / f"{command}.exe"
     with (source / "pyproject.toml").open("rb") as project_file:
-        requirements = tomllib.load(project_file)["project"]["optional-dependencies"]["gateway"]
+        metadata = tomllib.load(project_file)["project"]
+    requirements = metadata.get("dependencies", []) + metadata.get("optional-dependencies", {}).get("gateway", [])
     expected_version = next(item.split("==", 1)[1] for item in requirements if item.startswith("protoverta=="))
     options = (
         [skip, "-NonInteractive", "-NoPathChanges", "-WithGateway", "-SourceBranch", "integration/protoverta"]

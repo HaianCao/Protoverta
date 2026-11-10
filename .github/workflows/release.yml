@@ -50,7 +50,7 @@ jobs:
           name: release-wheel-sdk
           path: release-wheel-sdk
       - name: Write SHA-256 checksums
-        run: cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
+        run: cd dist && sha256sum -- * > SHA256SUMS && cat SHA256SUMS
       - uses: actions/upload-artifact@v7
         with:
           name: distributions
