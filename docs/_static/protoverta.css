@@ -1,0 +1,241 @@
+/* Protoverta documentation theme: brand colours from the logo
+   (cyan -> blue -> indigo -> violet -> pink) on top of Furo. */
+
+:root {
+  --pv-cyan: #22d3ee;
+  --pv-blue: #2563eb;
+  --pv-indigo: #4f46e5;
+  --pv-violet: #9333ea;
+  --pv-pink: #e879f9;
+  --pv-gradient: linear-gradient(120deg, var(--pv-cyan) 0%, var(--pv-blue) 35%, var(--pv-indigo) 60%, var(--pv-violet) 85%, var(--pv-pink) 100%);
+  --pv-radius: 14px;
+  --pv-card-border: rgba(79, 70, 229, 0.16);
+  --pv-card-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px rgba(79, 70, 229, 0.08);
+  --pv-hero-glow: radial-gradient(60% 80% at 15% 0%, rgba(34, 211, 238, 0.18), transparent 60%),
+    radial-gradient(50% 70% at 90% 10%, rgba(147, 51, 234, 0.16), transparent 60%);
+}
+
+body[data-theme="dark"] {
+  --pv-card-border: rgba(165, 180, 252, 0.18);
+  --pv-card-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 28px rgba(0, 0, 0, 0.35);
+  --pv-hero-glow: radial-gradient(60% 80% at 15% 0%, rgba(34, 211, 238, 0.14), transparent 60%),
+    radial-gradient(50% 70% at 90% 10%, rgba(147, 51, 234, 0.18), transparent 60%);
+}
+
+@media (prefers-color-scheme: dark) {
+  body:not([data-theme="light"]) {
+    --pv-card-border: rgba(165, 180, 252, 0.18);
+    --pv-card-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 28px rgba(0, 0, 0, 0.35);
+    --pv-hero-glow: radial-gradient(60% 80% at 15% 0%, rgba(34, 211, 238, 0.14), transparent 60%),
+      radial-gradient(50% 70% at 90% 10%, rgba(147, 51, 234, 0.18), transparent 60%);
+  }
+}
+
+/* ---- Sidebar brand ---- */
+.sidebar-logo {
+  max-width: 72px;
+  border-radius: 18px;
+  box-shadow: var(--pv-card-shadow);
+}
+.sidebar-brand-text {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  background: var(--pv-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ---- Typography ---- */
+h1, h2, h3 {
+  letter-spacing: -0.015em;
+}
+article h1 {
+  font-weight: 800;
+}
+article h2 {
+  margin-top: 2.2rem;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid var(--color-background-border);
+}
+
+/* ---- Tables ---- */
+article table.docutils {
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--pv-card-border);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: var(--pv-card-shadow);
+}
+article table.docutils th {
+  background: color-mix(in srgb, var(--pv-indigo) 9%, var(--color-background-primary));
+  font-weight: 650;
+  border: none;
+}
+article table.docutils td,
+article table.docutils th {
+  border-left: none;
+  border-right: none;
+  padding: 0.55rem 0.9rem;
+}
+article table.docutils tr:not(:last-child) td {
+  border-bottom: 1px solid var(--color-background-border);
+}
+
+/* ---- Code ---- */
+.highlight {
+  border-radius: 12px;
+}
+div.highlight pre {
+  border-radius: 12px;
+}
+
+/* ---- Landing page ---- */
+/* The page title stays for screen readers and the tab; the hero shows it. */
+article:has(.pv-hero) > section > h1:first-child {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.pv-hero-logo {
+  display: block;
+  margin: 0 auto;
+}
+.pv-hero.container {
+  position: relative;
+  margin: 0.5rem 0 2.2rem;
+  padding: 2.4rem 2rem 2.2rem;
+  border-radius: 22px;
+  border: 1px solid var(--pv-card-border);
+  background: var(--pv-hero-glow), var(--color-background-primary);
+  box-shadow: var(--pv-card-shadow);
+  text-align: center;
+}
+.pv-hero img.pv-hero-logo,
+.pv-hero-logo img {
+  width: 104px;
+  height: 104px;
+  border-radius: 26px;
+  box-shadow: 0 10px 30px rgba(79, 70, 229, 0.25);
+}
+.pv-hero h1,
+.pv-hero .pv-title {
+  margin: 1rem 0 0.4rem;
+  font-size: clamp(2.2rem, 5vw, 3.2rem);
+  font-weight: 800;
+  line-height: 1.1;
+  background: var(--pv-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.pv-tagline {
+  max-width: 40rem;
+  margin: 0 auto 1.4rem;
+  font-size: 1.15rem;
+  line-height: 1.55;
+  color: var(--color-foreground-secondary);
+}
+.pv-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+  justify-content: center;
+}
+.pv-actions a.sd-btn {
+  border-radius: 999px;
+  padding: 0.55rem 1.3rem;
+  font-weight: 600;
+}
+.pv-actions a.sd-btn-primary {
+  border: none;
+  background: var(--pv-gradient);
+  color: #fff !important;
+}
+.pv-actions a.sd-btn-primary:hover {
+  filter: brightness(1.08);
+}
+.pv-hero .pv-install.container {
+  max-width: 22rem;
+  margin: 1.6rem auto 0;
+}
+.pv-hero .pv-install > div,
+.pv-hero .pv-install div.highlight {
+  margin: 0;
+}
+.pv-hero .pv-install div.highlight {
+  border-radius: 999px;
+  border: 1px solid var(--pv-card-border);
+  background: var(--color-code-background);
+  box-shadow: var(--pv-card-shadow);
+}
+.pv-hero .pv-install div.highlight pre {
+  margin: 0;
+  padding: 0.65rem 1.4rem;
+  text-align: center;
+  background: transparent;
+  font-size: 0.92rem;
+}
+.pv-hero .pv-install div.highlight pre::before {
+  content: "$ ";
+  color: var(--pv-violet);
+  font-weight: 600;
+}
+
+/* Feature cards */
+.sd-card.pv-card {
+  border: 1px solid var(--pv-card-border);
+  border-radius: var(--pv-radius);
+  box-shadow: var(--pv-card-shadow);
+  background: var(--color-background-primary);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.sd-card.pv-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--pv-indigo) 45%, transparent);
+}
+.sd-card.pv-card .sd-card-title {
+  font-weight: 700;
+}
+.sd-card.pv-card .sd-card-title svg {
+  color: var(--pv-indigo);
+  margin-right: 0.35rem;
+}
+body[data-theme="dark"] .sd-card.pv-card .sd-card-title svg {
+  color: #a5b4fc;
+}
+
+/* Route matrix */
+.pv-matrix table.docutils {
+  width: 100%;
+}
+.pv-matrix table.docutils td,
+.pv-matrix table.docutils th {
+  padding: 0.55rem 0.6rem;
+  text-align: center;
+}
+.pv-matrix table.docutils td:first-child,
+.pv-matrix table.docutils th:first-child {
+  text-align: left;
+  font-weight: 600;
+}
+.pv-native {
+  font-weight: 650;
+  color: var(--pv-indigo);
+}
+body[data-theme="dark"] .pv-native {
+  color: #a5b4fc;
+}
+
+@media (max-width: 40em) {
+  .pv-hero.container {
+    padding: 1.8rem 1.1rem;
+  }
+  .pv-tagline {
+    font-size: 1.02rem;
+  }
+}
