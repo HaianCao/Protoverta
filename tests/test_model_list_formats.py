@@ -26,8 +26,11 @@ def test_messages_shape_and_bidirectional_paging_with_unknown_release():
         assert first["data"][0] == {"id": "m0", "display_name": "m0", "type": "model", "created_at": "1970-01-01T00:00:00Z"}
         assert snapshot.page("before_id=m20&limit=3&format=messages")["first_id"] == "m17"
         assert snapshot.page("before_id=m1&limit=3&format=messages")["has_more"] is False
+        # Claude Code 2.1.248+ sends both credentials; both matching is accepted.
+        with urlopen(Request(url, headers={"x-api-key": "local", "Authorization": "Bearer local"}), timeout=3) as response:
+            assert response.status == 200
         with pytest.raises(HTTPError) as exc:
-            urlopen(Request(url, headers={"x-api-key": "local", "Authorization": "Bearer local"}), timeout=3)
+            urlopen(Request(url, headers={"x-api-key": "local", "Authorization": "Bearer other"}), timeout=3)
         assert exc.value.code == 401
         with pytest.raises(HTTPError) as exc:
             urlopen(Request(url, headers={"x-api-key": "wrong", "anthropic-version": "2023-06-01"}), timeout=3)
