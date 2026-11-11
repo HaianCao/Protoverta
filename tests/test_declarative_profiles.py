@@ -10,13 +10,26 @@ from protoverta.provider_profiles import ProviderProfile, ProviderProfiles
 
 def profile(**extra):
     return ProviderProfile(
-        "https://example.test/v1", "chat", "m", "2026-10-25", "synthetic equivalent wire contract", "max_tokens", "completion_total", **extra
+        "https://example.test/v1",
+        "chat",
+        "m",
+        "2026-10-25",
+        "synthetic equivalent wire contract",
+        "max_tokens",
+        "completion_total",
+        **extra,
     )
 
 
 def test_reasoning_profile_is_exact_reversible_injective_and_never_clamps():
     registry = ProviderProfiles(
-        (profile(reasoning_field="thinking.level", reasoning_values={"low": 1, "medium": 2, "high": 3}, reasoning_semantics="effort_equivalent"),)
+        (
+            profile(
+                reasoning_field="thinking.level",
+                reasoning_values={"low": 1, "medium": 2, "high": 3},
+                reasoning_semantics="effort_equivalent",
+            ),
+        )
     )
     body = {"model": "m", "reasoning_effort": "high"}
     original = copy.deepcopy(body)
@@ -28,13 +41,23 @@ def test_reasoning_profile_is_exact_reversible_injective_and_never_clamps():
     with pytest.raises(ConversionError):
         registry.apply("https://example.test/v1", "chat", body | {"thinking": {"level": 0}})
     with pytest.raises(ValueError):
-        profile(reasoning_field="thinking.level", reasoning_values={"low": 1, "high": 1}, reasoning_semantics="effort_equivalent")
+        profile(
+            reasoning_field="thinking.level",
+            reasoning_values={"low": 1, "high": 1},
+            reasoning_semantics="effort_equivalent",
+        )
     assert registry.fingerprint() != ProviderProfiles((profile(),)).fingerprint()
 
 
 def test_catalog_nested_collection_alternate_id_query_and_numbered_pages():
     requests = []
-    policy = CatalogPolicy(collection_field="result.models", id_field="model_id", pagination="numbered", query_params=(("kind", "coding"),), first_page=0)
+    policy = CatalogPolicy(
+        collection_field="result.models",
+        id_field="model_id",
+        pagination="numbered",
+        query_params=(("kind", "coding"),),
+        first_page=0,
+    )
     result = fetch_catalog(
         "https://example.test/v1",
         {},
@@ -50,11 +73,15 @@ def test_catalog_nested_collection_alternate_id_query_and_numbered_pages():
     assert [item.id for item in result] == ["a", "b"]
     assert requests[0].full_url.endswith("?kind=coding&page=0")
     assert requests[1].full_url.endswith("?kind=coding&page=1")
-    result = fetch_catalog("https://example.test/v1", {}, CatalogPolicy(collection_field=None), upstream_open=pages([[{"id": "a"}]]))
+    result = fetch_catalog(
+        "https://example.test/v1", {}, CatalogPolicy(collection_field=None), upstream_open=pages([[{"id": "a"}]])
+    )
     assert result[0].id == "a"
 
 
-@pytest.mark.parametrize("params", [(("after_id", "x"),), (("page", "2"),), (("a", "1"), ("a", "2")), (("secret\n", "x"),)])
+@pytest.mark.parametrize(
+    "params", [(("after_id", "x"),), (("page", "2"),), (("a", "1"), ("a", "2")), (("secret\n", "x"),)]
+)
 def test_query_cannot_override_cursors_or_inject_headers(params):
     with pytest.raises(ValueError):
         CatalogPolicy(query_params=params)

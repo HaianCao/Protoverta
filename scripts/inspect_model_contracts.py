@@ -22,19 +22,31 @@ def main():
             root.mkdir()
             env[key] = str(root)
         env.update(DISABLE_AUTOUPDATER="1", CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1")
-        version = run_process([shutil.which("codex"), "--version"], env=env, cwd=directory, timeout=3, text=True, encoding="utf-8")
+        version = run_process(
+            [shutil.which("codex"), "--version"], env=env, cwd=directory, timeout=3, text=True, encoding="utf-8"
+        )
         if version.returncode or version.stdout.strip() != "codex-cli 0.166.0":
             raise ValueError("Inspect a new native catalog version separately before changing the pinned contract")
         for args in (["codex", "debug", "models", "--help"], ["codex", "app-server", "--help"]):
             args[0] = shutil.which(args[0])
             result = run_process(args, env=env, cwd=directory, timeout=10, text=True, encoding="utf-8")
             print(result.stdout[:6000])
-        result = run_process([shutil.which("codex"), "debug", "models", "--bundled"], env=env, cwd=directory, timeout=15, text=True, encoding="utf-8")
+        result = run_process(
+            [shutil.which("codex"), "debug", "models", "--bundled"],
+            env=env,
+            cwd=directory,
+            timeout=15,
+            text=True,
+            encoding="utf-8",
+        )
         data = json.loads(result.stdout)
         entry = data["models"][0]
         print(json.dumps({k: type(v).__name__ for k, v in entry.items()}))
         path = Path(directory) / "catalog.json"
-        for name, model in (("complete", {**entry, "slug": "vendor/model:free"}), ("minimal", {"slug": "vendor/model:free"})):
+        for name, model in (
+            ("complete", {**entry, "slug": "vendor/model:free"}),
+            ("minimal", {"slug": "vendor/model:free"}),
+        ):
             path.write_text(json.dumps({"models": [model]}), encoding="utf-8")
             args = [
                 shutil.which("codex"),
@@ -53,7 +65,16 @@ def main():
                 "models",
             ]
             result = run_process(args, env=env, cwd=directory, timeout=12, text=True, encoding="utf-8")
-            print(json.dumps({"case": name, "code": result.returncode, "output": result.stdout[:150], "error": result.stderr[-800:]}))
+            print(
+                json.dumps(
+                    {
+                        "case": name,
+                        "code": result.returncode,
+                        "output": result.stdout[:150],
+                        "error": result.stderr[-800:],
+                    }
+                )
+            )
         required = []
         for key in entry:
             candidate = {**entry, "slug": "vendor/model:free"}
@@ -81,7 +102,10 @@ def main():
             raise RuntimeError("Pinned native ModelInfo contract drift")
         if options.report:
             options.report.write_text(
-                json.dumps({"passed": True, "cli_version": version.stdout.strip(), "required_fields": required}, indent=2), encoding="utf-8"
+                json.dumps(
+                    {"passed": True, "cli_version": version.stdout.strip(), "required_fields": required}, indent=2
+                ),
+                encoding="utf-8",
             )
 
 

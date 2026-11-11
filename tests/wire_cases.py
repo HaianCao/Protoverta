@@ -69,7 +69,12 @@ def source_wire(protocol, *, tools=True, length=False):
         delta = {"role": "assistant", "content": TEXT}
         if tools:
             delta["tool_calls"] = [
-                {"index": index, "id": identifier, "type": "function", "function": {"name": name, "arguments": json.dumps(arguments, ensure_ascii=False)}}
+                {
+                    "index": index,
+                    "id": identifier,
+                    "type": "function",
+                    "function": {"name": name, "arguments": json.dumps(arguments, ensure_ascii=False)},
+                }
                 for index, (identifier, name, arguments) in zip((31, 2), CALLS, strict=True)
             ]
         return (
@@ -100,7 +105,12 @@ def source_wire(protocol, *, tools=True, length=False):
                         "content": [],
                         "stop_reason": None,
                         "stop_sequence": None,
-                        "usage": {"input_tokens": 19, "output_tokens": 0, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
+                        "usage": {
+                            "input_tokens": 19,
+                            "output_tokens": 0,
+                            "cache_creation_input_tokens": 0,
+                            "cache_read_input_tokens": 0,
+                        },
                     }
                 },
             ),
@@ -111,15 +121,33 @@ def source_wire(protocol, *, tools=True, length=False):
         if tools:
             for index, (identifier, name, arguments) in enumerate(CALLS, 1):
                 values += [
-                    ("content_block_start", {"index": index, "content_block": {"type": "tool_use", "id": identifier, "name": name, "input": {}}}),
-                    ("content_block_delta", {"index": index, "delta": {"type": "input_json_delta", "partial_json": json.dumps(arguments, ensure_ascii=False)}}),
+                    (
+                        "content_block_start",
+                        {
+                            "index": index,
+                            "content_block": {"type": "tool_use", "id": identifier, "name": name, "input": {}},
+                        },
+                    ),
+                    (
+                        "content_block_delta",
+                        {
+                            "index": index,
+                            "delta": {
+                                "type": "input_json_delta",
+                                "partial_json": json.dumps(arguments, ensure_ascii=False),
+                            },
+                        },
+                    ),
                     ("content_block_stop", {"index": index}),
                 ]
         values += [
             (
                 "message_delta",
                 {
-                    "delta": {"stop_reason": {"stop": "end_turn", "tool_calls": "tool_use", "length": "max_tokens"}[finish], "stop_sequence": None},
+                    "delta": {
+                        "stop_reason": {"stop": "end_turn", "tool_calls": "tool_use", "length": "max_tokens"}[finish],
+                        "stop_sequence": None,
+                    },
                     "usage": {"output_tokens": 7},
                 },
             ),
@@ -127,24 +155,55 @@ def source_wire(protocol, *, tools=True, length=False):
         ]
         return b"".join(event(kind, {"type": kind, **body}) for kind, body in values)
     parts = [{"type": "output_text", "text": TEXT, "annotations": [], "logprobs": []}]
-    message = {"id": "msg_fixture", "type": "message", "role": "assistant", "status": "incomplete" if length else "completed", "content": parts}
+    message = {
+        "id": "msg_fixture",
+        "type": "message",
+        "role": "assistant",
+        "status": "incomplete" if length else "completed",
+        "content": parts,
+    }
     values = [
         ("response.created", {"response": response_snapshot([], status="in_progress")}),
-        ("response.output_item.added", {"output_index": 0, "item": {**message, "status": "in_progress", "content": []}}),
-        ("response.content_part.added", {"item_id": "msg_fixture", "output_index": 0, "content_index": 0, "part": {**parts[0], "text": ""}}),
-        ("response.output_text.delta", {"item_id": "msg_fixture", "output_index": 0, "content_index": 0, "delta": TEXT, "logprobs": []}),
-        ("response.output_text.done", {"item_id": "msg_fixture", "output_index": 0, "content_index": 0, "text": TEXT, "logprobs": []}),
-        ("response.content_part.done", {"item_id": "msg_fixture", "output_index": 0, "content_index": 0, "part": parts[0]}),
+        (
+            "response.output_item.added",
+            {"output_index": 0, "item": {**message, "status": "in_progress", "content": []}},
+        ),
+        (
+            "response.content_part.added",
+            {"item_id": "msg_fixture", "output_index": 0, "content_index": 0, "part": {**parts[0], "text": ""}},
+        ),
+        (
+            "response.output_text.delta",
+            {"item_id": "msg_fixture", "output_index": 0, "content_index": 0, "delta": TEXT, "logprobs": []},
+        ),
+        (
+            "response.output_text.done",
+            {"item_id": "msg_fixture", "output_index": 0, "content_index": 0, "text": TEXT, "logprobs": []},
+        ),
+        (
+            "response.content_part.done",
+            {"item_id": "msg_fixture", "output_index": 0, "content_index": 0, "part": parts[0]},
+        ),
         ("response.output_item.done", {"output_index": 0, "item": message}),
     ]
     output = [message]
     if tools:
         for index, (identifier, name, arguments) in enumerate(CALLS, 1):
             raw = json.dumps(arguments, ensure_ascii=False)
-            item = {"id": f"fc_{index}", "type": "function_call", "call_id": identifier, "name": name, "arguments": raw, "status": "completed"}
+            item = {
+                "id": f"fc_{index}",
+                "type": "function_call",
+                "call_id": identifier,
+                "name": name,
+                "arguments": raw,
+                "status": "completed",
+            }
             identity = {"output_index": index, "item_id": item["id"]}
             values += [
-                ("response.output_item.added", {"output_index": index, "item": {**item, "arguments": "", "status": "in_progress"}}),
+                (
+                    "response.output_item.added",
+                    {"output_index": index, "item": {**item, "arguments": "", "status": "in_progress"}},
+                ),
                 ("response.function_call_arguments.delta", {**identity, "delta": raw}),
                 ("response.function_call_arguments.done", {**identity, "arguments": raw}),
                 ("response.output_item.done", {"output_index": index, "item": item}),
@@ -152,6 +211,17 @@ def source_wire(protocol, *, tools=True, length=False):
             output.append(item)
     terminal = "response.incomplete" if length else "response.completed"
     values.append(
-        (terminal, {"response": response_snapshot(output, status="incomplete" if length else "completed", reason="max_output_tokens" if length else None)})
+        (
+            terminal,
+            {
+                "response": response_snapshot(
+                    output,
+                    status="incomplete" if length else "completed",
+                    reason="max_output_tokens" if length else None,
+                )
+            },
+        )
     )
-    return b"".join(event(kind, {"type": kind, "sequence_number": sequence, **body}) for sequence, (kind, body) in enumerate(values))
+    return b"".join(
+        event(kind, {"type": kind, "sequence_number": sequence, **body}) for sequence, (kind, body) in enumerate(values)
+    )

@@ -17,7 +17,11 @@ from protoverta.core import Protocol
 
 
 def run(client, *, pause_seconds=0.3, heartbeat_interval=0.03):
-    if not (math.isfinite(pause_seconds) and math.isfinite(heartbeat_interval) and 0 < heartbeat_interval < pause_seconds <= 30):
+    if not (
+        math.isfinite(pause_seconds)
+        and math.isfinite(heartbeat_interval)
+        and 0 < heartbeat_interval < pause_seconds <= 30
+    ):
         raise ValueError("Require 0 < heartbeat interval < fixture pause <= 30 seconds")
     keepalives = []
     original_writer = server.StreamHeartbeatWriter

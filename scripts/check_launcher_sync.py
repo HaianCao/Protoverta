@@ -3,7 +3,8 @@
 CodexApter and ClaudApter keep separate copies of a few security/transport
 helpers so each launcher stays installable on its own. A fix applied to one
 copy must reach the other; this check makes a missed copy visible. Package
-names are normalized before comparison; nothing else is ignored.
+names and each launcher's own error class are normalized before comparison;
+nothing else is ignored.
 """
 
 import argparse
@@ -13,7 +14,10 @@ from pathlib import Path
 
 SHARED_MODULES = (
     "command.py",
+    "connection_probe.py",
+    "gateway_options.py",
     "http_deadline.py",
+    "provider_url.py",
     "retry_log.py",
     "retry_relay.py",
     "settings_store.py",
@@ -22,10 +26,13 @@ SHARED_MODULES = (
     "web_security.py",
 )
 PACKAGES = {"codex": "codexapter", "claude": "claudapter"}
+# Each launcher raises its own error type from otherwise identical code.
+ERRORS = {"codex": "ConfigError", "claude": "ClaudapterError"}
 
 
-def _normalized(path: Path, package: str) -> list[str]:
-    return path.read_text(encoding="utf-8").replace(package, "<package>").splitlines(keepends=True)
+def _normalized(path: Path, launcher: str) -> list[str]:
+    text = path.read_text(encoding="utf-8").replace(PACKAGES[launcher], "<package>")
+    return text.replace(ERRORS[launcher], "<LauncherError>").splitlines(keepends=True)
 
 
 def drift(codex_source: Path, claude_source: Path, modules=SHARED_MODULES) -> list[str]:
@@ -39,7 +46,7 @@ def drift(codex_source: Path, claude_source: Path, modules=SHARED_MODULES) -> li
         if missing:
             reports.append(f"{name}: missing {', '.join(missing)}")
             continue
-        left, right = _normalized(codex_file, PACKAGES["codex"]), _normalized(claude_file, PACKAGES["claude"])
+        left, right = _normalized(codex_file, "codex"), _normalized(claude_file, "claude")
         if left != right:
             diff = "".join(difflib.unified_diff(left, right, f"codex/{name}", f"claude/{name}"))
             reports.append(f"{name}: copies differ\n{diff}")

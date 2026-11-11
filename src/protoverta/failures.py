@@ -10,7 +10,16 @@ from dataclasses import dataclass
 from typing import Literal
 
 FailureKind = Literal[
-    "invalid_request", "context_window", "authentication", "permission", "not_found", "too_large", "rate_limit", "overloaded", "timeout", "upstream"
+    "invalid_request",
+    "context_window",
+    "authentication",
+    "permission",
+    "not_found",
+    "too_large",
+    "rate_limit",
+    "overloaded",
+    "timeout",
+    "upstream",
 ]
 FailurePhase = Literal["request", "preflight", "admission", "upstream", "response", "stream"]
 
@@ -79,7 +88,11 @@ class GatewayFailure:
             "timeout": "server_error",
             "upstream": "server_error",
         }
-        detail: dict[str, object] = {"type": (message_types if target == "messages" else openai_types)[self.kind], "message": self.message, "code": self.code}
+        detail: dict[str, object] = {
+            "type": (message_types if target == "messages" else openai_types)[self.kind],
+            "message": self.message,
+            "code": self.code,
+        }
         if self.phase is not None:
             detail["phase"] = self.phase
         if self.feature is not None:
@@ -93,7 +106,13 @@ class GatewayFailure:
             # ``param`` names a request parameter in the Responses contract. The
             # gateway path is an HTTP route, so it is reported separately and
             # never presented as if a request field were invalid.
-            event: dict[str, object] = {"type": "error", "code": self.code, "message": self.message, "param": None, "sequence_number": sequence_number}
+            event: dict[str, object] = {
+                "type": "error",
+                "code": self.code,
+                "message": self.message,
+                "param": None,
+                "sequence_number": sequence_number,
+            }
             if self.phase is not None:
                 event["phase"] = self.phase
             if self.feature is not None:
@@ -139,7 +158,9 @@ def gateway_failure(
     elif code not in _RECOGNIZED_CODES:
         code = kind
     valid_phase: FailurePhase | None = phase if isinstance(phase, str) and phase in _RECOGNIZED_PHASES else None
-    valid_path = path if isinstance(path, str) and 1 <= len(path) <= 128 and all(32 <= ord(c) < 127 for c in path) else None
+    valid_path = (
+        path if isinstance(path, str) and 1 <= len(path) <= 128 and all(32 <= ord(c) < 127 for c in path) else None
+    )
     # Known secrets are removed before bounding the message, including when a
     # provider embeds credentials in an otherwise valid JSON error response.
     for secret in sorted((value for value in secrets if value), key=len, reverse=True):

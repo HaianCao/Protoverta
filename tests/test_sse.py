@@ -4,7 +4,11 @@ from protoverta.sse import SSEEvent, SSEParser, encode_sse
 
 
 def test_all_byte_boundaries_utf8_crlf_and_multiline():
-    wire = b": heartbeat\r\nevent: response.output_text.delta\r\nid: 7\r\ndata: " + "xin chào".encode() + b"\r\ndata: world\r\n\r\n"
+    wire = (
+        b": heartbeat\r\nevent: response.output_text.delta\r\nid: 7\r\ndata: "
+        + "xin chào".encode()
+        + b"\r\ndata: world\r\n\r\n"
+    )
     parser = SSEParser()
     events = []
     for byte in wire:

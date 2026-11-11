@@ -15,7 +15,9 @@ def config(protocol="messages", mode="native"):
     return replace(GatewayConfig(protocol, "https://example.test/prefix/v1", "fixture", "local"), token_count_mode=mode)
 
 
-@pytest.mark.parametrize("protocol,path", [("messages", "/messages/count_tokens"), ("responses", "/responses/input_tokens")])
+@pytest.mark.parametrize(
+    "protocol,path", [("messages", "/messages/count_tokens"), ("responses", "/responses/input_tokens")]
+)
 def test_native_count_uses_exact_prefix_and_never_generates(protocol, path):
     captured = []
 
@@ -23,7 +25,11 @@ def test_native_count_uses_exact_prefix_and_never_generates(protocol, path):
         captured.append(request)
         return io.BytesIO(b'{"input_tokens":17,"object":"response.input_tokens"}')
 
-    body = {"model": "m", "messages": [{"role": "user", "content": "hello"}]} if protocol == "messages" else {"model": "m", "input": "hello"}
+    body = (
+        {"model": "m", "messages": [{"role": "user", "content": "hello"}]}
+        if protocol == "messages"
+        else {"model": "m", "input": "hello"}
+    )
     assert count_input(config(protocol), body, protocol, upstream_open=upstream) == (17, "provider-native")
     assert captured[0].full_url == "https://example.test/prefix/v1" + path
     assert "max_tokens" not in json.loads(captured[0].data)
@@ -57,7 +63,13 @@ def test_count_http_endpoint_opt_in_auth_and_estimate_provenance():
 
 
 def test_model_bound_local_tokenizer_has_no_download_or_cross_model_claim():
-    counter = ModelTokenCounter("m", "messages", render_request=lambda body: json.dumps(body["messages"]), encode=lambda text: list(text.encode()), exact=False)
+    counter = ModelTokenCounter(
+        "m",
+        "messages",
+        render_request=lambda body: json.dumps(body["messages"]),
+        encode=lambda text: list(text.encode()),
+        exact=False,
+    )
     operator = replace(config(mode="off"), token_count_mode="operator", token_counter=counter)
     body = {"model": "m", "messages": [{"role": "user", "content": "synthetic"}]}
     count, provenance = count_input(operator, body, "messages")
@@ -93,7 +105,13 @@ def test_count_preserves_upstream_failure_status_safe_headers_and_privacy(status
     stream = io.BytesIO(b"private provider body")
 
     def failed(request, timeout):
-        raise HTTPError(request.full_url, status, "private reason", {"Retry-After": "7", "Set-Cookie": "private", "X-Private": "private"}, stream)
+        raise HTTPError(
+            request.full_url,
+            status,
+            "private reason",
+            {"Retry-After": "7", "Set-Cookie": "private", "X-Private": "private"},
+            stream,
+        )
 
     with listener(config(), failed) as url:
         with pytest.raises(HTTPError) as error:

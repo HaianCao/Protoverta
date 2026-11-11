@@ -36,8 +36,20 @@ def loaded():
 
 def history():
     return [
-        {"type": "tool_search_call", "execution": "client", "status": "completed", "call_id": "search1", "arguments": {"goal": "lookup"}},
-        {"type": "tool_search_output", "execution": "client", "status": "completed", "call_id": "search1", "tools": [loaded()]},
+        {
+            "type": "tool_search_call",
+            "execution": "client",
+            "status": "completed",
+            "call_id": "search1",
+            "arguments": {"goal": "lookup"},
+        },
+        {
+            "type": "tool_search_output",
+            "execution": "client",
+            "status": "completed",
+            "call_id": "search1",
+            "tools": [loaded()],
+        },
     ]
 
 
@@ -50,7 +62,9 @@ def upstream_call(target, name="pv_client_tool_search"):
                     "message": {
                         "role": "assistant",
                         "content": None,
-                        "tool_calls": [{"id": "s2", "type": "function", "function": {"name": name, "arguments": '{"goal":"next"}'}}],
+                        "tool_calls": [
+                            {"id": "s2", "type": "function", "function": {"name": name, "arguments": '{"goal":"next"}'}}
+                        ],
                     },
                     "finish_reason": "tool_calls",
                 }
@@ -96,7 +110,20 @@ def test_paired_history_loads_definitions_and_preserves_result_identity():
     assert request == original
 
 
-@pytest.mark.parametrize("mutation", ["hosted", "missing_execution", "missing_output", "orphan", "duplicate", "conflict", "reserved", "schema", "unknown"])
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "hosted",
+        "missing_execution",
+        "missing_output",
+        "orphan",
+        "duplicate",
+        "conflict",
+        "reserved",
+        "schema",
+        "unknown",
+    ],
+)
 def test_ambiguous_lossy_or_unverified_search_shapes_fail_closed(mutation):
     request = body()
     request["input"] = history()
@@ -113,7 +140,13 @@ def test_ambiguous_lossy_or_unverified_search_shapes_fail_closed(mutation):
     elif mutation == "duplicate":
         request["input"].append(copy.deepcopy(request["input"][1]))
     elif mutation == "conflict":
-        request["tools"].append({"type": "function", "name": "lookup", "parameters": {"type": "object", "properties": {"other": {"type": "string"}}}})
+        request["tools"].append(
+            {
+                "type": "function",
+                "name": "lookup",
+                "parameters": {"type": "object", "properties": {"other": {"type": "string"}}},
+            }
+        )
     elif mutation == "reserved":
         request["tools"].append({"type": "function", "name": "pv_client_tool_search"})
     elif mutation == "schema":
@@ -127,11 +160,18 @@ def test_ambiguous_lossy_or_unverified_search_shapes_fail_closed(mutation):
 def test_loaded_custom_grammar_and_native_passthrough_remain_intact():
     request = body()
     request["input"] = history()
-    custom = {"type": "custom", "name": "exec", "format": {"type": "grammar", "syntax": "regex", "definition": "[a-z]+"}}
+    custom = {
+        "type": "custom",
+        "name": "exec",
+        "format": {"type": "grammar", "syntax": "regex", "definition": "[a-z]+"},
+    }
     request["input"][1]["tools"] = [custom]
     prepared = ClientToolSearchMap().prepare(request)
     assert prepared["tools"][0] == custom
-    assert convert_request(prepared, "responses", "chat")["tools"][0]["custom"]["format"]["grammar"]["definition"] == "[a-z]+"
+    assert (
+        convert_request(prepared, "responses", "chat")["tools"][0]["custom"]["format"]["grammar"]["definition"]
+        == "[a-z]+"
+    )
     assert convert_request(request, "responses", "responses") == request
 
 
@@ -179,7 +219,11 @@ def test_gateway_opt_in_json_search_round_trip(policy):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        request = Request(f"http://127.0.0.1:{server.server_port}/v1/responses", data=json.dumps(body()).encode(), headers={"Authorization": "Bearer local"})
+        request = Request(
+            f"http://127.0.0.1:{server.server_port}/v1/responses",
+            data=json.dumps(body()).encode(),
+            headers={"Authorization": "Bearer local"},
+        )
         if policy == "reject":
             with pytest.raises(HTTPError) as error:
                 urlopen(request, timeout=3)

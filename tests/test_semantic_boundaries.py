@@ -22,7 +22,13 @@ def chat_result(arguments="{}", call_id="call_fixture"):
                 "message": {
                     "role": "assistant",
                     "content": None,
-                    "tool_calls": [{"id": call_id, "type": "function", "function": {"name": "fixture_nonce", "arguments": arguments}}],
+                    "tool_calls": [
+                        {
+                            "id": call_id,
+                            "type": "function",
+                            "function": {"name": "fixture_nonce", "arguments": arguments},
+                        }
+                    ],
                 },
                 "finish_reason": "tool_calls",
             }
@@ -42,7 +48,13 @@ def test_doctor_requires_nonempty_call_identity_without_normalizing_it(protocol,
     else:
         result["output"][0]["call_id"] = call_id
     config = GatewayConfig(protocol, "https://example.invalid/v1", "fixture", "local")
-    report = check_route(config, "m", protocol, cases=("tools",), upstream_open=lambda request, timeout: io.BytesIO(json.dumps(result).encode()))
+    report = check_route(
+        config,
+        "m",
+        protocol,
+        cases=("tools",),
+        upstream_open=lambda request, timeout: io.BytesIO(json.dumps(result).encode()),
+    )
     assert report[0]["passed"] is bool(call_id)
     evidence = evidence_report(config, "m", protocol, report, verified_with="synthetic fixture")
     assert bool(evidence["routes"]) is bool(call_id)
@@ -54,7 +66,16 @@ def test_responses_usage_preserves_unknown_and_measured_details(details, streami
     if streaming:
         encoder = StreamEncoder("responses")
         encoder.feed(Delta("start", model="m"))
-        events = encoder.feed(Delta("finish", reason="stop", input_tokens=10, output_tokens=5, cached_input_tokens=details, reasoning_output_tokens=details))
+        events = encoder.feed(
+            Delta(
+                "finish",
+                reason="stop",
+                input_tokens=10,
+                output_tokens=5,
+                cached_input_tokens=details,
+                reasoning_output_tokens=details,
+            )
+        )
         usage = json.loads(events[-1].data)["response"]["usage"]
     else:
         result = {
@@ -63,7 +84,10 @@ def test_responses_usage_preserves_unknown_and_measured_details(details, streami
             "usage": {"prompt_tokens": 10, "completion_tokens": 5},
         }
         if details is not None:
-            result["usage"].update(prompt_tokens_details={"cached_tokens": details}, completion_tokens_details={"reasoning_tokens": details})
+            result["usage"].update(
+                prompt_tokens_details={"cached_tokens": details},
+                completion_tokens_details={"reasoning_tokens": details},
+            )
         usage = convert_response(result, "chat", "responses")["usage"]
     assert usage["total_tokens"] == 15
     if details is None:
@@ -106,7 +130,11 @@ def test_nonfinite_request_arguments_fail_locally(number):
         "model": "m",
         "max_tokens": 20,
         "messages": [
-            {"role": "assistant", "content": None, "tool_calls": [{"id": "c", "type": "function", "function": {"name": "f", "arguments": raw}}]},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{"id": "c", "type": "function", "function": {"name": "f", "arguments": raw}}],
+            },
             {"role": "tool", "tool_call_id": "c", "content": "synthetic result"},
         ],
     }
@@ -121,7 +149,10 @@ def test_finite_arguments_keep_original_spelling():
     assert converted["output"][0]["arguments"] == raw
 
 
-@pytest.mark.parametrize("source,target", [(a, b) for a in ("chat", "messages", "responses") for b in ("chat", "messages", "responses") if a != b])
+@pytest.mark.parametrize(
+    "source,target",
+    [(a, b) for a in ("chat", "messages", "responses") for b in ("chat", "messages", "responses") if a != b],
+)
 def test_invalid_arguments_never_dispatch_or_retry_upstream(source, target):
     dispatched = []
 
@@ -137,7 +168,11 @@ def test_invalid_arguments_never_dispatch_or_retry_upstream(source, target):
         "model": "m",
         "max_tokens": 20,
         "messages": [
-            {"role": "assistant", "content": None, "tool_calls": [{"id": "c", "type": "function", "function": {"name": "f", "arguments": "{}"}}]},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{"id": "c", "type": "function", "function": {"name": "f", "arguments": "{}"}}],
+            },
             {"role": "tool", "tool_call_id": "c", "content": "synthetic result"},
         ],
     }

@@ -31,17 +31,31 @@ def chat_refusal(value="private-refusal", *, reason="stop"):
         ("chat", chat_refusal(), "refusal"),
         ("chat", chat_refusal(None, reason="content_filter"), "content_filter"),
         ("messages", {"model": "m", "content": [], "stop_reason": "refusal"}, "refusal"),
-        ("messages", {"model": "m", "content": [], "stop_reason": "stop_sequence", "stop_sequence": "private-sequence"}, "stop_sequence"),
+        (
+            "messages",
+            {"model": "m", "content": [], "stop_reason": "stop_sequence", "stop_sequence": "private-sequence"},
+            "stop_sequence",
+        ),
         (
             "responses",
             {
                 "model": "m",
                 "status": "completed",
-                "output": [{"type": "message", "role": "assistant", "content": [{"type": "refusal", "refusal": "private-refusal"}]}],
+                "output": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "refusal", "refusal": "private-refusal"}],
+                    }
+                ],
             },
             "refusal",
         ),
-        ("responses", {"model": "m", "status": "incomplete", "incomplete_details": {"reason": "content_filter"}, "output": []}, "content_filter"),
+        (
+            "responses",
+            {"model": "m", "status": "incomplete", "incomplete_details": {"reason": "content_filter"}, "output": []},
+            "content_filter",
+        ),
     ],
 )
 def test_known_unrepresentable_output_is_not_malformed_json(source, body, feature):
@@ -66,7 +80,10 @@ def test_malformed_refusal_is_not_treated_as_supported_wire_semantics(value):
 def test_known_unrepresentable_json_returns_non_retryable_422_not_502(target):
     config = GatewayConfig("chat", "https://example.test/v1", "key", "local")
     body = {"model": "m", "input": "hi"} if target == "responses" else {"model": "m", "messages": [], "max_tokens": 8}
-    with listener(config, lambda request, timeout: io.BytesIO(json.dumps(chat_refusal()).encode())) as url, pytest.raises(HTTPError) as caught:
+    with (
+        listener(config, lambda request, timeout: io.BytesIO(json.dumps(chat_refusal()).encode())) as url,
+        pytest.raises(HTTPError) as caught,
+    ):
         post(url.removesuffix("responses") + target, body)
     assert caught.value.code == 422 and caught.value.headers["x-should-retry"] == "false"
     error = json.load(caught.value)
@@ -79,7 +96,14 @@ def test_known_unrepresentable_json_returns_non_retryable_422_not_502(target):
 @pytest.mark.parametrize("feature", ["refusal", "content_filter"])
 def test_unsupported_stream_semantics_never_become_success(visible, feature):
     def chunk(delta, finish=None):
-        return event("message", {"object": "chat.completion.chunk", "model": "m", "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]})
+        return event(
+            "message",
+            {
+                "object": "chat.completion.chunk",
+                "model": "m",
+                "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
+            },
+        )
 
     class Response(io.BytesIO):
         def __init__(self):
@@ -87,7 +111,10 @@ def test_unsupported_stream_semantics_never_become_success(visible, feature):
             self.chunks = iter(
                 [
                     chunk({"role": "assistant", "content": "visible" if visible else ""}),
-                    chunk({"refusal": "private-refusal"} if feature == "refusal" else {}, "content_filter" if feature == "content_filter" else None),
+                    chunk(
+                        {"refusal": "private-refusal"} if feature == "refusal" else {},
+                        "content_filter" if feature == "content_filter" else None,
+                    ),
                 ]
             )
 
@@ -158,16 +185,29 @@ def test_chat_include_usage_transport_option_maps_without_silent_parameter_drop(
 
 @pytest.mark.parametrize("source", ["chat", "responses"])
 def test_measured_cache_writes_survive_messages_conversion_and_roundtrip(source):
-    usage = {"input_tokens": 19, "output_tokens": 7, "input_tokens_details": {"cached_tokens": 3, "cache_write_tokens": 4}}
+    usage = {
+        "input_tokens": 19,
+        "output_tokens": 7,
+        "input_tokens_details": {"cached_tokens": 3, "cache_write_tokens": 4},
+    }
     response = {"model": "m", "status": "completed", "output": [], "usage": usage}
     if source == "chat":
         response = {
             "model": "m",
             "choices": [{"message": {"role": "assistant", "content": None}, "finish_reason": "stop"}],
-            "usage": {"prompt_tokens": 19, "completion_tokens": 7, "prompt_tokens_details": {"cached_tokens": 3, "cache_write_tokens": 4}},
+            "usage": {
+                "prompt_tokens": 19,
+                "completion_tokens": 7,
+                "prompt_tokens_details": {"cached_tokens": 3, "cache_write_tokens": 4},
+            },
         }
     messages = convert_response(response, source, "messages")
-    assert messages["usage"] == {"input_tokens": 12, "output_tokens": 7, "cache_read_input_tokens": 3, "cache_creation_input_tokens": 4}
+    assert messages["usage"] == {
+        "input_tokens": 12,
+        "output_tokens": 7,
+        "cache_read_input_tokens": 3,
+        "cache_creation_input_tokens": 4,
+    }
     result = convert_response(messages, "messages", source)
     details = result["usage"]["prompt_tokens_details" if source == "chat" else "input_tokens_details"]
     assert details == {"cached_tokens": 3, "cache_write_tokens": 4}

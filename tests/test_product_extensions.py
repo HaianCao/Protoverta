@@ -89,7 +89,10 @@ def test_explicit_cache_contract_preserves_only_certified_boundary():
 
 
 def test_native_compaction_is_forwarded_and_cross_protocol_compaction_rejected():
-    result = {"object": "response.compaction", "output": [{"type": "compaction", "encrypted_content": "opaque-fixture"}]}
+    result = {
+        "object": "response.compaction",
+        "output": [{"type": "compaction", "encrypted_content": "opaque-fixture"}],
+    }
     requests = []
 
     def upstream(request, timeout):
@@ -113,7 +116,9 @@ def test_native_compaction_is_forwarded_and_cross_protocol_compaction_rejected()
 def test_audio_and_hosted_state_are_not_relabelled_as_text_or_functions():
     for content in ([{"type": "input_audio", "input_audio": {"data": "synthetic", "format": "wav"}}],):
         with pytest.raises(ConversionError):
-            convert_request({"model": "m", "max_tokens": 32, "messages": [{"role": "user", "content": content}]}, "chat", "messages")
+            convert_request(
+                {"model": "m", "max_tokens": 32, "messages": [{"role": "user", "content": content}]}, "chat", "messages"
+            )
     with pytest.raises(ConversionError):
         convert_request({"model": "m", "input": "hello", "tools": [{"type": "web_search"}]}, "responses", "chat")
 
@@ -121,7 +126,9 @@ def test_audio_and_hosted_state_are_not_relabelled_as_text_or_functions():
 def test_current_evidence_policy_rejects_stale_route_before_io():
     route = record(identity="a" * 64)
     config = replace(
-        GatewayConfig("chat", "https://example.test/v1", "fixture", "local"), capabilities=CapabilityRegistry(routes=(route,)), require_current_evidence=True
+        GatewayConfig("chat", "https://example.test/v1", "fixture", "local"),
+        capabilities=CapabilityRegistry(routes=(route,)),
+        require_current_evidence=True,
     )
     with listener(config, lambda *_: pytest.fail("stale evidence must not call upstream")) as url:
         with pytest.raises(HTTPError) as error:
@@ -144,9 +151,25 @@ def test_vendor_effort_alias_cannot_hide_explicit_unsupported_capability():
         reasoning_semantics="effort_equivalent",
     )
     registry = CapabilityRegistry(
-        (CapabilityRecord("https://example.test/v1", "chat", "m", {"reasoning_effort": False}, "2026-10-25", "synthetic negative evidence"),)
+        (
+            CapabilityRecord(
+                "https://example.test/v1",
+                "chat",
+                "m",
+                {"reasoning_effort": False},
+                "2026-10-25",
+                "synthetic negative evidence",
+            ),
+        )
     )
-    config = GatewayConfig("chat", "https://example.test/v1", "fixture", "local", provider_profiles=ProviderProfiles((profile,)), capabilities=registry)
+    config = GatewayConfig(
+        "chat",
+        "https://example.test/v1",
+        "fixture",
+        "local",
+        provider_profiles=ProviderProfiles((profile,)),
+        capabilities=registry,
+    )
     with listener(config, lambda *_: pytest.fail("must reject before upstream")) as url:
         with pytest.raises(HTTPError) as error:
             post(url, {"model": "m", "input": "hello", "reasoning": {"effort": "high"}})
@@ -158,15 +181,37 @@ def test_vendor_effort_alias_cannot_hide_explicit_unsupported_capability():
     "extra",
     [
         {"tools": [{"type": "web_search"}]},
-        {"messages": [{"role": "user", "content": [{"type": "input_audio", "input_audio": {"data": "synthetic", "format": "wav"}}]}]},
-        {"messages": [{"role": "user", "content": [{"type": "video_url", "video_url": "https://example.invalid/video"}]}]},
+        {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [{"type": "input_audio", "input_audio": {"data": "synthetic", "format": "wav"}}],
+                }
+            ]
+        },
+        {
+            "messages": [
+                {"role": "user", "content": [{"type": "video_url", "video_url": "https://example.invalid/video"}]}
+            ]
+        },
     ],
 )
 def test_text_and_function_evidence_do_not_certify_native_media_or_hosted_tools(extra):
     registry = CapabilityRegistry(
-        (CapabilityRecord("https://example.test/v1", "chat", "m", {"text": True, "tools": True}, "2026-10-25", "synthetic text/function only"),)
+        (
+            CapabilityRecord(
+                "https://example.test/v1",
+                "chat",
+                "m",
+                {"text": True, "tools": True},
+                "2026-10-25",
+                "synthetic text/function only",
+            ),
+        )
     )
-    config = GatewayConfig("chat", "https://example.test/v1", "fixture", "local", capabilities=registry, require_verified_capabilities=True)
+    config = GatewayConfig(
+        "chat", "https://example.test/v1", "fixture", "local", capabilities=registry, require_verified_capabilities=True
+    )
     body = {"model": "m", "messages": [{"role": "user", "content": "synthetic"}]} | extra
     with listener(config, lambda *_: pytest.fail("unverified native feature must not call upstream")) as url:
         with pytest.raises(HTTPError) as error:

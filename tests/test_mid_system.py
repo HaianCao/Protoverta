@@ -11,7 +11,11 @@ def request():
     return {
         "model": "verified-model",
         "max_output_tokens": 64,
-        "input": [{"role": "system", "content": "Initial"}, {"role": "user", "content": "Question"}, {"role": "system", "content": "New instruction"}],
+        "input": [
+            {"role": "system", "content": "Initial"},
+            {"role": "user", "content": "Question"},
+            {"role": "system", "content": "New instruction"},
+        ],
     }
 
 
@@ -48,10 +52,14 @@ def test_codex_developer_mapping_requires_both_profile_and_capability():
     with pytest.raises(ConversionError):
         prepare_codex_request(body, "messages")
     prepared = prepare_codex_request(body, "messages", messages_mid_system=True)
-    assert convert_request(prepared, "responses", "messages", messages_mid_system=True)["messages"][-1]["role"] == "system"
+    assert (
+        convert_request(prepared, "responses", "messages", messages_mid_system=True)["messages"][-1]["role"] == "system"
+    )
 
 
-@pytest.mark.parametrize("models,protocol", [(["m"], "messages"), (("",), "messages"), (("bad model",), "messages"), (("m",), "chat")])
+@pytest.mark.parametrize(
+    "models,protocol", [(["m"], "messages"), (("",), "messages"), (("bad model",), "messages"), (("m",), "chat")]
+)
 def test_gateway_capability_config_is_exact_and_messages_only(models, protocol):
     with pytest.raises(ValueError, match="messages_system_models"):
         GatewayConfig(protocol, "https://example.test/v1", "key", "local", messages_system_models=models)
@@ -67,7 +75,10 @@ def test_system_after_parallel_tools_requires_every_result(complete):
             {
                 "role": "assistant",
                 "content": None,
-                "tool_calls": [{"id": identifier, "type": "function", "function": {"name": "read", "arguments": "{}"}} for identifier in ("a", "b")],
+                "tool_calls": [
+                    {"id": identifier, "type": "function", "function": {"name": "read", "arguments": "{}"}}
+                    for identifier in ("a", "b")
+                ],
             },
             {"role": "tool", "tool_call_id": "a", "content": "Result a"},
         ],

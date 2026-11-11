@@ -5,13 +5,18 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING, Any
 
 from .core import ConversionError, Protocol, _check_function_names
 from .json_wire import decode_json
 from .resources import StreamLimits
 from .sse import SSEParser, encode_sse
 from .stream_encoder import StreamEncoder
-from .streaming import Delta, StreamDecoder, StreamError, UnsupportedReasoningError
+from .streaming import Delta, DeltaTransform, StreamDecoder, StreamError, UnsupportedReasoningError
+
+if TYPE_CHECKING:
+    from .sse import SSEEvent
+    from .tool_policy import BoundToolPolicy
 
 
 @dataclass
@@ -35,7 +40,9 @@ class _MessagesOrder:
 
     @staticmethod
     def _size(delta: Delta) -> int:
-        return 64 + sum(len(value.encode("utf-8")) for value in (delta.text, delta.name, delta.call_id, delta.item_id) if value)
+        return 64 + sum(
+            len(value.encode("utf-8")) for value in (delta.text, delta.name, delta.call_id, delta.item_id) if value
+        )
 
     def feed(self, delta: Delta) -> list[Delta]:
         if delta.kind == "start":
@@ -48,13 +55,14 @@ class _MessagesOrder:
             if delta.tool_type == "custom":
                 raise StreamError("Messages cannot preserve native custom-tool formats")
             block = _PendingBlock()
-            self.tools[delta.index] = block
+            self.tools[delta.position] = block
             self.blocks.append(block)
         elif delta.kind in {"tool_delta", "tool_end"}:
-            block = self.tools.get(delta.index)
-            if block is None or block.closed:
+            pending = self.tools.get(delta.position)
+            if pending is None or pending.closed:
                 raise StreamError("Messages conversion received an invalid tool lifecycle")
-            block.closed = delta.kind == "tool_end"
+            pending.closed = delta.kind == "tool_end"
+            block = pending
         elif delta.kind == "text":
             block = _PendingBlock(closed=True)
             self.blocks.append(block)
@@ -93,17 +101,17 @@ class StreamTranscoder:
         *,
         messages_usage_policy: str = "strict",
         max_pending_bytes: int = 8 * 1024 * 1024,
-        response_transform: Callable[[dict], dict] | None = None,
+        response_transform: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
         public_reasoning: bool = False,
         tool_name_transform: Callable[[str], str] | None = None,
-        max_stream_bytes=32 * 1024 * 1024,
-        max_stream_items=1024,
-        max_tool_argument_bytes=8 * 1024 * 1024,
-        delta_transform: Callable[[Delta], Delta] | None = None,
-        request_context: dict | None = None,
-        tool_policy=None,
+        max_stream_bytes: int = 32 * 1024 * 1024,
+        max_stream_items: int = 1024,
+        max_tool_argument_bytes: int = 8 * 1024 * 1024,
+        delta_transform: DeltaTransform | None = None,
+        request_context: dict[str, Any] | None = None,
+        tool_policy: BoundToolPolicy | None = None,
         text_logprobs: bool = False,
-        max_top_logprobs=None,
+        max_top_logprobs: int | None = None,
         omit_reasoning: bool = False,
     ) -> None:
         self.source = Protocol(source)
@@ -114,17 +122,27 @@ class StreamTranscoder:
             raise ValueError("max_pending_bytes must be positive")
         cross_messages = self.target == Protocol.MESSAGES and self.source != Protocol.MESSAGES
         if cross_messages and messages_usage_policy == "strict":
-            raise StreamError("incremental Messages output needs input_tokens at stream start; this source reports usage later")
+            raise StreamError(
+                "incremental Messages output needs input_tokens at stream start; this source reports usage later"
+            )
         self.order = _MessagesOrder(max_pending_bytes) if cross_messages else None
         self.parser = SSEParser()
         limit = max_top_logprobs if max_top_logprobs is not None else (request_context or {}).get("top_logprobs")
         self.decoder = StreamDecoder(
-            self.source, public_reasoning=public_reasoning, text_logprobs=text_logprobs, max_top_logprobs=limit, omit_reasoning=omit_reasoning
+            self.source,
+            public_reasoning=public_reasoning,
+            text_logprobs=text_logprobs,
+            max_top_logprobs=limit,
+            omit_reasoning=omit_reasoning,
         )
         if request_context is not None and self.source == self.target:
             raise ValueError("request_context requires translated Responses output")
         self.encoder = StreamEncoder(
-            self.target, response_transform=response_transform, public_reasoning=public_reasoning, request_context=request_context, text_logprobs=text_logprobs
+            self.target,
+            response_transform=response_transform,
+            public_reasoning=public_reasoning,
+            request_context=request_context,
+            text_logprobs=text_logprobs,
         )
         self.tool_name_transform = tool_name_transform
         self.delta_transform = delta_transform
@@ -150,12 +168,12 @@ class StreamTranscoder:
                     self.tool_policy.observe_delta(decoded)
                 if decoded.kind == "tool_start" and self.tool_name_transform is None:
                     try:
-                        _check_function_names((decoded.name,), self.target)
+                        _check_function_names((decoded.call_name,), self.target)
                     except ConversionError as exc:
                         raise StreamError("upstream function name is not portable to the target") from exc
                 if decoded.kind == "tool_start" and self.tool_name_transform is not None:
                     try:
-                        decoded = replace(decoded, name=self.tool_name_transform(decoded.name))
+                        decoded = replace(decoded, name=self.tool_name_transform(decoded.call_name))
                     except ConversionError as exc:
                         raise StreamError("upstream function alias cannot be restored") from exc
                 for delta in self.order.feed(decoded) if self.order else [decoded]:
@@ -219,7 +237,7 @@ class _LifecycleValidator:
         # stream; only that protocol's own failure epilogue may follow it.
         self.upstream_error = False
 
-    def _upstream_failure(self, body: dict, kind: str | None) -> None:
+    def _upstream_failure(self, body: dict[str, Any], kind: str | None) -> None:
         if self.protocol == Protocol.RESPONSES:
             if "sequence_number" in body:
                 sequence = self._index(body, "sequence_number")
@@ -240,15 +258,20 @@ class _LifecycleValidator:
             self.ended = self.protocol == Protocol.MESSAGES
         self.upstream_error = True
 
-    def _index(self, body: dict, field: str) -> int:
+    def _index(self, body: dict[str, Any], field: str) -> int:
         value = body.get(field)
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             raise StreamError(f"invalid native stream {field}")
         return value
 
-    def feed(self, event) -> None:
+    def feed(self, event: SSEEvent) -> None:
         if self.ended:
-            if self.protocol == Protocol.RESPONSES and event.event == "message" and event.data == "[DONE]" and not self.saw_trailing_done:
+            if (
+                self.protocol == Protocol.RESPONSES
+                and event.event == "message"
+                and event.data == "[DONE]"
+                and not self.saw_trailing_done
+            ):
                 self.saw_trailing_done = True
                 return
             raise StreamError("event after stream completion")
@@ -267,7 +290,12 @@ class _LifecycleValidator:
         if not isinstance(body, dict):
             raise StreamError("native stream event must be an object")
         kind = body.get("type")
-        if event.event == "error" or kind == "error" or self.protocol != Protocol.RESPONSES and body.get("error") is not None:
+        if (
+            event.event == "error"
+            or kind == "error"
+            or self.protocol != Protocol.RESPONSES
+            and body.get("error") is not None
+        ):
             self._upstream_failure(body, "error")
             return
         if self.protocol == Protocol.RESPONSES and kind == "response.failed" and event.event in {"message", kind}:
@@ -388,7 +416,13 @@ class StreamValidator:
     """
 
     def __init__(
-        self, protocol: Protocol | str, *, max_stream_bytes=32 * 1024 * 1024, max_stream_items=1024, max_tool_argument_bytes=8 * 1024 * 1024, event_guard=None
+        self,
+        protocol: Protocol | str,
+        *,
+        max_stream_bytes: int = 32 * 1024 * 1024,
+        max_stream_items: int = 1024,
+        max_tool_argument_bytes: int = 8 * 1024 * 1024,
+        event_guard: Callable[[SSEEvent], object] | None = None,
     ) -> None:
         self.parser = SSEParser()
         self.decoder = _LifecycleValidator(protocol)

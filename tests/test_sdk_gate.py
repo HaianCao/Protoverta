@@ -5,7 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 
-VALID_XML = "<testsuites><testsuite>" + "".join(f'<testcase name="sdk_{i}"/>' for i in range(29)) + "</testsuite></testsuites>"
+VALID_XML = (
+    "<testsuites><testsuite>" + "".join(f'<testcase name="sdk_{i}"/>' for i in range(29)) + "</testsuite></testsuites>"
+)
 
 
 def gate_module(monkeypatch):
@@ -26,9 +28,13 @@ def gate_module(monkeypatch):
         (1, "", 1),
     ],
 )
-def test_sdk_gate_rejects_skips_empty_suites_and_cleans_inherited_pythonpath(monkeypatch, installed, returncode, xml, expected):
+def test_sdk_gate_rejects_skips_empty_suites_and_cleans_inherited_pythonpath(
+    monkeypatch, installed, returncode, xml, expected
+):
     gate = gate_module(monkeypatch)
-    monkeypatch.setattr(gate.importlib.metadata, "version", lambda name: {"openai": "3.37.0", "anthropic": "2.3.0"}[name])
+    monkeypatch.setattr(
+        gate.importlib.metadata, "version", lambda name: {"openai": "3.37.0", "anthropic": "2.3.0"}[name]
+    )
     monkeypatch.setattr("sys.argv", ["check_sdk", *(["--installed"] if installed else [])])
     monkeypatch.setenv("PYTHONPATH", "unrelated-old-checkout")
 

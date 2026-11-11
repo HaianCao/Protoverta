@@ -22,11 +22,21 @@ def main() -> int:
         if good.returncode:
             return good.returncode
         bad = subprocess.run(
-            [*command, "--no-pretty", "--no-color-output", "tests/typing/invalid.py"], cwd=root, env=env, capture_output=True, text=True, check=False
+            [*command, "--no-pretty", "--no-color-output", "tests/typing/invalid.py"],
+            cwd=root,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
         )
         # Exactly the two bad arguments and the out-of-vocabulary outcome.
         # A missing checker/import or a syntax/config error must not count.
-        if bad.returncode != 1 or bad.stdout.count("[arg-type]") != 2 or bad.stdout.count("[assignment]") != 1 or bad.stdout.count(": error:") != 3:
+        if (
+            bad.returncode != 1
+            or bad.stdout.count("[arg-type]") != 2
+            or bad.stdout.count("[assignment]") != 1
+            or bad.stdout.count(": error:") != 3
+        ):
             print("Type gate negative fixture did not fail for the expected three boundary errors.", file=sys.stderr)
             print(bad.stdout, file=sys.stderr)
             print(bad.stderr, file=sys.stderr)

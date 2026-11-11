@@ -17,7 +17,9 @@ from protoverta.token_quota import SharedTokenQuota
 
 def test_atomic_reservations_reconcile_unknown_usage_and_policy_conflicts(tmp_path):
     now = [100.0]
-    quota = SharedTokenQuota(tmp_path / "quota.sqlite", "synthetic-key-scope", "m", limit=100, lease=10, clock=lambda: now[0])
+    quota = SharedTokenQuota(
+        tmp_path / "quota.sqlite", "synthetic-key-scope", "m", limit=100, lease=10, clock=lambda: now[0]
+    )
     with ThreadPoolExecutor(max_workers=8) as pool:
 
         def reserve(_):
@@ -35,19 +37,25 @@ def test_atomic_reservations_reconcile_unknown_usage_and_policy_conflicts(tmp_pa
     with pytest.raises(AdmissionDenied):
         quota.reserve(30)
     with pytest.raises(AdmissionPolicyError):
-        SharedTokenQuota(tmp_path / "quota.sqlite", "synthetic-key-scope", "m", limit=101, clock=lambda: now[0]).reserve(1)
+        SharedTokenQuota(
+            tmp_path / "quota.sqlite", "synthetic-key-scope", "m", limit=101, clock=lambda: now[0]
+        ).reserve(1)
     now[0] += 61
     assert quota.reserve(100)
 
 
 def test_active_lease_survives_rate_window_and_models_are_separate(tmp_path):
     now = [100.0]
-    quota = SharedTokenQuota(tmp_path / "q.sqlite", "synthetic-private-key-value", "m", limit=10, lease=120, clock=lambda: now[0])
+    quota = SharedTokenQuota(
+        tmp_path / "q.sqlite", "synthetic-private-key-value", "m", limit=10, lease=120, clock=lambda: now[0]
+    )
     quota.reserve(10)
     now[0] += 61
     with pytest.raises(AdmissionDenied):
         quota.reserve(1)
-    assert SharedTokenQuota(tmp_path / "q.sqlite", "synthetic-private-key-value", "other", limit=10, clock=lambda: now[0]).reserve(10)
+    assert SharedTokenQuota(
+        tmp_path / "q.sqlite", "synthetic-private-key-value", "other", limit=10, clock=lambda: now[0]
+    ).reserve(10)
     assert b"synthetic-private-key-value" not in (tmp_path / "q.sqlite").read_bytes()
 
 
@@ -103,7 +111,9 @@ def test_missing_usage_retains_reservation_and_missing_caps_or_estimates_reject_
 
     def upstream(request, timeout):
         calls.append(1)
-        return io.BytesIO(b'{"model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}')
+        return io.BytesIO(
+            b'{"model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}'
+        )
 
     body = {"model": "m", "input": "synthetic", "max_output_tokens": 80}
     item = config(tmp_path)
@@ -115,7 +125,10 @@ def test_missing_usage_retains_reservation_and_missing_caps_or_estimates_reject_
         assert error.value.code == 429
         error.value.close()
     assert len(calls) == 1
-    for invalid, request in [(item, {"model": "m", "input": "synthetic"}), (replace(item, token_counter=lambda *_: TokenCount(10)), body)]:
+    for invalid, request in [
+        (item, {"model": "m", "input": "synthetic"}),
+        (replace(item, token_counter=lambda *_: TokenCount(10)), body),
+    ]:
         with listener(invalid, lambda *_: pytest.fail("must not generate")) as url:
             with pytest.raises(HTTPError) as error:
                 post(url, request)

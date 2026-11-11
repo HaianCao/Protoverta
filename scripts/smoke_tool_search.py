@@ -51,7 +51,9 @@ def serve_mcp(*, verify_env=False, lane_values=None):
                 ]
             }
             if lane_values is not None:
-                result["tools"][0]["inputSchema"].update(properties={"lane": {"type": "string", "enum": list(lane_values)}}, required=["lane"])
+                result["tools"][0]["inputSchema"].update(
+                    properties={"lane": {"type": "string", "enum": list(lane_values)}}, required=["lane"]
+                )
         elif method == "tools/call" and request.get("params", {}).get("name") == LOOKUP:
             env_ok = not verify_env or os.environ.get("PROTOVERTA_MCP_FIXTURE_TOKEN") == "local-mcp-env"
             arguments = request.get("params", {}).get("arguments", {})
@@ -64,7 +66,12 @@ def serve_mcp(*, verify_env=False, lane_values=None):
             )
             value = lane_values[arguments["lane"]] if lane_values is not None and lane_ok else VALUE
             result = {
-                "content": [{"type": "text", "text": value if env_ok and lane_ok else "Fixture arguments or environment did not resolve"}],
+                "content": [
+                    {
+                        "type": "text",
+                        "text": value if env_ok and lane_ok else "Fixture arguments or environment did not resolve",
+                    }
+                ],
                 "isError": not (env_ok and lane_ok),
             }
         elif method == "resources/list":
@@ -72,7 +79,16 @@ def serve_mcp(*, verify_env=False, lane_values=None):
         elif method == "prompts/list":
             result = {"prompts": []}
         else:
-            print(json.dumps({"jsonrpc": "2.0", "id": request["id"], "error": {"code": -32601, "message": "Unsupported fixture method"}}), flush=True)
+            print(
+                json.dumps(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": request["id"],
+                        "error": {"code": -32601, "message": "Unsupported fixture method"},
+                    }
+                ),
+                flush=True,
+            )
             continue
         print(json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": result}), flush=True)
 
@@ -122,7 +138,12 @@ def lookup_completed(stdout):
         if not isinstance(event, dict) or not isinstance(event.get("item", {}), dict):
             continue
         item = event.get("item", {})
-        if event.get("type") == "item.completed" and item.get("type") == "mcp_tool_call" and item.get("server") == "fixture" and item.get("tool") == LOOKUP:
+        if (
+            event.get("type") == "item.completed"
+            and item.get("type") == "mcp_tool_call"
+            and item.get("server") == "fixture"
+            and item.get("tool") == LOOKUP
+        ):
             result = item.get("result")
             return (
                 item.get("status") == "completed"
@@ -140,7 +161,11 @@ def run(upstream, adapter_source=None, installed_adapter=False):
     rounds, observed = 0, []
     with tempfile.TemporaryDirectory(prefix="protoverta-search-") as directory:
         root = Path(directory)
-        env = {key: value for key, value in os.environ.items() if key.upper() in {"PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP"}}
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if key.upper() in {"PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP"}
+        }
         env.update(
             HOME=directory,
             USERPROFILE=directory,
@@ -154,7 +179,13 @@ def run(upstream, adapter_source=None, installed_adapter=False):
         # Read only the binary's bundled metadata, never query a model provider.
         catalog = json.loads(
             subprocess.run(
-                [executable, "debug", "models", "--bundled"], env=env, capture_output=True, text=True, encoding="utf-8", check=True, timeout=15
+                [executable, "debug", "models", "--bundled"],
+                env=env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=True,
+                timeout=15,
             ).stdout
         )
         entries = catalog["models"] if isinstance(catalog, dict) else catalog
@@ -203,20 +234,40 @@ def run(upstream, adapter_source=None, installed_adapter=False):
             env.update(CODEX_CA_MCP_CONFIG=str(mcp_path), CODEX_CA_MODEL_CATALOG=str(catalog_path))
             env["PROTOVERTA_MCP_FIXTURE_TOKEN"] = "local-mcp-env"
             env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1] / "src")
-            options = {key: value for key, value in options.items() if not key.startswith("mcp_servers.") and key != "model_catalog_json"}
+            options = {
+                key: value
+                for key, value in options.items()
+                if not key.startswith("mcp_servers.") and key != "model_catalog_json"
+            }
 
         def open_upstream(request, *, timeout):
             nonlocal rounds
             rounds += 1
             body = json.loads(request.data)
             tools = list(functions(body, upstream))
-            observed.append({"tool_types": [tool.get("type", "function") for tool in tools], "names": [tool.get("name") for tool in tools]})
+            observed.append(
+                {
+                    "tool_types": [tool.get("type", "function") for tool in tools],
+                    "names": [tool.get("name") for tool in tools],
+                }
+            )
             if upstream == Protocol.RESPONSES:
-                observed[-1]["search_outputs"] = [item for item in body.get("input", []) if isinstance(item, dict) and item.get("type") == "tool_search_output"]
+                observed[-1]["search_outputs"] = [
+                    item
+                    for item in body.get("input", [])
+                    if isinstance(item, dict) and item.get("type") == "tool_search_output"
+                ]
             encoder = StreamEncoder(upstream)
             deltas = [Delta("start", model=body["model"], input_tokens=1, output_tokens=0)]
             if rounds == 1:
-                search = next((tool for tool in tools if tool.get("type") == "tool_search" or tool.get("name") == "pv_client_tool_search"), None)
+                search = next(
+                    (
+                        tool
+                        for tool in tools
+                        if tool.get("type") == "tool_search" or tool.get("name") == "pv_client_tool_search"
+                    ),
+                    None,
+                )
                 if search is None:
                     raise ValueError("This client did not advertise native client tool search")
                 observed[-1]["search_parameters"] = search["parameters"]
@@ -235,7 +286,13 @@ def run(upstream, adapter_source=None, installed_adapter=False):
                 ]
             elif rounds == 2:
                 loaded = next(
-                    (tool for tool in tools if LOOKUP in tool.get("name", "") or "Return a fixed synthetic test value" in tool.get("description", "")), None
+                    (
+                        tool
+                        for tool in tools
+                        if LOOKUP in tool.get("name", "")
+                        or "Return a fixed synthetic test value" in tool.get("description", "")
+                    ),
+                    None,
                 )
                 if loaded is None:
                     raise ValueError("Client search did not load the fixture tool")

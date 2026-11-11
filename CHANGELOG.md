@@ -5,6 +5,41 @@ as a GitHub release with a wheel, an sdist and `SHA256SUMS`. Versions before
 0.3.0 were previews (`0.3.0aN`). The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.0] - 2026-11-11
+
+Internal restructuring with one user-visible addition (catalog skip mode).
+The public API and wire behaviour are unchanged; the gateway is now fully typed.
+
+### Added
+- `CatalogPolicy(invalid_entries="skip")`: one invalid entry no longer fails
+  the whole model catalog. Entries without a valid ID are left out and
+  malformed optional metadata (name, token limits, modalities) is dropped,
+  never guessed. The default stays `"reject"`.
+- `fetch_catalog` returns a `Catalog`: still a tuple of `ModelInfo`, with
+  `skipped` and `dropped_fields` counts.
+
+### Changed
+- The whole package is fully typed and checked with strict mypy (all 46
+  modules; previously 17). `fetch_catalog`, the token counters, the gateway
+  config and stream types now carry precise annotations; `GatewayConfig`
+  `token_counter` and `retry_log` are typed callables.
+- Stream events and content parts that lack a field their kind requires now
+  fail with a `StreamError`/`ConversionError` instead of a `TypeError`.
+- Protocol handling is organised per codec: `protoverta.core.CODECS` maps
+  each protocol to its request and response decoders/encoders and to the
+  response features it can represent, instead of `if/elif` branches.
+  Responses stream events dispatch through a handler table, and the
+  gateway classifies stream failures in one place. No wire behaviour changes.
+- `GatewayConfig` validation runs as named check groups (limits, admission,
+  token policies, endpoint, capabilities, ...) in the same order as before,
+  and the gateway handles a POST as read -> prepare -> exchange steps. The
+  public `GatewayConfig(...)` constructor is unchanged.
+- The HTTPS transport keeps the TLS context it was given instead of reading
+  CPython's private `HTTPSHandler._context`.
+- Response headers and chunked framing are read a buffered run at a time
+  instead of byte by byte; every socket read still runs under the request
+  deadline.
+
 ## [0.3.0] - 2026-11-10
 
 First stable release.
@@ -91,6 +126,7 @@ fixed in 0.3.0a10); the tag was removed.
 Earlier previews (0.3.0a5 and 0.3.0a6) are described in their
 [GitHub releases](https://github.com/HaianCao/Protoverta/releases).
 
+[0.4.0]: https://github.com/HaianCao/Protoverta/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/HaianCao/Protoverta/compare/v0.3.0a11...v0.3.0
 [0.3.0a11]: https://github.com/HaianCao/Protoverta/releases/tag/v0.3.0a11
 [0.3.0a10]: https://github.com/HaianCao/Protoverta/releases/tag/v0.3.0a10

@@ -15,7 +15,15 @@ from pathlib import Path
 from unittest.mock import patch
 
 
-def run(source: Path, package: str, browser_executable: str | None = None, *, installed=False, screenshots=None, launch_fixture=False):
+def run(
+    source: Path,
+    package: str,
+    browser_executable: str | None = None,
+    *,
+    installed=False,
+    screenshots=None,
+    launch_fixture=False,
+):
     import sys
 
     from playwright.sync_api import expect, sync_playwright
@@ -33,10 +41,17 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
         safe = sanitized_environment()
         # Resolve the test browser cache before replacing LOCALAPPDATA; never use
         # the user's browser profile. Cache binaries are read-only to this run.
-        safe["PLAYWRIGHT_BROWSERS_PATH"] = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", str(Path(os.environ.get("LOCALAPPDATA", temporary)) / "ms-playwright"))
+        safe["PLAYWRIGHT_BROWSERS_PATH"] = os.environ.get(
+            "PLAYWRIGHT_BROWSERS_PATH", str(Path(os.environ.get("LOCALAPPDATA", temporary)) / "ms-playwright")
+        )
         for name in ("roaming", "local", "profile"):
             (root / name).mkdir()
-        safe.update(APPDATA=str(root / "roaming"), LOCALAPPDATA=str(root / "local"), USERPROFILE=str(root / "profile"), HOME=str(root / "profile"))
+        safe.update(
+            APPDATA=str(root / "roaming"),
+            LOCALAPPDATA=str(root / "local"),
+            USERPROFILE=str(root / "profile"),
+            HOME=str(root / "profile"),
+        )
         safe.update({("CODEX_CA_ENV_FILE" if codex else "CLAUDE_CA_ENV_FILE"): str(root / ".env")})
         stack.enter_context(patch.dict(os.environ, safe, clear=True))
         config = config_module.Config(path=root / "config.toml")
@@ -53,12 +68,24 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
 
         def fetch(config, provider, **options):
             names = [
-                {"id": "constructor" if i == 0 else "model-" + str(i), "display_name": "Nineteen <em> model" if i == 19 else "Model " + str(i)}
+                {
+                    "id": "constructor" if i == 0 else "model-" + str(i),
+                    "display_name": "Nineteen <em> model" if i == 19 else "Model " + str(i),
+                }
                 for i in range(20)
             ]
             models = [item["id"] for item in names] if codex else names
-            identity = web._identity(provider, config, token=options["token"]) if codex else web._identity(config, provider, token=options["token"])
-            entry = {"identity": identity, "models": models, "model_info": names[1:], "fetched_at" if codex else "saved_at": time.time()}
+            identity = (
+                web._identity(provider, config, token=options["token"])
+                if codex
+                else web._identity(config, provider, token=options["token"])
+            )
+            entry = {
+                "identity": identity,
+                "models": models,
+                "model_info": names[1:],
+                "fetched_at" if codex else "saved_at": time.time(),
+            }
             if options.get("cache_sink"):
                 options["cache_sink"](entry)
             return models
@@ -87,13 +114,22 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
         try:
             url = urls.get(timeout=5)
             with sync_playwright() as playwright:
-                browser = playwright.chromium.launch(headless=True, **({"executable_path": browser_executable} if browser_executable else {}))
+                browser = playwright.chromium.launch(
+                    headless=True, **({"executable_path": browser_executable} if browser_executable else {})
+                )
                 try:
                     page = browser.new_page(viewport={"width": 1280, "height": 900})
                     errors = []
                     page.on("pageerror", lambda exc: errors.append(str(exc)))
                     # Local setup/assets only; never contact a real provider.
-                    page.route("**/*", lambda route: route.continue_() if route.request.url.startswith(url.split("/?")[0] + "/") else route.abort())
+                    page.route(
+                        "**/*",
+                        lambda route: (
+                            route.continue_()
+                            if route.request.url.startswith(url.split("/?")[0] + "/")
+                            else route.abort()
+                        ),
+                    )
                     loaded = page.goto(url)
                     assert loaded is not None
                     policy = loaded.headers.get("content-security-policy", "")
@@ -128,7 +164,9 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
                     page.locator("#apiKey").fill("synthetic-browser-key")
                     page.locator("#gatewayRuntimeFields").evaluate("(el) => el.closest('details').open = true")
                     page.locator("#runtime_retry_attempts").fill("2")
-                    with page.expect_response(lambda response: "/api/provider" in response.url and response.request.method == "POST") as saved:
+                    with page.expect_response(
+                        lambda response: "/api/provider" in response.url and response.request.method == "POST"
+                    ) as saved:
                         page.locator("#saveProvider" if codex else "#providerForm button[type=submit]").click()
                     assert saved.value.ok
                     expect(page.locator(select + " option")).to_have_count(1)
@@ -161,7 +199,9 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
                     expect(page.locator(model)).to_have_value("model-19")
                     page.route(
                         "**/api/models**",
-                        lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps({"models": [], "stale": False})),
+                        lambda route: route.fulfill(
+                            status=200, content_type="application/json", body=json.dumps({"models": [], "stale": False})
+                        ),
                     )
                     page.goto(url)
                     page.locator(model).fill("")
@@ -195,7 +235,9 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
                         page.screenshot(path=str(screenshots / (package + "-agent-editor.png")), full_page=True)
                     page.locator("#connectionDetails").evaluate("(el) => el.open = true")
                     page.locator("#authMode").select_option("api_key")
-                    with page.expect_response(lambda response: "/api/provider" in response.url and response.request.method == "POST") as saved:
+                    with page.expect_response(
+                        lambda response: "/api/provider" in response.url and response.request.method == "POST"
+                    ) as saved:
                         # Same-task assertions cannot race the HTTP response: both
                         # model entry and Run must stay disabled until save settles.
                         assert page.evaluate(
@@ -259,7 +301,12 @@ def run(source: Path, package: str, browser_executable: str | None = None, *, in
                         else {"policy": "custom", "default": "fixture-worker", "haiku": "fixture-fast"}
                     )
                     assert not errors, errors
-                    return {"package": package, "passed": True, "launch_stubbed": not launch_fixture, "synthetic_foreground_cli": launch_fixture}
+                    return {
+                        "package": package,
+                        "passed": True,
+                        "launch_stubbed": not launch_fixture,
+                        "synthetic_foreground_cli": launch_fixture,
+                    }
                 finally:
                     browser.close()
         finally:
@@ -278,11 +325,22 @@ def main():
     parser.add_argument("--browser-executable")
     parser.add_argument("--installed", action="store_true", help="Test the installed wheel, not checkout imports")
     parser.add_argument("--screenshots", type=Path, help="Optional synthetic-fixture screenshots directory")
-    parser.add_argument("--launch-fixture", action="store_true", help="Exercise real foreground launcher/gateway with a synthetic CLI child")
+    parser.add_argument(
+        "--launch-fixture",
+        action="store_true",
+        help="Exercise real foreground launcher/gateway with a synthetic CLI child",
+    )
     args = parser.parse_args()
     print(
         json.dumps(
-            run(args.source, args.package, args.browser_executable, installed=args.installed, screenshots=args.screenshots, launch_fixture=args.launch_fixture)
+            run(
+                args.source,
+                args.package,
+                args.browser_executable,
+                installed=args.installed,
+                screenshots=args.screenshots,
+                launch_fixture=args.launch_fixture,
+            )
         )
     )
 

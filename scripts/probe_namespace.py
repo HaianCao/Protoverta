@@ -17,7 +17,13 @@ from protoverta.server import GatewayConfig, gateway_session
 
 def probe(protocol: Protocol, base_url: str, key: str, model: str, *, force_function: bool = False) -> dict:
     config = GatewayConfig(
-        protocol, base_url, key, "isolated-probe", namespace_tools="flatten", upstream_reasoning="openrouter_disabled", default_max_output_tokens=512
+        protocol,
+        base_url,
+        key,
+        "isolated-probe",
+        namespace_tools="flatten",
+        upstream_reasoning="openrouter_disabled",
+        default_max_output_tokens=512,
     )
     tool = {
         "type": "namespace",
@@ -27,13 +33,19 @@ def probe(protocol: Protocol, base_url: str, key: str, model: str, *, force_func
                 "type": "function",
                 "name": "add",
                 "description": "Add two integer arguments",
-                "parameters": {"type": "object", "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}}, "required": ["a", "b"]},
+                "parameters": {
+                    "type": "object",
+                    "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}},
+                    "required": ["a", "b"],
+                },
             }
         ],
     }
     first_request = {
         "model": model,
-        "input": [{"role": "user", "content": "Use calculator.add exactly once to add 2 and 3, then report the result."}],
+        "input": [
+            {"role": "user", "content": "Use calculator.add exactly once to add 2 and 3, then report the result."}
+        ],
         "tools": [tool],
         "tool_choice": "required",
         "max_output_tokens": 512,
@@ -64,14 +76,30 @@ def probe(protocol: Protocol, base_url: str, key: str, model: str, *, force_func
         calls = [item for item in first.get("output", []) if item.get("type") == "function_call"]
         matched = [item for item in calls if item.get("namespace") == "calculator" and item.get("name") == "add"]
         if len(matched) != 1:
-            return {"passed": False, "upstream": protocol.value, "stage": "tool_call", "calls": len(calls), "namespace_restored": False}
+            return {
+                "passed": False,
+                "upstream": protocol.value,
+                "stage": "tool_call",
+                "calls": len(calls),
+                "namespace_restored": False,
+            }
         call = matched[0]
         arguments = json.loads(call["arguments"])
         if arguments != {"a": 2, "b": 3}:
-            return {"passed": False, "upstream": protocol.value, "stage": "arguments", "namespace_restored": True, "arguments_match": False}
+            return {
+                "passed": False,
+                "upstream": protocol.value,
+                "stage": "arguments",
+                "namespace_restored": True,
+                "arguments_match": False,
+            }
         followup = {
             "model": model,
-            "input": [*first_request["input"], *first["output"], {"type": "function_call_output", "call_id": call["call_id"], "output": "5"}],
+            "input": [
+                *first_request["input"],
+                *first["output"],
+                {"type": "function_call_output", "call_id": call["call_id"], "output": "5"},
+            ],
             "tools": [tool],
             "max_output_tokens": 512,
         }
@@ -102,7 +130,9 @@ def main() -> int:
     parser.add_argument("--key-env", required=True)
     parser.add_argument("--allow-live", action="store_true")
     parser.add_argument(
-        "--force-function", action="store_true", help="Force the declared namespaced function through Protoverta's explicit selection extension"
+        "--force-function",
+        action="store_true",
+        help="Force the declared namespaced function through Protoverta's explicit selection extension",
     )
     args = parser.parse_args()
     if not args.allow_live:

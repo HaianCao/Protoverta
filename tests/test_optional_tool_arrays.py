@@ -44,7 +44,11 @@ def test_absent_null_and_empty_tools_remain_compatible(source, target, form):
 @pytest.mark.parametrize("target", ["messages", "responses"])
 @pytest.mark.parametrize("value", INVALID)
 def test_chat_history_tool_calls_rejects_nonarrays(target, value):
-    body = {"model": "m", "max_tokens": 20, "messages": [{"role": "assistant", "content": "synthetic", "tool_calls": value}]}
+    body = {
+        "model": "m",
+        "max_tokens": 20,
+        "messages": [{"role": "assistant", "content": "synthetic", "tool_calls": value}],
+    }
     before = copy.deepcopy(body)
     with pytest.raises(ConversionError, match="tool_calls must be an array"):
         convert_request(body, "chat", target)
@@ -59,7 +63,9 @@ def test_optional_chat_history_tool_calls_still_allows_text(target, form):
     if form != "missing":
         body["messages"][0]["tool_calls"] = None if form == "null" else []
     # Responses assigns fresh message IDs; compare decoded history semantics.
-    assert convert_request(convert_request(body, "chat", target), target, "chat") == convert_request(expected, target, "chat")
+    assert convert_request(convert_request(body, "chat", target), target, "chat") == convert_request(
+        expected, target, "chat"
+    )
 
 
 @pytest.mark.parametrize("target", ["messages", "responses"])
@@ -97,7 +103,12 @@ def test_invalid_request_arrays_never_dispatch_and_next_request_recovers(source,
             bodies = [{**text_request(source), "tools": value, "stream": stream}]
             if source == "chat":
                 bodies.append(
-                    {"model": "m", "max_tokens": 20, "stream": stream, "messages": [{"role": "assistant", "content": "synthetic", "tool_calls": value}]}
+                    {
+                        "model": "m",
+                        "max_tokens": 20,
+                        "stream": stream,
+                        "messages": [{"role": "assistant", "content": "synthetic", "tool_calls": value}],
+                    }
                 )
             for body in bodies:
                 with pytest.raises(HTTPError) as error:

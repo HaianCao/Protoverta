@@ -6,9 +6,17 @@ from protoverta import ConversionError, Protocol, convert_request, convert_respo
 @pytest.mark.parametrize("source,target", [(a, b) for a in Protocol for b in Protocol if a != b])
 def test_all_six_text_request_edges(source, target):
     request = {
-        Protocol.CHAT: {"model": "example", "messages": [{"role": "user", "content": "hello"}], "max_completion_tokens": 64},
+        Protocol.CHAT: {
+            "model": "example",
+            "messages": [{"role": "user", "content": "hello"}],
+            "max_completion_tokens": 64,
+        },
         Protocol.MESSAGES: {"model": "example", "messages": [{"role": "user", "content": "hello"}], "max_tokens": 64},
-        Protocol.RESPONSES: {"model": "example", "input": [{"role": "user", "content": [{"type": "input_text", "text": "hello"}]}], "max_output_tokens": 64},
+        Protocol.RESPONSES: {
+            "model": "example",
+            "input": [{"role": "user", "content": [{"type": "input_text", "text": "hello"}]}],
+            "max_output_tokens": 64,
+        },
     }[source]
     output = convert_request(request, source, target)
     assert output["model"] == "example"
@@ -32,7 +40,13 @@ def test_all_six_text_response_edges(source, target):
         Protocol.RESPONSES: {
             "model": "example",
             "status": "completed",
-            "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "hello", "annotations": []}]}],
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "hello", "annotations": []}],
+                }
+            ],
             "usage": {"input_tokens": 2, "output_tokens": 1},
         },
     }[source]
@@ -54,7 +68,9 @@ def test_tool_call_and_result_chat_to_messages():
             {
                 "role": "assistant",
                 "content": None,
-                "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "add", "arguments": '{"a":1,"b":2}'}}],
+                "tool_calls": [
+                    {"id": "call_1", "type": "function", "function": {"name": "add", "arguments": '{"a":1,"b":2}'}}
+                ],
             },
             {"role": "tool", "tool_call_id": "call_1", "content": "3"},
         ],
@@ -75,7 +91,9 @@ def test_all_six_function_request_edges(source, target):
                 {
                     "role": "assistant",
                     "content": None,
-                    "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "add", "arguments": '{"a":1}'}}],
+                    "tool_calls": [
+                        {"id": "call_1", "type": "function", "function": {"name": "add", "arguments": '{"a":1}'}}
+                    ],
                 },
                 {"role": "tool", "tool_call_id": "call_1", "content": "2"},
             ],
@@ -85,7 +103,10 @@ def test_all_six_function_request_edges(source, target):
             "max_tokens": 64,
             "messages": [
                 {"role": "user", "content": "calculate"},
-                {"role": "assistant", "content": [{"type": "tool_use", "id": "call_1", "name": "add", "input": {"a": 1}}]},
+                {
+                    "role": "assistant",
+                    "content": [{"type": "tool_use", "id": "call_1", "name": "add", "input": {"a": 1}}],
+                },
                 {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "call_1", "content": "2"}]},
             ],
         },
@@ -115,7 +136,9 @@ def test_all_six_function_response_edges(source, target):
                     "message": {
                         "role": "assistant",
                         "content": None,
-                        "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "add", "arguments": '{"a":1}'}}],
+                        "tool_calls": [
+                            {"id": "call_1", "type": "function", "function": {"name": "add", "arguments": '{"a":1}'}}
+                        ],
                     },
                     "finish_reason": "tool_calls",
                 }
@@ -131,7 +154,16 @@ def test_all_six_function_response_edges(source, target):
         Protocol.RESPONSES: {
             "model": "m",
             "status": "completed",
-            "output": [{"type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "add", "arguments": '{"a":1}', "status": "completed"}],
+            "output": [
+                {
+                    "type": "function_call",
+                    "id": "fc_1",
+                    "call_id": "call_1",
+                    "name": "add",
+                    "arguments": '{"a":1}',
+                    "status": "completed",
+                }
+            ],
             "usage": {"input_tokens": 5, "output_tokens": 3},
         },
     }
@@ -145,7 +177,13 @@ def test_no_fake_reasoning_or_server_state():
         convert_request({"model": "m", "input": "hello", "previous_response_id": "resp_old"}, "responses", "chat")
     with pytest.raises(ConversionError, match="unsupported Messages block"):
         convert_request(
-            {"model": "m", "max_tokens": 64, "messages": [{"role": "assistant", "content": [{"type": "thinking", "thinking": "private", "signature": "abc"}]}]},
+            {
+                "model": "m",
+                "max_tokens": 64,
+                "messages": [
+                    {"role": "assistant", "content": [{"type": "thinking", "thinking": "private", "signature": "abc"}]}
+                ],
+            },
             "messages",
             "chat",
         )
@@ -153,14 +191,22 @@ def test_no_fake_reasoning_or_server_state():
 
 def test_developer_role_not_silently_rewritten():
     with pytest.raises(ConversionError, match="developer"):
-        convert_request({"model": "m", "max_tokens": 64, "messages": [{"role": "developer", "content": "policy"}]}, "chat", "messages")
+        convert_request(
+            {"model": "m", "max_tokens": 64, "messages": [{"role": "developer", "content": "policy"}]},
+            "chat",
+            "messages",
+        )
 
 
 def test_no_fabricated_usage():
     response = {"model": "m", "content": [{"type": "text", "text": "hi"}], "stop_reason": "end_turn"}
     assert "usage" not in convert_response(response, "messages", "chat")
     with pytest.raises(ConversionError, match="real upstream token usage"):
-        convert_response({"model": "m", "choices": [{"message": {"role": "assistant", "content": "hi"}, "finish_reason": "stop"}]}, "chat", "messages")
+        convert_response(
+            {"model": "m", "choices": [{"message": {"role": "assistant", "content": "hi"}, "finish_reason": "stop"}]},
+            "chat",
+            "messages",
+        )
 
 
 def test_length_finish_reason_is_preserved():
@@ -184,7 +230,12 @@ def test_same_protocol_keeps_extensions():
 def test_invalid_tool_json_rejected():
     body = {
         "model": "m",
-        "messages": [{"role": "assistant", "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "f", "arguments": "{"}}]}],
+        "messages": [
+            {
+                "role": "assistant",
+                "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "f", "arguments": "{"}}],
+            }
+        ],
     }
     with pytest.raises(ConversionError, match="valid JSON"):
         convert_request(body, "chat", "responses")
@@ -224,7 +275,10 @@ def test_responses_preserves_tool_result_before_user_text():
 
 
 def test_mismatched_tool_finish_rejected():
-    body = {"model": "m", "choices": [{"message": {"role": "assistant", "content": "done"}, "finish_reason": "tool_calls"}]}
+    body = {
+        "model": "m",
+        "choices": [{"message": {"role": "assistant", "content": "done"}, "finish_reason": "tool_calls"}],
+    }
     with pytest.raises(ConversionError, match="does not match"):
         convert_response(body, "chat", "responses")
 

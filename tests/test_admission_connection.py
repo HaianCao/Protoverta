@@ -76,7 +76,9 @@ def test_request_released_within_the_grace_window_is_admitted():
         if len(calls) == 1:
             entered.set()
             time.sleep(REQUEST_SLOT_GRACE_SECONDS / 5)
-        return io.BytesIO(b'{"model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}')
+        return io.BytesIO(
+            b'{"model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}'
+        )
 
     config = GatewayConfig("chat", "https://example.test/v1", "key", "local", max_concurrent_requests=1)
     with listener(config, upstream) as url, ThreadPoolExecutor(max_workers=1) as pool:
@@ -93,10 +95,14 @@ def test_request_released_within_the_grace_window_is_admitted():
 
 
 def test_closed_gateway_releases_the_database_file(tmp_path):
-    config = GatewayConfig("chat", "https://example.test/v1", "key", "local", shared_admission_db=str(tmp_path / "quota.sqlite"))
+    config = GatewayConfig(
+        "chat", "https://example.test/v1", "key", "local", shared_admission_db=str(tmp_path / "quota.sqlite")
+    )
 
     def upstream(request, *, timeout):
-        return io.BytesIO(b'{"model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}')
+        return io.BytesIO(
+            b'{"model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}'
+        )
 
     server = GatewayHTTPServer(("127.0.0.1", 0), make_handler(config, upstream_open=upstream))
     thread = threading.Thread(target=server.serve_forever, daemon=True)

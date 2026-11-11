@@ -37,7 +37,9 @@ def bad_messages(role, kind):
 
 
 @pytest.mark.parametrize("target", ["chat", "responses"])
-@pytest.mark.parametrize("role,kind", [("user", "tool_use"), ("system", "tool_use"), ("assistant", "tool_result"), ("system", "tool_result")])
+@pytest.mark.parametrize(
+    "role,kind", [("user", "tool_use"), ("system", "tool_use"), ("assistant", "tool_result"), ("system", "tool_result")]
+)
 def test_messages_tool_blocks_require_the_correct_role(target, role, kind):
     body = bad_messages(role, kind)
     original = copy.deepcopy(body)
@@ -58,7 +60,9 @@ def test_correct_tool_history_still_round_trips_on_all_six_routes(source, target
     assert body == original
 
 
-@pytest.mark.parametrize("source,target", [("chat", "messages"), ("chat", "responses"), ("messages", "chat"), ("messages", "responses")])
+@pytest.mark.parametrize(
+    "source,target", [("chat", "messages"), ("chat", "responses"), ("messages", "chat"), ("messages", "responses")]
+)
 @pytest.mark.parametrize("stream", [False, True])
 def test_wrong_tool_roles_return_422_without_upstream_dispatch_and_valid_request_recovers(source, target, stream):
     calls = []
@@ -68,7 +72,13 @@ def test_wrong_tool_roles_return_422_without_upstream_dispatch_and_valid_request
         return io.BytesIO(encode_json(convert_response(RESULT, "chat", target)))
 
     if source == "chat":
-        invalid = [{"model": "m", "max_tokens": 20, "messages": [{"role": "user", "content": "synthetic", "tool_calls": [CHAT_CALL]}]}]
+        invalid = [
+            {
+                "model": "m",
+                "max_tokens": 20,
+                "messages": [{"role": "user", "content": "synthetic", "tool_calls": [CHAT_CALL]}],
+            }
+        ]
     else:
         invalid = [bad_messages("user", "tool_use"), bad_messages("assistant", "tool_result")]
     with listener(target, upstream) as origin:

@@ -98,7 +98,10 @@ class Terminal:
 
 
 # Native CLI releases this fixture was exercised with; extend after review.
-FIXTURE_VERSIONS = {"codex": {"codex-cli 0.166.0", "codex-cli 0.167.0"}, "claude": {"2.1.308 (Claude Code)", "2.1.318 (Claude Code)", "2.1.319 (Claude Code)"}}
+FIXTURE_VERSIONS = {
+    "codex": {"codex-cli 0.166.0", "codex-cli 0.167.0"},
+    "claude": {"2.1.308 (Claude Code)", "2.1.318 (Claude Code)", "2.1.319 (Claude Code)"},
+}
 
 
 def worker(client, source, report, workspace):
@@ -138,14 +141,24 @@ def worker(client, source, report, workspace):
             TERM="xterm-256color",
         )
         config = config_module.Config(path=root / "adapter.toml")
-        version = run_process([shutil.which(client), "--version"], env=env, cwd=root, timeout=3, text=True, encoding="utf-8")
+        version = run_process(
+            [shutil.which(client), "--version"], env=env, cwd=root, timeout=3, text=True, encoding="utf-8"
+        )
         expected_versions = FIXTURE_VERSIONS[client]
         if version.returncode or version.stdout.strip() not in expected_versions:
             raise ValueError("Model picker fixture requires its pinned native CLI version")
         provider = config_module.Provider(
-            "fixture", "Synthetic provider", "http://127.0.0.1:9/v1", protocol="chat_completions" if client == "codex" else "chat", execution_mode="gateway"
+            "fixture",
+            "Synthetic provider",
+            "http://127.0.0.1:9/v1",
+            protocol="chat_completions" if client == "codex" else "chat",
+            execution_mode="gateway",
         )
-        provider.agent_models = {"policy": "custom", "default": OTHER, **({"effort": "low"} if client == "codex" else {})}
+        provider.agent_models = {
+            "policy": "custom",
+            "default": OTHER,
+            **({"effort": "low"} if client == "codex" else {}),
+        }
         config.providers["fixture"] = provider
         if client == "codex":
             config.secrets["fixture-main"] = config_module.SecretReference("fixture-main", "environment", "P07_TOKEN")
@@ -159,13 +172,22 @@ def worker(client, source, report, workspace):
                         "hasCompletedOnboarding": True,
                         "theme": "dark",
                         "numStartups": 1,
-                        "projects": {str(root): {"hasTrustDialogAccepted": True, "hasCompletedProjectOnboarding": True}},
+                        "projects": {
+                            str(root): {"hasTrustDialogAccepted": True, "hasCompletedProjectOnboarding": True}
+                        },
                     }
                 ),
                 encoding="utf-8",
             )
         else:
-            result = run_process([shutil.which("codex"), "debug", "models", "--bundled"], env=env, cwd=root, timeout=10, text=True, encoding="utf-8")
+            result = run_process(
+                [shutil.which("codex"), "debug", "models", "--bundled"],
+                env=env,
+                cwd=root,
+                timeout=10,
+                text=True,
+                encoding="utf-8",
+            )
             entry = next(item for item in json.loads(result.stdout)["models"] if item["slug"] == "gpt-5.5")
             path = root / "catalog.json"
             entries = [
@@ -199,7 +221,9 @@ def worker(client, source, report, workspace):
                     "model": body.get("model"),
                     "marker_prompt": MARKER in request.data.decode(),
                     "task_prompt": "Reply with " + MARKER + "." in user_text,
-                    "request_kind": "title_helper" if "Write the title in the predominant language" in user_text else "conversation",
+                    "request_kind": "title_helper"
+                    if "Write the title in the predominant language" in user_text
+                    else "conversation",
                 }
             )
             encoder = StreamEncoder(Protocol.CHAT)
@@ -208,30 +232,65 @@ def worker(client, source, report, workspace):
                 Delta("text", text=MARKER),
                 Delta("finish", reason="stop", input_tokens=1, output_tokens=1),
             ]
-            return io.BytesIO(b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta)))
+            return io.BytesIO(
+                b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta))
+            )
 
         token_method = "resolve_token" if client == "codex" else "get_token"
         terminal = None
         try:
-            with patch.dict(os.environ, env, clear=True), patch.object(launcher, token_method, return_value="synthetic-token"):
+            with (
+                patch.dict(os.environ, env, clear=True),
+                patch.object(launcher, token_method, return_value="synthetic-token"),
+            ):
                 gateway, _ = launcher._gateway(config, provider, MAIN)
                 with (
-                    patch("protoverta.server.make_handler", side_effect=lambda config, **kwargs: make_handler(config, upstream_open=upstream, **kwargs)),
+                    patch(
+                        "protoverta.server.make_handler",
+                        side_effect=lambda config, **kwargs: make_handler(config, upstream_open=upstream, **kwargs),
+                    ),
                     gateway_session(gateway) as origin,
                 ):
                     extra = (
                         ["--no-daemon", "--no-alt-screen", "--sandbox", "read-only"]
                         if client == "codex"
-                        else ["--setting-sources", "", "--strict-mcp-config", "--tools", "", "--system-prompt", "Synthetic picker test; no tools."]
+                        else [
+                            "--setting-sources",
+                            "",
+                            "--strict-mcp-config",
+                            "--tools",
+                            "",
+                            "--system-prompt",
+                            "Synthetic picker test; no tools.",
+                        ]
                     )
                     if client == "codex":
-                        for key in ("features.daemon_auto_start", "features.plugins", "features.apps", "features.remote_plugin", "check_for_update_on_startup"):
+                        for key in (
+                            "features.daemon_auto_start",
+                            "features.plugins",
+                            "features.apps",
+                            "features.remote_plugin",
+                            "check_for_update_on_startup",
+                        ):
                             extra += ["-c", key + "=false"]
                     args, child_env = launcher.build_invocation(
-                        config, provider, MAIN, "low" if client == "codex" else "default", extra, gateway_url=origin, gateway_token=gateway.inbound_token
+                        config,
+                        provider,
+                        MAIN,
+                        "low" if client == "codex" else "default",
+                        extra,
+                        gateway_url=origin,
+                        gateway_token=gateway.inbound_token,
                     )
                     terminal = Terminal(args, child_env, root)
-                    text = terminal.wait(lambda text: "trust" in text.lower() or MAIN in text or "Synthetic Alpha" in text or "theme" in text.lower())
+                    text = terminal.wait(
+                        lambda text: (
+                            "trust" in text.lower()
+                            or MAIN in text
+                            or "Synthetic Alpha" in text
+                            or "theme" in text.lower()
+                        )
+                    )
                     compact = re.sub(r"\s", "", text).lower()
                     if "yes,itrustthisfolder" in compact or "yes,iproceed" in compact:
                         terminal.wait(lambda text: "entertoconfirm" in re.sub(r"\s", "", text).lower())
@@ -260,7 +319,9 @@ def worker(client, source, report, workspace):
                     native_before = native_defaults() if client == "claude" else None
                     offset = len(terminal.drain())
                     terminal.send("/model\r")
-                    text = terminal.wait(lambda text: ("Synthetic Beta" if client == "codex" else OTHER) in text, start=offset)
+                    text = terminal.wait(
+                        lambda text: ("Synthetic Beta" if client == "codex" else OTHER) in text, start=offset
+                    )
                     picker_seen = "Synthetic Beta" in text if client == "codex" else OTHER in text
                     if client == "codex":
                         terminal.send("\x1b[B\r")
@@ -272,15 +333,25 @@ def worker(client, source, report, workspace):
                         time.sleep(0.3)
                         selected_offset = len(terminal.drain())
                         terminal.send("s")
-                        terminal.wait(lambda text: "Setmodelto" + OTHER in re.sub(r"\s", "", text) and "session" in text.lower(), start=selected_offset)
+                        terminal.wait(
+                            lambda text: "Setmodelto" + OTHER in re.sub(r"\s", "", text) and "session" in text.lower(),
+                            start=selected_offset,
+                        )
                     time.sleep(0.8)
                     terminal.send("Reply with " + MARKER + ".\r")
                     terminal.wait(
-                        lambda _: any(item["task_prompt"] and item["request_kind"] == "conversation" and item["model"] == OTHER for item in observed), 15
+                        lambda _: any(
+                            item["task_prompt"] and item["request_kind"] == "conversation" and item["model"] == OTHER
+                            for item in observed
+                        ),
+                        15,
                     )
                     terminal.wait(lambda text: MARKER in text)
                     safe_requests = all(
-                        item["model"] in {MAIN, OTHER} and (item["request_kind"] != "conversation" or not item["task_prompt"] or item["model"] == OTHER)
+                        item["model"] in {MAIN, OTHER}
+                        and (
+                            item["request_kind"] != "conversation" or not item["task_prompt"] or item["model"] == OTHER
+                        )
                         for item in observed
                     )
                     result = {
@@ -300,7 +371,16 @@ def worker(client, source, report, workspace):
                     return 0 if result["passed"] else 1
         except Exception:
             report.write_text(
-                json.dumps({"passed": False, "client": client, "observed": observed, "screen": terminal.raw if terminal else ""}, indent=2), encoding="utf-8"
+                json.dumps(
+                    {
+                        "passed": False,
+                        "client": client,
+                        "observed": observed,
+                        "screen": terminal.raw if terminal else "",
+                    },
+                    indent=2,
+                ),
+                encoding="utf-8",
             )
             raise
         finally:

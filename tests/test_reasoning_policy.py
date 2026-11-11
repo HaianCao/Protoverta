@@ -52,7 +52,9 @@ def test_unknown_reasoning_policy_fails_at_configuration():
 
 def test_disabled_messages_preserves_history_and_rejects_invalid_output_config():
     history = [{"role": "assistant", "content": [{"type": "thinking", "thinking": "opaque", "signature": "signed"}]}]
-    result = apply_upstream_reasoning({"messages": history, "output_config": {"effort": "high"}}, Protocol.MESSAGES, "disabled")
+    result = apply_upstream_reasoning(
+        {"messages": history, "output_config": {"effort": "high"}}, Protocol.MESSAGES, "disabled"
+    )
     assert result["messages"] is history
     assert "output_config" not in result
     with pytest.raises(ConversionError, match="output_config"):
@@ -69,7 +71,9 @@ def test_gateway_applies_reasoning_policy_after_conversion(upstream, inbound):
         # A native error is enough to inspect the actual outbound request.
         raise HTTPError(request.full_url, 400, "unsupported", {}, io.BytesIO(b'{"error":{"message":"fixture"}}'))
 
-    config = GatewayConfig(upstream, "https://example.test/v1", "key", "local", upstream_reasoning="openrouter_disabled")
+    config = GatewayConfig(
+        upstream, "https://example.test/v1", "key", "local", upstream_reasoning="openrouter_disabled"
+    )
     server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(config, upstream_open=open_upstream))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -80,7 +84,11 @@ def test_gateway_applies_reasoning_policy_after_conversion(upstream, inbound):
             else {"model": "m", "messages": [{"role": "user", "content": "Hello"}], "max_tokens": 32}
         )
         endpoint = "chat/completions" if inbound == Protocol.CHAT else inbound.value
-        request = Request(f"http://127.0.0.1:{server.server_port}/v1/{endpoint}", data=json.dumps(payload).encode(), headers={"Authorization": "Bearer local"})
+        request = Request(
+            f"http://127.0.0.1:{server.server_port}/v1/{endpoint}",
+            data=json.dumps(payload).encode(),
+            headers={"Authorization": "Bearer local"},
+        )
         with pytest.raises(HTTPError) as error:
             urlopen(request, timeout=3)
         assert error.value.code == 400

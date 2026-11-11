@@ -29,7 +29,9 @@ def gate(monkeypatch):
 def test_stream_snapshots_include_only_known_nullable_envelope_facts(source):
     pipeline = StreamTranscoder(source, "responses")
     wire = pipeline.feed(source_wire(source, tools=False)) + pipeline.finish()
-    snapshots = [json.loads(event.data)["response"] for event in SSEParser().feed(wire) if "response" in json.loads(event.data)]
+    snapshots = [
+        json.loads(event.data)["response"] for event in SSEParser().feed(wire) if "response" in json.loads(event.data)
+    ]
     assert len(snapshots) >= 2
     for snapshot in snapshots:
         assert snapshot["max_tool_calls"] is None
@@ -53,10 +55,18 @@ def test_function_metadata_nulls_preserve_explicit_values_and_original_request(s
 
 def test_missing_function_metadata_is_unknown_not_an_invented_default():
     result = restore_request_context({"output": []}, {"tools": [{"type": "function", "name": "lookup"}]})
-    assert result["tools"][0] == {"type": "function", "name": "lookup", "description": None, "parameters": None, "strict": None}
+    assert result["tools"][0] == {
+        "type": "function",
+        "name": "lookup",
+        "description": None,
+        "parameters": None,
+        "strict": None,
+    }
 
 
-@pytest.mark.parametrize("tool", [{"type": "custom", "name": "fixture"}, {"type": "namespace", "name": "fixture", "tools": []}])
+@pytest.mark.parametrize(
+    "tool", [{"type": "custom", "name": "fixture"}, {"type": "namespace", "name": "fixture", "tools": []}]
+)
 def test_function_null_projection_does_not_rewrite_other_tool_kinds(tool):
     assert restore_request_context({"output": []}, {"tools": [tool]})["tools"] == [tool]
 
@@ -64,7 +74,9 @@ def test_function_null_projection_does_not_rewrite_other_tool_kinds(tool):
 @pytest.mark.parametrize("source", ["chat", "messages"])
 def test_audit_json_and_sse_share_the_same_declared_fixture_measurements(monkeypatch, source):
     module = gate(monkeypatch)
-    body = convert_request({"model": "m", "max_tokens": 20, "messages": [{"role": "user", "content": "synthetic"}]}, "chat", source)
+    body = convert_request(
+        {"model": "m", "max_tokens": 20, "messages": [{"role": "user", "content": "synthetic"}]}, "chat", source
+    )
     with module.fixture(source)(SimpleNamespace(data=json.dumps(body).encode()), timeout=1) as response:
         completed = convert_response(json.load(response), source, "responses")
     body["stream"] = True
@@ -85,7 +97,11 @@ def reports(module, *, passed=False):
             "upstream": source,
             "exit_code": 0 if passed else 1,
             "results": [
-                {"id": name, "status": "passed" if passed else "failed", "errors": [] if passed else ["temperature: Required", "usage: Invalid input"]}
+                {
+                    "id": name,
+                    "status": "passed" if passed else "failed",
+                    "errors": [] if passed else ["temperature: Required", "usage: Invalid input"],
+                }
                 for name in module.CASES
             ],
         }

@@ -13,15 +13,22 @@ from protoverta.retry import open_with_retry
 from protoverta.server import GatewayConfig
 
 
-@pytest.mark.parametrize("error", [PermissionError("private path"), FileExistsError("private path"), sqlite3.OperationalError("database locked")])
+@pytest.mark.parametrize(
+    "error",
+    [PermissionError("private path"), FileExistsError("private path"), sqlite3.OperationalError("database locked")],
+)
 def test_storage_errors_return_local_503_without_upstream_and_recover(tmp_path, error):
     calls = []
 
     def upstream(request, *, timeout):
         calls.append(1)
-        return io.BytesIO(b'{"model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}')
+        return io.BytesIO(
+            b'{"model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}'
+        )
 
-    config = GatewayConfig("chat", "https://example.test/v1", "key", "local", shared_admission_db=str(tmp_path / "quota.sqlite"))
+    config = GatewayConfig(
+        "chat", "https://example.test/v1", "key", "local", shared_admission_db=str(tmp_path / "quota.sqlite")
+    )
     with listener(config, upstream) as url:
         with patch.object(SharedAdmission, "_connect", side_effect=error), pytest.raises(HTTPError) as failure:
             post(url, {"model": "m", "input": "hi"})
@@ -37,13 +44,18 @@ def test_storage_errors_return_local_503_without_upstream_and_recover(tmp_path, 
 
 def test_parent_directory_failure_is_wrapped_at_storage_boundary(tmp_path):
     budget = SharedAdmission(tmp_path / "quota.sqlite", "fixture")
-    with patch("protoverta.admission.Path.mkdir", side_effect=PermissionError("private path")), pytest.raises(AdmissionStorageError):
+    with (
+        patch("protoverta.admission.Path.mkdir", side_effect=PermissionError("private path")),
+        pytest.raises(AdmissionStorageError),
+    ):
         budget.acquire()
 
 
 def test_failed_release_keeps_lease_until_expiry_without_refunding_rate(tmp_path):
     now = [100.0]
-    budget = SharedAdmission(tmp_path / "quota.sqlite", "fixture", concurrency=1, requests=2, lease=5, clock=lambda: now[0])
+    budget = SharedAdmission(
+        tmp_path / "quota.sqlite", "fixture", concurrency=1, requests=2, lease=5, clock=lambda: now[0]
+    )
     lease = budget.acquire()
     with patch.object(budget, "_open", side_effect=PermissionError("fixture")), pytest.raises(AdmissionStorageError):
         budget.release(lease)
@@ -65,11 +77,16 @@ def test_http_release_failure_does_not_overwrite_completed_response(tmp_path):
             raise PermissionError("synthetic release failure")
         return original(self)
 
-    config = GatewayConfig("chat", "https://example.test/v1", "key", "local", shared_admission_db=str(tmp_path / "quota.sqlite"))
+    config = GatewayConfig(
+        "chat", "https://example.test/v1", "key", "local", shared_admission_db=str(tmp_path / "quota.sqlite")
+    )
     with (
         patch.object(SharedAdmission, "_open", open_storage),
         listener(
-            config, lambda *args, **kwargs: io.BytesIO(b'{"model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}')
+            config,
+            lambda *args, **kwargs: io.BytesIO(
+                b'{"model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}'
+            ),
         ) as url,
         post(url, {"model": "m", "input": "hi"}) as response,
     ):

@@ -20,14 +20,19 @@ def request(protocol):
             "model": "m",
             "messages": [{"role": "user", "content": "Return JSON"}],
             "max_completion_tokens": 64,
-            "response_format": {"type": "json_schema", "json_schema": {"name": "result", "schema": copy.deepcopy(SCHEMA), "strict": True}},
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {"name": "result", "schema": copy.deepcopy(SCHEMA), "strict": True},
+            },
             "reasoning_effort": "low",
         },
         Protocol.RESPONSES: {
             "model": "m",
             "input": "Return JSON",
             "max_output_tokens": 64,
-            "text": {"format": {"type": "json_schema", "name": "result", "schema": copy.deepcopy(SCHEMA), "strict": True}},
+            "text": {
+                "format": {"type": "json_schema", "name": "result", "schema": copy.deepcopy(SCHEMA), "strict": True}
+            },
             "reasoning": {"effort": "low"},
         },
         Protocol.MESSAGES: {
@@ -55,7 +60,9 @@ def test_structured_output_all_six_routes_preserve_schema_and_effort(source, tar
     assert format_of(converted, target)["schema"] == SCHEMA
     if target != Protocol.MESSAGES:
         assert format_of(converted, target)["strict"] is True
-        assert format_of(converted, target)["name"] == ("protoverta_output" if source == Protocol.MESSAGES else "result")
+        assert format_of(converted, target)["name"] == (
+            "protoverta_output" if source == Protocol.MESSAGES else "result"
+        )
     else:
         assert converted["output_config"]["effort"] == "low"
         disabled = apply_upstream_reasoning(converted, target, "disabled")
@@ -87,7 +94,9 @@ def test_json_object_mode_is_not_emulated_on_messages():
         convert_request(body, "chat", "messages")
 
 
-@pytest.mark.parametrize("mutation", ["constraint", "optional", "extra_keys", "recursive", "description", "strict", "format_extra"])
+@pytest.mark.parametrize(
+    "mutation", ["constraint", "optional", "extra_keys", "recursive", "description", "strict", "format_extra"]
+)
 def test_messages_schema_boundary_rejects_without_rewriting(mutation):
     body = request(Protocol.RESPONSES)
     value = body["text"]["format"]

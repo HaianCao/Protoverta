@@ -36,7 +36,10 @@ def test_sparse_parallel_calls_keep_id_arguments_and_first_start_order():
     output = b"".join(pipe.feed(wire[index : index + 1]) for index in range(len(wire))) + pipe.finish()
     result = [json.loads(event.data) for event in SSEParser().feed(output)]
     calls = [event for event in result if event["type"] == "content_block_start"]
-    assert [(item["content_block"]["id"], item["content_block"]["name"]) for item in calls] == [("b", "second"), ("a", "first")]
+    assert [(item["content_block"]["id"], item["content_block"]["name"]) for item in calls] == [
+        ("b", "second"),
+        ("a", "first"),
+    ]
     arguments = {}
     for event in result:
         if event["type"] == "content_block_delta":

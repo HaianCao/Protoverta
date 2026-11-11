@@ -60,7 +60,19 @@ def test_opt_in_does_not_weaken_default_rejection_or_messages_boundary(source):
 
 
 @pytest.mark.parametrize(
-    "mutation", ["bytes_null", "bytes_bool", "bytes_range", "unknown", "positive", "nan", "huge_integer", "top_unknown", "top_missing", "misaligned"]
+    "mutation",
+    [
+        "bytes_null",
+        "bytes_bool",
+        "bytes_range",
+        "unknown",
+        "positive",
+        "nan",
+        "huge_integer",
+        "top_unknown",
+        "top_missing",
+        "misaligned",
+    ],
 )
 def test_malformed_or_unalignable_probabilities_never_get_repaired(mutation):
     value = token("hello")
@@ -103,7 +115,9 @@ def stream(source, *, split_unicode=False):
 @pytest.mark.parametrize("source,target", [("chat", "responses"), ("responses", "chat")])
 @pytest.mark.parametrize("chunk_size", [1, 7, 65536])
 @pytest.mark.parametrize("split_unicode", [False, True])
-def test_fragmented_stream_preserves_actual_token_bytes_and_terminal_probabilities(source, target, chunk_size, split_unicode):
+def test_fragmented_stream_preserves_actual_token_bytes_and_terminal_probabilities(
+    source, target, chunk_size, split_unicode
+):
     raw, expected = stream(source, split_unicode=split_unicode)
     pipe = StreamTranscoder(source, target, text_logprobs=True)
     output = b"".join(pipe.feed(raw[i : i + chunk_size]) for i in range(0, len(raw), chunk_size)) + pipe.finish()
@@ -111,10 +125,15 @@ def test_fragmented_stream_preserves_actual_token_bytes_and_terminal_probabiliti
     if target == "responses":
         assert events[-1]["response"]["output"][-1]["content"][0]["logprobs"] == expected
     else:
-        assert [r for e in events for c in e.get("choices", []) for r in (c.get("logprobs") or {}).get("content", [])] == expected
+        assert [
+            r for e in events for c in e.get("choices", []) for r in (c.get("logprobs") or {}).get("content", [])
+        ] == expected
 
 
-@pytest.mark.parametrize("where", ["response.output_text.done", "response.content_part.done", "response.output_item.done", "response.completed"])
+@pytest.mark.parametrize(
+    "where",
+    ["response.output_text.done", "response.content_part.done", "response.output_item.done", "response.completed"],
+)
 def test_responses_probability_snapshot_tampering_fails_before_success(where):
     raw, _ = stream("responses")
     events = SSEParser().feed(raw)
@@ -154,7 +173,11 @@ def test_enabled_request_controls_round_trip_and_selected_only_gets_explicit_zer
     before = copy.deepcopy(body)
     converted = convert_request(body, source, target, text_logprobs=True)
     assert converted["top_logprobs"] == (top if top is not None else 0)
-    assert converted.get("logprobs") is True if target == "chat" else converted["include"] == ["message.output_text.logprobs"]
+    assert (
+        converted.get("logprobs") is True
+        if target == "chat"
+        else converted["include"] == ["message.output_text.logprobs"]
+    )
     assert body == before
     with pytest.raises(ConversionError):
         convert_request(body, source, "messages", text_logprobs=True)
@@ -170,13 +193,21 @@ def test_gateway_automatically_preserves_probabilities_only_for_explicit_request
         raw = stream(source)[0] if streaming else json.dumps(response(source)).encode()
         return io.BytesIO(raw)
 
-    cfg = GatewayConfig(source, "https://example.invalid/v1", "synthetic", "local", client_profile="codex" if target == "responses" else "strict")
+    cfg = GatewayConfig(
+        source,
+        "https://example.invalid/v1",
+        "synthetic",
+        "local",
+        client_profile="codex" if target == "responses" else "strict",
+    )
     body = {**prompt(target), "stream": streaming}
     with listener(cfg, upstream) as url, request(url, target, json.dumps(body).encode()) as result:
         raw = result.read()
     assert b"top_logprobs" in raw and b"-0.25" in raw
     assert len(seen) == 1 and seen[0]["top_logprobs"] == 1
-    assert seen[0].get("logprobs") is True if source == "chat" else seen[0]["include"] == ["message.output_text.logprobs"]
+    assert (
+        seen[0].get("logprobs") is True if source == "chat" else seen[0]["include"] == ["message.output_text.logprobs"]
+    )
 
 
 @pytest.mark.parametrize("streaming", [False, True])
@@ -232,7 +263,10 @@ def test_malformed_codex_include_is_422_without_provider_io(include):
     assert seen == []
 
 
-@pytest.mark.parametrize("where", ["response.output_text.done", "response.content_part.done", "response.output_item.done", "response.completed"])
+@pytest.mark.parametrize(
+    "where",
+    ["response.output_text.done", "response.content_part.done", "response.output_item.done", "response.completed"],
+)
 def test_snapshot_comparison_cannot_hide_float_bytes_that_compare_equal_to_integers(where):
     raw, _ = stream("responses")
     output = []

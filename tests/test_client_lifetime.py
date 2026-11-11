@@ -54,7 +54,10 @@ def test_disconnect_closes_default_upstream_before_io_timeout():
             try:
                 body = json.dumps({"model": "m", "messages": [{"role": "user", "content": "hi"}]}).encode()
                 client.sendall(
-                    b"POST /v1/chat/completions HTTP/1.0\r\nAuthorization: Bearer local\r\nContent-Length: " + str(len(body)).encode() + b"\r\n\r\n" + body
+                    b"POST /v1/chat/completions HTTP/1.0\r\nAuthorization: Bearer local\r\nContent-Length: "
+                    + str(len(body)).encode()
+                    + b"\r\n\r\n"
+                    + body
                 )
                 assert entered.wait(2)
                 client.shutdown(socket.SHUT_RDWR)

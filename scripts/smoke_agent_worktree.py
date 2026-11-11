@@ -24,7 +24,9 @@ def verified_lifecycle(stdout):
         return False
     result = json.loads(stdout)
     stats = result["subagent_stats"]
-    return result.get("permission_denials") == [] and all(type(stats.get(key)) is int for key in ("spawned", "completed", "failed"))
+    return result.get("permission_denials") == [] and all(
+        type(stats.get(key)) is int for key in ("spawned", "completed", "failed")
+    )
 
 
 class Scenario(parallel.Scenario):
@@ -37,7 +39,15 @@ class Scenario(parallel.Scenario):
         self.read_verified = False
 
     def git(self, *args):
-        result = run_process(["git", *args], cwd=str(self.root), env=self.git_env, text=True, encoding="utf-8", errors="replace", timeout=5)
+        result = run_process(
+            ["git", *args],
+            cwd=str(self.root),
+            env=self.git_env,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=5,
+        )
         if result.returncode:
             raise RuntimeError("Owned native-worktree Git command failed")
         return result.stdout
@@ -50,15 +60,31 @@ class Scenario(parallel.Scenario):
         self.git("init", "--initial-branch=main")
         self.git("add", "fixture.txt")
         self.git(
-            "-c", "user.name=Synthetic Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "commit", "-m", "Synthetic fixture"
+            "-c",
+            "user.name=Synthetic Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-m",
+            "Synthetic fixture",
         )
 
     def paths(self):
-        return [Path(line[len("worktree ") :]).resolve() for line in self.git("worktree", "list", "--porcelain").splitlines() if line.startswith("worktree ")]
+        return [
+            Path(line[len("worktree ") :]).resolve()
+            for line in self.git("worktree", "list", "--porcelain").splitlines()
+            if line.startswith("worktree ")
+        ]
 
     def open(self, request, *, timeout):
         body = json.loads(request.data)
-        expected = {Protocol.CHAT: "/v1/chat/completions", Protocol.MESSAGES: "/v1/messages", Protocol.RESPONSES: "/v1/responses"}[self.protocol]
+        expected = {
+            Protocol.CHAT: "/v1/chat/completions",
+            Protocol.MESSAGES: "/v1/messages",
+            Protocol.RESPONSES: "/v1/responses",
+        }[self.protocol]
         if body.get("model") != "p04-fixture-model" or urlsplit(request.full_url).path != expected:
             raise ValueError("Native-worktree endpoint/model mismatch")
         role = "child" if TASK in single.user_text(body, self.protocol) else "parent"
@@ -87,7 +113,11 @@ class Scenario(parallel.Scenario):
             self.child_path = children[0]
             (self.child_path / "fixture.txt").write_text(VALUE, encoding="utf-8")
             return single.encode(
-                self.protocol, body["model"], tool=single.find_tool(tools, "read"), arguments={"file_path": "fixture.txt"}, call_id="worktree_read"
+                self.protocol,
+                body["model"],
+                tool=single.find_tool(tools, "read"),
+                arguments={"file_path": "fixture.txt"},
+                call_id="worktree_read",
             )
         if role == "child":
             if VALUE not in json.dumps(records.get("worktree_read")):

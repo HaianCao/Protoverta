@@ -51,7 +51,15 @@ def test_preflight_and_ui_distinguish_exact_estimate_and_unavailable():
     assert exact.headers()["X-Protoverta-Context-Count-Category"] == "exact"
 
     unavailable = assess_context(
-        body | {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "https://example.test/img.png"}}]}]},
+        body
+        | {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [{"type": "image_url", "image_url": {"url": "https://example.test/img.png"}}],
+                }
+            ]
+        },
         "chat",
         4096,
     )
@@ -206,10 +214,20 @@ def test_native_responses_compact_preserves_owner_resource_and_stream_validator(
     events = [
         (
             "response.created",
-            {"type": "response.created", "sequence_number": 0, "response": {"id": "resp_1", "status": "in_progress", "model": "m", "output": []}},
+            {
+                "type": "response.created",
+                "sequence_number": 0,
+                "response": {"id": "resp_1", "status": "in_progress", "model": "m", "output": []},
+            },
         ),
-        ("response.output_item.added", {"type": "response.output_item.added", "sequence_number": 1, "output_index": 0, "item": compaction_item}),
-        ("response.output_item.done", {"type": "response.output_item.done", "sequence_number": 2, "output_index": 0, "item": compaction_item}),
+        (
+            "response.output_item.added",
+            {"type": "response.output_item.added", "sequence_number": 1, "output_index": 0, "item": compaction_item},
+        ),
+        (
+            "response.output_item.done",
+            {"type": "response.output_item.done", "sequence_number": 2, "output_index": 0, "item": compaction_item},
+        ),
         (
             "response.completed",
             {
@@ -291,7 +309,12 @@ def test_cross_protocol_opaque_compaction_rejected_with_remediation():
     msg_decoder.feed(
         SSEEvent(
             "message_start",
-            json.dumps({"type": "message_start", "message": {"id": "msg_1", "model": "m", "usage": {"input_tokens": 1, "output_tokens": 0}}}),
+            json.dumps(
+                {
+                    "type": "message_start",
+                    "message": {"id": "msg_1", "model": "m", "usage": {"input_tokens": 1, "output_tokens": 0}},
+                }
+            ),
         )
     )
     with pytest.raises(UnsupportedStreamFeatureError) as stream_exc:
@@ -307,14 +330,27 @@ def test_cross_protocol_opaque_compaction_rejected_with_remediation():
     resp_decoder.feed(
         SSEEvent(
             "response.created",
-            json.dumps({"type": "response.created", "sequence_number": 0, "response": {"id": "resp_1", "model": "m", "status": "in_progress"}}),
+            json.dumps(
+                {
+                    "type": "response.created",
+                    "sequence_number": 0,
+                    "response": {"id": "resp_1", "model": "m", "status": "in_progress"},
+                }
+            ),
         )
     )
     with pytest.raises(UnsupportedStreamFeatureError) as stream_exc:
         resp_decoder.feed(
             SSEEvent(
                 "response.output_item.added",
-                json.dumps({"type": "response.output_item.added", "sequence_number": 1, "output_index": 0, "item": {"id": "c_1", "type": "compaction"}}),
+                json.dumps(
+                    {
+                        "type": "response.output_item.added",
+                        "sequence_number": 1,
+                        "output_index": 0,
+                        "item": {"id": "c_1", "type": "compaction"},
+                    }
+                ),
             )
         )
     assert stream_exc.value.feature == "compaction"
@@ -340,7 +376,10 @@ def test_mixed_user_text_and_tool_results_preserved_in_chat_and_responses():
         "max_tokens": 128,
         "messages": [
             {"role": "user", "content": "Read file"},
-            {"role": "assistant", "content": [{"type": "tool_use", "id": "call_1", "name": "Read", "input": {"file_path": "a.txt"}}]},
+            {
+                "role": "assistant",
+                "content": [{"type": "tool_use", "id": "call_1", "name": "Read", "input": {"file_path": "a.txt"}}],
+            },
             {
                 "role": "user",
                 "content": [
@@ -380,7 +419,11 @@ def test_large_tool_output_reserve_count_errors_and_capability_window_smaller_th
         "max_tokens": 500,
         "messages": [
             {"role": "user", "content": "read"},
-            {"role": "assistant", "content": None, "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "Read", "arguments": "{}"}}]},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "Read", "arguments": "{}"}}],
+            },
             {"role": "tool", "tool_call_id": "c1", "content": large_output},
         ],
     }

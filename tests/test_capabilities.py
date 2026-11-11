@@ -12,7 +12,13 @@ from protoverta.server import GatewayConfig
 
 
 def registry(**features):
-    return CapabilityRegistry((CapabilityRecord("https://example.test/api/v1/", "chat", "model-a", features, "2026-10-23", "synthetic test evidence"),))
+    return CapabilityRegistry(
+        (
+            CapabilityRecord(
+                "https://example.test/api/v1/", "chat", "model-a", features, "2026-10-23", "synthetic test evidence"
+            ),
+        )
+    )
 
 
 def test_capabilities_are_exact_and_unknown_is_distinct_from_unsupported():
@@ -103,7 +109,11 @@ def test_registry_invalid_types_are_reported_explicitly():
             },
             {"text", "streaming", "tools", "forced_tool_choice", "json_schema", "strict_json_schema"},
         ),
-        ("responses", {"model": "m", "reasoning": {"effort": "low"}, "text": {"format": {"type": "json_object"}}}, {"text", "reasoning_effort", "json_object"}),
+        (
+            "responses",
+            {"model": "m", "reasoning": {"effort": "low"}, "text": {"format": {"type": "json_object"}}},
+            {"text", "reasoning_effort", "json_object"},
+        ),
         (
             "messages",
             {
@@ -124,7 +134,13 @@ def test_image_schema_property_is_not_a_multimodal_request():
 
 
 @pytest.mark.parametrize(
-    "url", ["https://user:password@example.test/v1", "https://example.test/v1?key=secret", "http://example.test/v1", "https://example.test/v1/responses"]
+    "url",
+    [
+        "https://user:password@example.test/v1",
+        "https://example.test/v1?key=secret",
+        "http://example.test/v1",
+        "https://example.test/v1/responses",
+    ],
 )
 def test_registry_rejects_credential_urls_and_endpoint_suffixes(url):
     with pytest.raises(ValueError):

@@ -16,8 +16,12 @@ from protoverta.server import GatewayConfig
 
 def test_shared_concurrency_rate_cooldown_and_expired_crash_lease(tmp_path):
     now = [100.0]
-    first = SharedAdmission(tmp_path / "budget.sqlite", "fixture-key", requests=2, window=60, concurrency=1, lease=10, clock=lambda: now[0])
-    second = SharedAdmission(first.path, "fixture-key", requests=2, window=60, concurrency=1, lease=10, clock=lambda: now[0])
+    first = SharedAdmission(
+        tmp_path / "budget.sqlite", "fixture-key", requests=2, window=60, concurrency=1, lease=10, clock=lambda: now[0]
+    )
+    second = SharedAdmission(
+        first.path, "fixture-key", requests=2, window=60, concurrency=1, lease=10, clock=lambda: now[0]
+    )
     lease = first.acquire()
     with pytest.raises(AdmissionDenied):
         second.acquire()
@@ -87,9 +91,18 @@ def test_distinct_gateways_cannot_bypass_shared_concurrency(tmp_path):
     def upstream(request, timeout):
         entered.set()
         assert release.wait(3)
-        return io.BytesIO(b'{"model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}')
+        return io.BytesIO(
+            b'{"model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}'
+        )
 
-    config = GatewayConfig("chat", "https://example.test/v1", "key", "local", shared_admission_db=str(tmp_path / "budget.sqlite"), shared_concurrency=1)
+    config = GatewayConfig(
+        "chat",
+        "https://example.test/v1",
+        "key",
+        "local",
+        shared_admission_db=str(tmp_path / "budget.sqlite"),
+        shared_concurrency=1,
+    )
     with listener(config, upstream) as first, listener(config, upstream) as second, ThreadPoolExecutor(1) as pool:
 
         def run():

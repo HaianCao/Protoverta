@@ -10,13 +10,14 @@ import secrets
 import socket
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from http.client import HTTPException
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any, cast
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit
+from urllib.parse import SplitResult, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from . import __version__
@@ -27,7 +28,7 @@ from .admission import (
     SharedAdmission,
 )
 from .capabilities import CapabilityRegistry, _prefix, request_features, route_policies
-from .context import assess_context
+from .context import TokenCount, assess_context
 from .core import (
     ConversionError,
     Protocol,
@@ -42,7 +43,7 @@ from .json_wire import decode_json, encode_json
 from .lifetime import DisconnectWatch
 from .model_snapshot import ModelMetadataUnavailable, ModelSnapshot
 from .namespaces import NamespaceMap
-from .observability import Observer, RequestTrace
+from .observability import Observer, Outcome, RequestTrace
 from .profiles import prepare_claude_request, prepare_codex_request
 from .provider_profiles import ProviderProfiles
 from .resources import (
@@ -52,13 +53,16 @@ from .resources import (
     RequestBudget,
     StreamLimitError,
     StreamLimits,
+    attach_budget,
     positive_number,
 )
 from .retry import RetryState, open_with_policy, open_with_retry, retry_after
-from .sse import encode_sse
+from .sse import SSEEvent, encode_sse
 from .stream_pipe import StreamTranscoder, StreamValidator
 from .stream_writer import StreamHeartbeatWriter
 from .streaming import (
+    Delta,
+    DeltaTransform,
     StreamError,
     UnsupportedReasoningError,
     UnsupportedStreamFeatureError,
@@ -77,7 +81,14 @@ REQUEST_HEADER_TIMEOUT = 15.0
 # release. Wait this long for a slot before answering 503.
 REQUEST_SLOT_GRACE_SECONDS = 0.5
 _CAPACITY_RESPONSE = b"".join(
-    line + b"\r\n" for line in (b"HTTP/1.1 503 Service Unavailable", b"Retry-After: 1", b"Content-Length: 0", b"Connection: close", b"")
+    line + b"\r\n"
+    for line in (
+        b"HTTP/1.1 503 Service Unavailable",
+        b"Retry-After: 1",
+        b"Content-Length: 0",
+        b"Connection: close",
+        b"",
+    )
 )
 
 _PATHS = {
@@ -135,7 +146,9 @@ class GatewayConfig:
     retry_max_wait: float = 5.0
     require_verified_routes: bool = False
     context_preflight: str = "off"
-    token_counter: object = field(default=None, repr=False, compare=False)
+    token_counter: Callable[[dict[str, Any], Protocol], TokenCount] | None = field(
+        default=None, repr=False, compare=False
+    )
     token_count_mode: str = "off"
     require_current_evidence: bool = False
     evidence_max_age_days: int | None = None
@@ -146,26 +159,58 @@ class GatewayConfig:
     model_snapshot: ModelSnapshot | None = field(default=None, repr=False)
     # Error-class retry (supersedes retry_attempts/retry_max_wait when set).
     retry_policy: RetryPolicy | None = None
-    retry_log: object = field(default=None, repr=False, compare=False)
+    retry_log: Callable[[str], None] | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
+        # Each group validates one area; they run in this fixed order, so the
+        # first error reported for an invalid combination never changes.
+        self._check_retry_hooks()
+        self._check_model_snapshot()
+        self._check_evidence_freshness()
+        self._check_token_policies()
+        self._check_simple_retry()
+        self._check_shared_admission()
+        self._check_tool_and_reasoning_policies()
+        self._normalize_protocol_and_routing()
+        self._check_token_quota()
+        self._check_upstream_endpoint()
+        self._check_limits()
+        self._check_client_policies()
+        self._check_capability_policies()
+
+    def _check_retry_hooks(self) -> None:
+        """Error-class retry policy and its log callback."""
         if self.retry_policy is not None and not isinstance(self.retry_policy, RetryPolicy):
             raise ValueError("retry_policy must be a RetryPolicy")
         if self.retry_log is not None and not callable(self.retry_log):
             raise ValueError("retry_log must be callable")
+
+    def _check_model_snapshot(self) -> None:
+        """The session model snapshot and Codex resume guard."""
         if self.model_snapshot is not None and (
-            not isinstance(self.model_snapshot, ModelSnapshot) or not self.model_snapshot.matches(self.upstream_base_url, self.upstream_protocol)
+            not isinstance(self.model_snapshot, ModelSnapshot)
+            or not self.model_snapshot.matches(self.upstream_base_url, self.upstream_protocol)
         ):
             raise ValueError("model snapshot must match this gateway's exact upstream prefix and protocol")
         if type(self.codex_model_safe_resume) is not bool:
             raise ValueError("codex_model_safe_resume must be a boolean")
+
+    def _check_evidence_freshness(self) -> None:
+        """Evidence identity and age limits."""
         if (
             type(self.require_current_evidence) is not bool
             or self.evidence_max_age_days is not None
             and (type(self.evidence_max_age_days) is not int or self.evidence_max_age_days < 0)
         ):
             raise ValueError("invalid evidence identity/freshness policy")
-        if self.prompt_caching not in ("off", "ephemeral") or self.prompt_caching != "off" and self.provider_profiles is None:
+
+    def _check_token_policies(self) -> None:
+        """Prompt caching, token counting and context preflight."""
+        if (
+            self.prompt_caching not in ("off", "ephemeral")
+            or self.prompt_caching != "off"
+            and self.provider_profiles is None
+        ):
             raise ValueError("explicit caching requires certified provider profiles")
         if self.token_count_mode not in ("off", "estimate", "native", "operator"):
             raise ValueError("invalid token count mode")
@@ -177,14 +222,31 @@ class GatewayConfig:
             raise ValueError("token_counter must be callable")
         if self.context_preflight == "exact" and self.token_counter is None:
             raise ValueError("exact context policy needs an operator token counter")
-        if type(self.retry_attempts) is not int or not 1 <= self.retry_attempts <= 4 or not positive_number(self.retry_max_wait):
+
+    def _check_simple_retry(self) -> None:
+        """The fixed-attempt retry used without a retry policy."""
+        if (
+            type(self.retry_attempts) is not int
+            or not 1 <= self.retry_attempts <= 4
+            or not positive_number(self.retry_max_wait)
+        ):
             raise ValueError("retry_attempts must be 1-4 and retry_max_wait must be finite and positive")
+
+    def _check_shared_admission(self) -> None:
+        """The shared admission database and its limits."""
         if self.shared_admission_db is not None:
             if not isinstance(self.shared_admission_db, str) or not self.shared_admission_db.strip():
                 raise ValueError("shared_admission_db must be a nonempty path")
             SharedAdmission(
-                self.shared_admission_db, "validation", requests=self.shared_requests, window=self.shared_window, concurrency=self.shared_concurrency
+                self.shared_admission_db,
+                "validation",
+                requests=self.shared_requests,
+                window=self.shared_window,
+                concurrency=self.shared_concurrency,
             )
+
+    def _check_tool_and_reasoning_policies(self) -> None:
+        """Provider profiles, client tool search, reasoning and tool-name policies."""
         if self.provider_profiles is not None and not isinstance(self.provider_profiles, ProviderProfiles):
             raise ValueError("provider_profiles must be a ProviderProfiles registry")
         if self.client_tool_search not in ("reject", "function"):
@@ -197,18 +259,31 @@ class GatewayConfig:
             object.__setattr__(self, "tool_names", "alias" if self.client_profile in {"codex", "claude"} else "reject")
         if self.tool_names not in {"reject", "alias"}:
             raise ValueError("tool_names must be reject or alias")
+
+    def _normalize_protocol_and_routing(self) -> None:
+        """Normalizes the upstream protocol and checks OpenRouter routing."""
         object.__setattr__(self, "upstream_protocol", Protocol(self.upstream_protocol))
         from .routing import validate_openrouter
 
         validate_openrouter(self)
+
+    def _check_token_quota(self) -> None:
+        """The shared per-model token quota."""
         if self.shared_token_limit is not None and (
             type(self.shared_token_limit) is not int
             or not 0 < self.shared_token_limit <= 2**63 - 1
             or self.shared_admission_db is None
             or not callable(self.token_counter)
         ):
-            raise ValueError("shared_token_limit requires a positive limit, dedicated shared database and exact operator token counter")
-        if not isinstance(self.upstream_base_url, str) or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in self.upstream_base_url):
+            raise ValueError(
+                "shared_token_limit requires a positive limit, dedicated shared database and exact operator token counter"
+            )
+
+    def _check_upstream_endpoint(self) -> None:
+        """Upstream URL, authentication style and credentials."""
+        if not isinstance(self.upstream_base_url, str) or any(
+            char.isspace() or ord(char) < 32 or ord(char) == 127 for char in self.upstream_base_url
+        ):
             raise ValueError("upstream_base_url must be text without whitespace or control characters")
         parsed = urlsplit(self.upstream_base_url)
         port = parsed.port
@@ -224,7 +299,9 @@ class GatewayConfig:
             or parsed.fragment
             or any(char.isspace() for char in self.upstream_base_url)
         ):
-            raise ValueError("upstream_base_url must be HTTPS (HTTP is allowed only for loopback), without credentials, query or fragment")
+            raise ValueError(
+                "upstream_base_url must be HTTPS (HTTP is allowed only for loopback), without credentials, query or fragment"
+            )
         if parsed.path.rstrip("/").endswith(("/responses", "/messages", "/chat/completions")):
             raise ValueError("upstream_base_url must omit the endpoint suffix")
         if self.auth_style not in {"bearer", "x-api-key"}:
@@ -235,6 +312,9 @@ class GatewayConfig:
             raise ValueError("credentials cannot contain line breaks")
         if not self.inbound_token.isascii():
             raise ValueError("inbound_token must be ASCII")
+
+    def _check_limits(self) -> None:
+        """Timeouts, body and stream size limits and concurrency."""
         if (
             isinstance(self.timeout, bool)
             or not isinstance(self.timeout, int | float)
@@ -249,6 +329,9 @@ class GatewayConfig:
         if not positive_number(self.total_timeout) or not positive_number(self.progress_timeout):
             raise ValueError("total_timeout and progress_timeout must be finite positive numbers")
         StreamLimits(self.max_stream_bytes, self.max_stream_items, self.max_tool_argument_bytes)
+
+    def _check_client_policies(self) -> None:
+        """Client profile, usage, reasoning and request-shape policies."""
         if self.client_profile not in {"strict", "codex", "claude"}:
             raise ValueError("client_profile must be strict, codex or claude")
         if self.messages_usage_policy not in {"strict", "deferred"}:
@@ -258,18 +341,28 @@ class GatewayConfig:
         if self.namespace_tools not in ("reject", "flatten"):
             raise ValueError("namespace_tools must be reject or flatten")
         if not isinstance(self.messages_system_models, tuple) or any(
-            not isinstance(model, str) or not model or any(char.isspace() for char in model) for model in self.messages_system_models
+            not isinstance(model, str) or not model or any(char.isspace() for char in model)
+            for model in self.messages_system_models
         ):
             raise ValueError("messages_system_models must be a tuple of exact model IDs")
         if self.messages_system_models and self.upstream_protocol != Protocol.MESSAGES:
             raise ValueError("messages_system_models requires a Messages upstream")
         if self.default_max_output_tokens is not None and (
-            isinstance(self.default_max_output_tokens, bool) or not isinstance(self.default_max_output_tokens, int) or self.default_max_output_tokens <= 0
+            isinstance(self.default_max_output_tokens, bool)
+            or not isinstance(self.default_max_output_tokens, int)
+            or self.default_max_output_tokens <= 0
         ):
             raise ValueError("default_max_output_tokens must be a positive integer")
+
+    def _check_capability_policies(self) -> None:
+        """The capability registry and the checks that require it."""
         if self.capabilities is not None and not isinstance(self.capabilities, CapabilityRegistry):
             raise ValueError("capabilities must be a CapabilityRegistry")
-        if not isinstance(self.require_verified_capabilities, bool) or self.require_verified_capabilities and self.capabilities is None:
+        if (
+            not isinstance(self.require_verified_capabilities, bool)
+            or self.require_verified_capabilities
+            and self.capabilities is None
+        ):
             raise ValueError("require_verified_capabilities requires a capability registry")
         if type(self.require_verified_routes) is not bool or self.require_verified_routes and self.capabilities is None:
             raise ValueError("require_verified_routes requires a capability registry")
@@ -279,11 +372,13 @@ class GatewayConfig:
     @property
     def upstream_url(self) -> str:
         base = self.upstream_base_url.rstrip("/")
-        path = {Protocol.CHAT: "/chat/completions", Protocol.MESSAGES: "/messages", Protocol.RESPONSES: "/responses"}[self.upstream_protocol]
+        path = {Protocol.CHAT: "/chat/completions", Protocol.MESSAGES: "/messages", Protocol.RESPONSES: "/responses"}[
+            self.upstream_protocol
+        ]
         return base + path
 
 
-def apply_upstream_reasoning(payload: dict, protocol: Protocol, policy: str) -> dict:
+def apply_upstream_reasoning(payload: dict[str, Any], protocol: Protocol, policy: str) -> dict[str, Any]:
     """Apply an explicit operator override after conversion, without hiding output.
 
     provider_default leaves the request untouched. Disabled policies override any
@@ -317,12 +412,49 @@ def apply_upstream_reasoning(payload: dict, protocol: Protocol, policy: str) -> 
     return outbound
 
 
+@dataclass(slots=True)
+class _PreparedRequest:
+    """One POST after decoding and conversion, ready to send upstream."""
+
+    outbound: dict[str, Any]
+    data: bytes
+    streaming: bool
+    compact: bool
+    response_request: dict[str, Any]
+    tool_name_map: ToolNameMap | None
+    namespace_map: NamespaceMap | None
+    search_map: ClientToolSearchMap | None
+    tool_policy: BoundToolPolicy | None
+    text_logprobs: bool
+    token_quota: Any
+    token_amount: int | None
+
+
+def _classify_stream_failure(exc: BaseException, feature: str | None) -> tuple[str, Outcome]:
+    """Failure code and trace outcome for a stream that broke mid-response (first match wins)."""
+    if feature in {"refusal", "content_filter"}:
+        return "policy_refusal", "policy_refusal"
+    if isinstance(exc, UnsupportedReasoningError):
+        return "unsupported_reasoning", "unsupported_reasoning"
+    if isinstance(exc, UnsupportedStreamFeatureError):
+        return "unsupported_feature", "unsupported_feature"
+    if isinstance(exc, DeadlineExceeded):
+        return exc.kind, "timeout"
+    if isinstance(exc, TimeoutError):
+        return "upstream_timeout", "timeout"
+    if isinstance(exc, StreamLimitError):
+        return "stream_limit", "stream_limit"
+    return "invalid_stream", "invalid_stream"
+
+
 class _RedirectBlocker(HTTPRedirectHandler):
-    def redirect_request(self, request, fp, code, msg, headers, newurl):
+    def redirect_request(self, request: Request, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> None:
         return None
 
 
-def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observer | None = None) -> type[BaseHTTPRequestHandler]:
+def make_handler(
+    config: GatewayConfig, *, upstream_open: Callable[..., Any] | None = None, observer: Observer | None = None
+) -> type[BaseHTTPRequestHandler]:
     """Build the HTTP request handler class for ``config``.
 
     ``upstream_open`` replaces the HTTPS opener (tests inject scripted
@@ -352,6 +484,12 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
     class Handler(BaseHTTPRequestHandler):
         server_version = f"Protoverta/{__version__}"
         connection_limit = config.max_concurrent_requests
+        _trace: RequestTrace
+        _budget: RequestBudget
+        _deadline_input: DeadlineInput
+        _context_headers: dict[str, str]
+        _request_path: str | None
+        _response_started: bool
 
         @staticmethod
         def release_storage() -> None:
@@ -360,7 +498,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
             if shared_admission is not None:
                 shared_admission.close()
 
-        def setup(self):
+        def setup(self) -> None:
             super().setup()
             self._budget = RequestBudget(config.timeout, config.total_timeout, config.progress_timeout)
             register = getattr(self.server, "register_request_budget", None)
@@ -375,14 +513,14 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
             )
             self.rfile = io.BufferedReader(self._deadline_input)
 
-        def parse_request(self):
+        def parse_request(self) -> bool:
             parsed = super().parse_request()
             if parsed:
                 # Headers are complete; the body follows the request budget.
                 self._deadline_input.header_deadline = None
             return parsed
 
-        def handle(self):
+        def handle(self) -> None:
             try:
                 super().handle()
             except ConnectionError:
@@ -393,7 +531,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
             # Avoid logging paths, request bodies, or credentials by default.
             return
 
-        def send_response(self, code, message=None):
+        def send_response(self, code: int, message: str | None = None) -> None:
             self._response_started = True
             super().send_response(code, message)
 
@@ -420,14 +558,23 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 pass  # The client is gone; there is nobody to answer.
             self._trace.outcome = "internal_error"
 
-        def _json(self, status: int, payload: dict[str, object], headers=None) -> None:
+        def _json(self, status: int, payload: Mapping[str, Any], headers: Any = None) -> None:
             raw = encode_json(payload)
             self._raw_json(status, raw, headers)
 
         def _error(
-            self, status, message, protocol, *, code=None, phase: FailurePhase | None = None, feature: str | None = None, path: str | None = None, headers=None
-        ):
-            self._trace.outcome = {
+            self,
+            status: int,
+            message: str,
+            protocol: Protocol,
+            *,
+            code: str | None = None,
+            phase: FailurePhase | None = None,
+            feature: str | None = None,
+            path: str | None = None,
+            headers: Any = None,
+        ) -> None:
+            outcomes: dict[int, Outcome] = {
                 400: "invalid_request",
                 401: "authentication",
                 404: "not_found",
@@ -438,7 +585,8 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 429: "upstream_http",
                 503: "upstream_http",
                 504: "timeout",
-            }.get(status, "upstream_http")
+            }
+            self._trace.outcome = outcomes.get(status, "upstream_http")
             if feature in {"refusal", "content_filter"} and code in {None, "unsupported_feature", "policy_refusal"}:
                 code = "policy_refusal"
             if code in {
@@ -451,24 +599,34 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 "stream_limit",
                 "upstream_transport",
             }:
-                self._trace.outcome = code
+                self._trace.outcome = cast(Outcome, code)
             self._trace.phase = phase
             self._trace.feature = feature
             failure = gateway_failure(
-                status, message, code=code, phase=phase, feature=feature, path=path, secrets=(config.upstream_api_key, config.inbound_token)
+                status,
+                message,
+                code=code,
+                phase=phase,
+                feature=feature,
+                path=path,
+                secrets=(config.upstream_api_key, config.inbound_token),
             )
             self._json(failure.status, failure.payload(protocol), headers)
 
-        def _forward_headers(self, headers) -> None:
+        def _forward_headers(self, headers: Any) -> None:
             for name, value in headers.items() if headers else []:
                 lower = name.lower()
-                allowed = lower in {"retry-after", "x-should-retry", "request-id", "x-request-id", "x-accel-buffering"} or lower.startswith(
-                    "anthropic-ratelimit-"
-                )
+                allowed = lower in {
+                    "retry-after",
+                    "x-should-retry",
+                    "request-id",
+                    "x-request-id",
+                    "x-accel-buffering",
+                } or lower.startswith("anthropic-ratelimit-")
                 if allowed and "\r" not in str(value) and "\n" not in str(value):
                     self.send_header(name, value)
 
-        def _raw_json(self, status: int, raw: bytes, headers=None) -> None:
+        def _raw_json(self, status: int, raw: bytes, headers: Any = None) -> None:
             self.connection.settimeout(self._budget.remaining() if status < 400 else min(config.timeout, 1))
             self._trace.status = status
             if status < 400:
@@ -492,32 +650,28 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
 
         def _stream(
             self,
-            response,
+            response: Any,
             source: Protocol,
             target: Protocol,
-            response_transform=None,
-            tool_name_transform=None,
-            budget=None,
-            delta_transform=None,
-            tool_policy=None,
-            text_logprobs=False,
-            max_top_logprobs=None,
+            response_transform: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+            tool_name_transform: Callable[[str], str] | None = None,
+            budget: RequestBudget | None = None,
+            delta_transform: DeltaTransform | None = None,
+            tool_policy: BoundToolPolicy | None = None,
+            text_logprobs: bool = False,
+            max_top_logprobs: int | None = None,
         ) -> None:
-            native_guard = None
+            native_guard: Callable[[SSEEvent], None] | None = None
             if config.codex_model_safe_resume and source == target == Protocol.RESPONSES:
                 from .harness_controls import guard_codex_closed_resume
 
-                def native_guard(event):
+                def guard_resume(event: SSEEvent) -> None:
                     # The lifecycle validator already accepted any trailing
                     # [DONE] marker; it is not JSON and carries no tool call.
                     if event.data != "[DONE]":
                         guard_codex_closed_resume(json.loads(event.data), streaming=True)
 
-            limits = {
-                "max_stream_bytes": config.max_stream_bytes,
-                "max_stream_items": config.max_stream_items,
-                "max_tool_argument_bytes": config.max_tool_argument_bytes,
-            }
+                native_guard = guard_resume
             pipeline = (
                 StreamTranscoder(
                     source,
@@ -532,24 +686,38 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                     text_logprobs=text_logprobs,
                     max_top_logprobs=max_top_logprobs,
                     omit_reasoning=config.reasoning_output == "omit",
-                    **limits,
+                    max_stream_bytes=config.max_stream_bytes,
+                    max_stream_items=config.max_stream_items,
+                    max_tool_argument_bytes=config.max_tool_argument_bytes,
                 )
                 if source != target
-                else StreamValidator(source, event_guard=native_guard, **limits)
+                else StreamValidator(
+                    source,
+                    event_guard=native_guard,
+                    max_stream_bytes=config.max_stream_bytes,
+                    max_stream_items=config.max_stream_items,
+                    max_tool_argument_bytes=config.max_tool_argument_bytes,
+                )
             )
             budget = budget or RequestBudget(config.timeout, config.total_timeout, config.progress_timeout)
             headers_sent = False
             initial = bytearray()
 
-            def send_bytes(raw, timeout):
+            def send_bytes(raw: bytes, timeout: float) -> None:
                 self.connection.settimeout(timeout)
                 self.wfile.write(raw)
                 self.wfile.flush()
 
-            keepalive = None if source == target else encode_sse("ping", '{"type":"ping"}') if target == Protocol.MESSAGES else b": protoverta keepalive\n\n"
+            keepalive = (
+                None
+                if source == target
+                else encode_sse("ping", '{"type":"ping"}')
+                if target == Protocol.MESSAGES
+                else b": protoverta keepalive\n\n"
+            )
             writer = StreamHeartbeatWriter(send_bytes, budget, keepalive, interval=STREAM_HEARTBEAT_INTERVAL)
 
-            def write_output(raw, *, final_error=False):
+            def write_output(raw: bytes, *, final_error: bool = False) -> None:
                 writer.write(raw, final_error=final_error)
                 self._trace.mark_first_payload()
                 if not final_error:
@@ -636,7 +804,13 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                     return
                 policy_violation = isinstance(exc, ToolPolicyViolation)
                 unsupported = isinstance(exc, (UnsupportedReasoningError, UnsupportedStreamFeatureError))
-                feature = "reasoning" if isinstance(exc, UnsupportedReasoningError) else exc.feature if isinstance(exc, UnsupportedStreamFeatureError) else None
+                feature = (
+                    "reasoning"
+                    if isinstance(exc, UnsupportedReasoningError)
+                    else exc.feature
+                    if isinstance(exc, UnsupportedStreamFeatureError)
+                    else None
+                )
                 message = f"upstream stream error: {type(exc).__name__}"
                 if isinstance(exc, UnsupportedReasoningError):
                     hint = (
@@ -657,44 +831,16 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                     feature = "tool_policy"
                 timeout = isinstance(exc, TimeoutError)
                 limited = isinstance(exc, StreamLimitError)
-                refusal = feature in {"refusal", "content_filter"}
-                code = (
-                    "policy_refusal"
-                    if refusal
-                    else "unsupported_reasoning"
-                    if isinstance(exc, UnsupportedReasoningError)
-                    else "unsupported_feature"
-                    if unsupported
-                    else exc.kind
-                    if isinstance(exc, DeadlineExceeded)
-                    else "upstream_timeout"
-                    if timeout
-                    else "stream_limit"
-                    if limited
-                    else "invalid_stream"
-                )
+                code, self._trace.outcome = _classify_stream_failure(exc, feature)
                 if policy_violation:
                     code = "tool_policy_violation"
-                self._trace.outcome = (
-                    "policy_refusal"
-                    if refusal
-                    else "unsupported_reasoning"
-                    if isinstance(exc, UnsupportedReasoningError)
-                    else "unsupported_feature"
-                    if unsupported
-                    else "timeout"
-                    if timeout
-                    else "stream_limit"
-                    if limited
-                    else "invalid_stream"
-                )
                 self._trace.phase = "stream"
                 if policy_violation:
                     self._trace.outcome = "invalid_response"
                 self._trace.feature = feature
                 reported = isinstance(exc, UpstreamReportedError)
                 status = 422 if unsupported else 504 if timeout else 502
-                if reported:
+                if isinstance(exc, UpstreamReportedError):
                     # The provider's own message, bounded and secret-redacted.
                     message, code = str(exc), "upstream_error"
                     status = exc.status if exc.status is not None and exc.status < 500 else 502
@@ -726,7 +872,11 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                             else None,
                         )
                     else:
-                        sequence = pipeline.encoder.sequence if isinstance(pipeline, StreamTranscoder) else pipeline.decoder.sequence + 1
+                        sequence = (
+                            pipeline.encoder.sequence
+                            if isinstance(pipeline, StreamTranscoder)
+                            else pipeline.decoder.sequence + 1
+                        )
                         error = json.dumps(failure.stream_payload(target, sequence_number=max(0, sequence)))
                         write_output(encode_sse("error", error), final_error=True)
                 except (ConnectionError, TimeoutError):
@@ -761,20 +911,34 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                     len(tokens) > 1
                     or len(api_keys) > 1
                     or not supplied
-                    or any(value is None or not value.isascii() or not secrets.compare_digest(value, config.inbound_token) for value in supplied)
+                    or any(
+                        value is None or not value.isascii() or not secrets.compare_digest(value, config.inbound_token)
+                        for value in supplied
+                    )
                 ):
                     self._error(401, "unauthorized", list_protocol, phase="request", path=target.path)
                     return
-                self._trace.correlation(self.headers.get("X-Protoverta-Agent-ID"), self.headers.get("X-Protoverta-Chain-ID"), model_identity_salt)
+                self._trace.correlation(
+                    self.headers.get("X-Protoverta-Agent-ID"),
+                    self.headers.get("X-Protoverta-Chain-ID"),
+                    model_identity_salt,
+                )
                 acquired = admission.acquire(timeout=REQUEST_SLOT_GRACE_SECONDS)
                 if not acquired:
                     self._error(
-                        503, "Local gateway request capacity reached.", list_protocol, phase="admission", path=target.path, headers={"Retry-After": "1"}
+                        503,
+                        "Local gateway request capacity reached.",
+                        list_protocol,
+                        phase="admission",
+                        path=target.path,
+                        headers={"Retry-After": "1"},
                     )
                     self._trace.outcome = "capacity"
                     return
                 if config.model_snapshot is None:
-                    self._error(404, "No session model snapshot configured.", list_protocol, phase="preflight", path=target.path)
+                    self._error(
+                        404, "No session model snapshot configured.", list_protocol, phase="preflight", path=target.path
+                    )
                     return
                 try:
                     payload = config.model_snapshot.page(
@@ -784,7 +948,13 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                     )
                 except ModelMetadataUnavailable as exc:
                     self._error(
-                        422, str(exc), list_protocol, code="unsupported_feature", phase="preflight", path=target.path, headers={"x-should-retry": "false"}
+                        422,
+                        str(exc),
+                        list_protocol,
+                        code="unsupported_feature",
+                        phase="preflight",
+                        path=target.path,
+                        headers={"x-should-retry": "false"},
                     )
                     return
                 except ValueError as exc:
@@ -807,7 +977,9 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 protocol = _PATHS.get(urlsplit(self.path).path)
             except ValueError:
                 protocol = None
-            self._trace = RequestTrace(protocol.value if protocol is not None else "unknown", config.upstream_protocol.value)
+            self._trace = RequestTrace(
+                protocol.value if protocol is not None else "unknown", config.upstream_protocol.value
+            )
             self._context_headers = {}
             self._request_path = None
             try:
@@ -831,10 +1003,18 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 self._error(404, "unsupported endpoint", Protocol.CHAT, phase="request", path=target_url.path)
                 return
             token = self.headers.get("Authorization", "")
-            if not token.startswith("Bearer ") or not token[7:].isascii() or not secrets.compare_digest(token[7:], config.inbound_token):
+            if (
+                not token.startswith("Bearer ")
+                or not token[7:].isascii()
+                or not secrets.compare_digest(token[7:], config.inbound_token)
+            ):
                 self._error(401, "unauthorized", protocol, phase="request", path=target_url.path)
                 return
-            self._trace.correlation(self.headers.get("X-Protoverta-Agent-ID"), self.headers.get("X-Protoverta-Chain-ID"), model_identity_salt)
+            self._trace.correlation(
+                self.headers.get("X-Protoverta-Agent-ID"),
+                self.headers.get("X-Protoverta-Chain-ID"),
+                model_identity_salt,
+            )
             if not admission.acquire(timeout=REQUEST_SLOT_GRACE_SECONDS):
                 self._error(
                     503,
@@ -859,29 +1039,53 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 )
                 self._trace.outcome = "shared_admission"
             except (AdmissionStorageError, AdmissionPolicyError):
-                self._error(503, "Shared provider admission unavailable.", protocol, phase="admission", path=target_url.path)
+                self._error(
+                    503, "Shared provider admission unavailable.", protocol, phase="admission", path=target_url.path
+                )
                 self._trace.outcome = "admission_unavailable"
             except TimeoutError:
-                self._error(408, "Client request body read timed out.", protocol, phase="request", path=target_url.path, headers={"x-should-retry": "false"})
+                self._error(
+                    408,
+                    "Client request body read timed out.",
+                    protocol,
+                    phase="request",
+                    path=target_url.path,
+                    headers={"x-should-retry": "false"},
+                )
             except ConnectionError:
                 self._trace.outcome = "client_disconnected"
             finally:
                 admission.release()
 
-        def _handle_post(self, protocol, target_url) -> None:
+        def _handle_post(self, protocol: Protocol, target_url: SplitResult) -> None:
+            # Read the body, prepare the upstream request, then exchange it.
+            length = self._request_length(protocol, target_url)
+            if length is None:
+                return
+            prepared = self._prepare_post(protocol, target_url, length)
+            if prepared is not None:
+                self._exchange(protocol, target_url, prepared)
+
+        def _request_length(self, protocol: Protocol, target_url: SplitResult) -> int | None:
             # One unambiguous framing mode; never interpret chunked input as JSON.
             lengths = self.headers.get_all("Content-Length", [])
             if self.headers.get_all("Transfer-Encoding") or len(lengths) > 1:
-                self._error(400, "ambiguous or unsupported request framing", protocol, phase="request", path=target_url.path)
-                return
+                self._error(
+                    400, "ambiguous or unsupported request framing", protocol, phase="request", path=target_url.path
+                )
+                return None
             try:
                 length = int(self.headers.get("Content-Length", ""))
             except ValueError:
                 self._error(411, "Content-Length is required", protocol, phase="request", path=target_url.path)
-                return
+                return None
             if length < 0 or length > config.max_body_bytes:
                 self._error(413, "request body is too large", protocol, phase="request", path=target_url.path)
-                return
+                return None
+            return length
+
+        def _prepare_post(self, protocol: Protocol, target_url: SplitResult, length: int) -> _PreparedRequest | None:
+            """Decode, adapt, convert and preflight; None once the client was answered."""
             stage: FailurePhase = "request"
             try:
                 payload = decode_json(self.rfile.read(length))
@@ -899,13 +1103,17 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                     try:
                         if shared_admission is not None and config.token_count_mode == "native":
                             count_lease = shared_admission.acquire()
-                        count, provenance = count_input(config, payload, protocol, upstream_open=upstream_open, budget=self._budget)
+                        count, provenance = count_input(
+                            config, payload, protocol, upstream_open=upstream_open, budget=self._budget
+                        )
                     except NativeCountError as exc:
                         delay = retry_after(exc.headers)
                         if shared_admission is not None and exc.status in (429, 503) and delay is not None:
                             shared_admission.cooldown(delay)
-                        self._error(exc.status, str(exc), protocol, phase="upstream", path=target_url.path, headers=exc.headers)
-                        return
+                        self._error(
+                            exc.status, str(exc), protocol, phase="upstream", path=target_url.path, headers=exc.headers
+                        )
+                        return None
                     finally:
                         if shared_admission is not None and count_lease is not None:
                             try:
@@ -914,27 +1122,42 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                                 pass
                     self._context_headers = {
                         "X-Protoverta-Count-Kind": provenance,
-                        "X-Protoverta-Count-Category": "exact" if provenance in ("provider-native", "operator-exact") else "estimate",
+                        "X-Protoverta-Count-Category": "exact"
+                        if provenance in ("provider-native", "operator-exact")
+                        else "estimate",
                     }
-                    result = {"input_tokens": count}
+                    count_body: dict[str, Any] = {"input_tokens": count}
                     if protocol == Protocol.RESPONSES:
-                        result["object"] = "response.input_tokens"
+                        count_body["object"] = "response.input_tokens"
                     self._trace.phase = "response"
-                    self._json(200, result)
-                    return
+                    self._json(200, count_body)
+                    return None
                 streaming = payload.get("stream", False)
                 compact = target_url.path == "/v1/responses/compact"
                 if compact and (config.upstream_protocol != Protocol.RESPONSES or streaming or target_url.query):
                     if config.upstream_protocol != Protocol.RESPONSES:
                         raise UnsupportedFeatureError("compaction")
-                    raise ConversionError("compaction requires a native non-streaming Responses upstream; opaque state cannot be translated")
+                    raise ConversionError(
+                        "compaction requires a native non-streaming Responses upstream; opaque state cannot be translated"
+                    )
                 if not isinstance(streaming, bool):
                     raise ConversionError("stream must be a boolean")
                 self._trace.streaming = streaming
                 cache_active = False
-                if streaming and protocol == Protocol.MESSAGES and config.upstream_protocol != Protocol.MESSAGES and config.messages_usage_policy == "strict":
-                    raise ConversionError("incremental Messages output requires input usage before the first event; this route cannot provide it")
-                claude_beta = config.client_profile == "claude" and protocol == Protocol.MESSAGES and target_url.query == "beta=true"
+                if (
+                    streaming
+                    and protocol == Protocol.MESSAGES
+                    and config.upstream_protocol != Protocol.MESSAGES
+                    and config.messages_usage_policy == "strict"
+                ):
+                    raise ConversionError(
+                        "incremental Messages output requires input usage before the first event; this route cannot provide it"
+                    )
+                claude_beta = (
+                    config.client_profile == "claude"
+                    and protocol == Protocol.MESSAGES
+                    and target_url.query == "beta=true"
+                )
                 if target_url.query and protocol != config.upstream_protocol and not claude_beta:
                     raise ConversionError("query parameters cannot be translated between protocols")
                 tool_policy = None
@@ -959,8 +1182,15 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                     if protocol == Protocol.RESPONSES and config.client_tool_search == "function":
                         search_map = ClientToolSearchMap()
                         payload = search_map.prepare(payload)
-                    logical_tools = search_map.snapshot_tools() if search_map is not None and search_map.enabled else copy.deepcopy(payload.get("tools") or [])
-                    mid_system = config.upstream_protocol == Protocol.MESSAGES and payload.get("model") in config.messages_system_models
+                    logical_tools = (
+                        search_map.snapshot_tools()
+                        if search_map is not None and search_map.enabled
+                        else copy.deepcopy(payload.get("tools") or [])
+                    )
+                    mid_system = (
+                        config.upstream_protocol == Protocol.MESSAGES
+                        and payload.get("model") in config.messages_system_models
+                    )
                     if protocol == Protocol.RESPONSES and config.namespace_tools == "flatten":
                         namespace_map = NamespaceMap()
                         payload = namespace_map.prepare(payload)
@@ -969,11 +1199,17 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                         payload = tool_name_map.prepare(payload, protocol)
                     if config.client_profile == "codex" and protocol == Protocol.RESPONSES:
                         payload = prepare_codex_request(
-                            payload, config.upstream_protocol, default_max_output_tokens=config.default_max_output_tokens, messages_mid_system=mid_system
+                            payload,
+                            config.upstream_protocol,
+                            default_max_output_tokens=config.default_max_output_tokens,
+                            messages_mid_system=mid_system,
                         )
                         # Report the output cap actually introduced by this
                         # gateway profile, without inventing a provider default.
-                        if response_request.get("max_output_tokens") is None and payload.get("max_output_tokens") is not None:
+                        if (
+                            response_request.get("max_output_tokens") is None
+                            and payload.get("max_output_tokens") is not None
+                        ):
                             response_request["max_output_tokens"] = payload["max_output_tokens"]
                     elif config.client_profile == "claude" and protocol == Protocol.MESSAGES:
                         payload = prepare_claude_request(payload)
@@ -984,8 +1220,11 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                             response_request["tool_choice"] = effective_choice
                         if response_request.get("parallel_tool_calls") is None:
                             response_request["parallel_tool_calls"] = effective_parallel
-                    penalty_contract = config.provider_profiles is not None and config.provider_profiles.supports_responses_penalties(
-                        config.upstream_base_url, config.upstream_protocol, payload.get("model")
+                    penalty_contract = (
+                        config.provider_profiles is not None
+                        and config.provider_profiles.supports_responses_penalties(
+                            config.upstream_base_url, config.upstream_protocol, payload.get("model")
+                        )
                     )
                     outbound = convert_request(
                         payload,
@@ -1011,7 +1250,9 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                     outbound = apply_upstream_reasoning(outbound, config.upstream_protocol, config.upstream_reasoning)
                 semantic_outbound = outbound
                 if config.provider_profiles is not None:
-                    outbound = config.provider_profiles.apply(config.upstream_base_url, config.upstream_protocol, outbound)
+                    outbound = config.provider_profiles.apply(
+                        config.upstream_base_url, config.upstream_protocol, outbound
+                    )
                 if protocol != config.upstream_protocol:
                     tool_policy = BoundToolPolicy(outbound, config.upstream_protocol)
                     if not tool_policy.allowed:
@@ -1029,20 +1270,29 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                     from .evidence_identity import evidence_options
 
                     config.capabilities.preflight(
-                        config.upstream_base_url, config.upstream_protocol, outbound, require_verified=config.require_verified_capabilities
+                        config.upstream_base_url,
+                        config.upstream_protocol,
+                        outbound,
+                        require_verified=config.require_verified_capabilities,
                     )
                     if semantic_outbound is not outbound:
                         config.capabilities.preflight(
-                            config.upstream_base_url, config.upstream_protocol, semantic_outbound, require_verified=config.require_verified_capabilities
+                            config.upstream_base_url,
+                            config.upstream_protocol,
+                            semantic_outbound,
+                            require_verified=config.require_verified_capabilities,
                         )
                     if cache_active:
-                        config.capabilities.assess(config.upstream_base_url, config.upstream_protocol, outbound.get("model"), {"prompt_caching"}).require(
-                            verified=config.require_verified_capabilities
-                        )
+                        config.capabilities.assess(
+                            config.upstream_base_url,
+                            config.upstream_protocol,
+                            outbound.get("model"),
+                            {"prompt_caching"},
+                        ).require(verified=config.require_verified_capabilities)
                     if compact:
-                        config.capabilities.assess(config.upstream_base_url, config.upstream_protocol, outbound.get("model"), {"compaction"}).require(
-                            verified=config.require_verified_capabilities
-                        )
+                        config.capabilities.assess(
+                            config.upstream_base_url, config.upstream_protocol, outbound.get("model"), {"compaction"}
+                        ).require(verified=config.require_verified_capabilities)
                     config.capabilities.assess_route(
                         config.upstream_base_url,
                         config.upstream_protocol,
@@ -1057,10 +1307,18 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                         client_profile=config.client_profile,
                         policies=route_policies(config),
                         **evidence_options(config),
-                    ).require(verified=config.require_verified_routes or config.require_current_evidence or config.evidence_max_age_days is not None)
+                    ).require(
+                        verified=config.require_verified_routes
+                        or config.require_current_evidence
+                        or config.evidence_max_age_days is not None
+                    )
                 if config.context_preflight != "off" and not compact:
                     record = (
-                        config.capabilities.lookup(config.upstream_base_url, config.upstream_protocol, outbound.get("model")) if config.capabilities else None
+                        config.capabilities.lookup(
+                            config.upstream_base_url, config.upstream_protocol, outbound.get("model")
+                        )
+                        if config.capabilities
+                        else None
                     )
                     assessment = assess_context(
                         outbound,
@@ -1083,9 +1341,14 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                         raise ConversionError("token quota cannot account for opaque compaction input")
                     if not isinstance(outbound.get("model"), str) or not outbound["model"]:
                         raise ConversionError("token quota requires an exact model ID")
-                    token_amount = input_reserve(config, outbound).tokens + output_reserve(semantic_outbound, config.upstream_protocol)
+                    token_amount = input_reserve(config, outbound).tokens + output_reserve(
+                        semantic_outbound, config.upstream_protocol
+                    )
+                    token_db = config.shared_admission_db
+                    if token_db is None:  # GatewayConfig requires one with a token limit.
+                        raise ConversionError("token quota requires a shared admission database")
                     token_quota = SharedTokenQuota(
-                        config.shared_admission_db,
+                        token_db,
                         _prefix(config.upstream_base_url) + "\0" + config.upstream_api_key,
                         outbound["model"],
                         limit=config.shared_token_limit,
@@ -1100,9 +1363,14 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 data = encode_json(outbound)
             except RecursionError:
                 self._error(
-                    422, "request nesting exceeds the supported depth", protocol, phase=stage, path=target_url.path, headers={"x-should-retry": "false"}
+                    422,
+                    "request nesting exceeds the supported depth",
+                    protocol,
+                    phase=stage,
+                    path=target_url.path,
+                    headers={"x-should-retry": "false"},
                 )
-                return
+                return None
             except UnsupportedFeatureError as exc:
                 self._error(
                     422,
@@ -1114,11 +1382,45 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                     path=target_url.path,
                     headers={"x-should-retry": "false"},
                 )
-                return
+                return None
             except (json.JSONDecodeError, UnicodeError, ConversionError) as exc:
-                self._error(422, str(exc), protocol, phase=stage, path=target_url.path, headers={"x-should-retry": "false"})
-                return
-            headers = {"Content-Type": "application/json", "Accept": "text/event-stream" if streaming else "application/json"}
+                self._error(
+                    422, str(exc), protocol, phase=stage, path=target_url.path, headers={"x-should-retry": "false"}
+                )
+                return None
+            return _PreparedRequest(
+                outbound=outbound,
+                data=data,
+                streaming=streaming,
+                compact=compact,
+                response_request=response_request,
+                tool_name_map=tool_name_map,
+                namespace_map=namespace_map,
+                search_map=search_map,
+                tool_policy=tool_policy,
+                text_logprobs=text_logprobs,
+                token_quota=token_quota,
+                token_amount=token_amount,
+            )
+
+        def _exchange(self, protocol: Protocol, target_url: SplitResult, prepared: _PreparedRequest) -> None:
+            """Send the prepared request upstream and relay the response or failure."""
+            outbound = prepared.outbound
+            data = prepared.data
+            streaming = prepared.streaming
+            compact = prepared.compact
+            response_request = prepared.response_request
+            tool_name_map = prepared.tool_name_map
+            namespace_map = prepared.namespace_map
+            search_map = prepared.search_map
+            tool_policy = prepared.tool_policy
+            text_logprobs = prepared.text_logprobs
+            token_quota = prepared.token_quota
+            token_amount = prepared.token_amount
+            headers = {
+                "Content-Type": "application/json",
+                "Accept": "text/event-stream" if streaming else "application/json",
+            }
             if config.auth_style == "bearer":
                 headers["Authorization"] = f"Bearer {config.upstream_api_key}"
             else:
@@ -1134,7 +1436,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
             )
             request = Request(upstream_url, data=data, headers=headers, method="POST")
 
-            def restore_response(result):
+            def restore_response(result: dict[str, Any]) -> dict[str, Any]:
                 if tool_name_map is not None:
                     result = tool_name_map.restore(result, protocol)
                 mapped = namespace_map.restore(result) if namespace_map else copy.deepcopy(result)
@@ -1152,11 +1454,13 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
 
             lease = None
             watch = None
-            token_leases = []
+            token_leases: list[str] = []
             successful_token_lease = None
 
-            def open_accounted(request, *, timeout):
-                identifier = token_quota.reserve(token_amount) if token_quota is not None else None
+            def open_accounted(request: Request, *, timeout: float) -> Any:
+                identifier = (
+                    token_quota.reserve(token_amount) if token_quota is not None and token_amount is not None else None
+                )
                 if identifier is not None:
                     token_leases.append(identifier)
                 response = open_upstream(request, timeout=timeout)
@@ -1168,7 +1472,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 budget = self._budget
                 watch = DisconnectWatch(self.connection, budget.cancel)
                 watch.__enter__()
-                request.protoverta_budget = budget
+                attach_budget(request, budget)
                 if retry_policy is not None:
                     response, lease = open_with_policy(
                         open_accounted,
@@ -1184,26 +1488,34 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                     )
                 else:
                     response, lease = open_with_retry(
-                        open_accounted, request, budget, attempts=config.retry_attempts, max_wait=config.retry_max_wait, admission=shared_admission
+                        open_accounted,
+                        request,
+                        budget,
+                        attempts=config.retry_attempts,
+                        max_wait=config.retry_max_wait,
+                        admission=shared_admission,
                     )
                 with response:
                     budget.remaining()
                     if streaming:
-                        transform = restore_response if protocol == Protocol.RESPONSES and protocol != config.upstream_protocol else None
+                        transform = (
+                            restore_response
+                            if protocol == Protocol.RESPONSES and protocol != config.upstream_protocol
+                            else None
+                        )
                         profile_delta = (
-                            config.provider_profiles.stream_delta_restorer(config.upstream_base_url, config.upstream_protocol, outbound.get("model"))
+                            config.provider_profiles.stream_delta_restorer(
+                                config.upstream_base_url, config.upstream_protocol, outbound.get("model")
+                            )
                             if config.provider_profiles is not None and protocol != config.upstream_protocol
                             else None
                         )
                         search_delta = search_map.stream_delta if search_map is not None else None
+                        delta_fn: DeltaTransform | None
                         if profile_delta is not None and search_delta is not None:
 
-                            def combined_delta(d):
-                                out_deltas = []
-                                for item in profile_delta(d):
-                                    res = search_delta(item)
-                                    out_deltas.extend([res] if not isinstance(res, list) else res)
-                                return out_deltas
+                            def combined_delta(d: Delta) -> list[Delta]:
+                                return [search_delta(item) for item in profile_delta(d)]
 
                             delta_fn = combined_delta
                         else:
@@ -1234,11 +1546,18 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                         raise ConversionError("upstream returned a non-object JSON response")
                     try:
                         usage = _decode_usage(result.get("usage", {}), config.upstream_protocol)
-                        self._trace.usage(usage["input_tokens"], usage["output_tokens"], usage["cached_input_tokens"], usage["cache_creation_input_tokens"])
+                        self._trace.usage(
+                            usage["input_tokens"],
+                            usage["output_tokens"],
+                            usage["cached_input_tokens"],
+                            usage["cache_creation_input_tokens"],
+                        )
                     except (ValueError, TypeError, AttributeError):
                         pass  # Diagnostics must never reject a native response.
                     if config.provider_profiles is not None:
-                        result = config.provider_profiles.restore(config.upstream_base_url, config.upstream_protocol, outbound.get("model"), result)
+                        result = config.provider_profiles.restore(
+                            config.upstream_base_url, config.upstream_protocol, outbound.get("model"), result
+                        )
                     if protocol != config.upstream_protocol:
                         result = convert_response(
                             result,
@@ -1249,7 +1568,8 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                             max_top_logprobs=outbound.get("top_logprobs") if text_logprobs else None,
                             omit_reasoning=config.reasoning_output == "omit",
                         )
-                        tool_policy.check_result(result, protocol)
+                        if tool_policy is not None:
+                            tool_policy.check_result(result, protocol)
                         result = restore_response(result)
                     elif config.codex_model_safe_resume and protocol == Protocol.RESPONSES:
                         from .harness_controls import guard_codex_closed_resume
@@ -1258,18 +1578,31 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                     truncated = False
                     if protocol == Protocol.CHAT:
                         choices = result.get("choices")
-                        truncated = isinstance(choices, list) and any(isinstance(c, dict) and c.get("finish_reason") == "length" for c in choices)
+                        truncated = isinstance(choices, list) and any(
+                            isinstance(c, dict) and c.get("finish_reason") == "length" for c in choices
+                        )
                     elif protocol == Protocol.MESSAGES:
                         truncated = result.get("stop_reason") == "max_tokens"
                     elif protocol == Protocol.RESPONSES and not compact:
                         inc = result.get("incomplete_details")
-                        truncated = result.get("status") == "incomplete" and isinstance(inc, dict) and inc.get("reason") == "max_output_tokens"
+                        truncated = (
+                            result.get("status") == "incomplete"
+                            and isinstance(inc, dict)
+                            and inc.get("reason") == "max_output_tokens"
+                        )
                     self._trace.phase = "response"
                     if truncated:
                         self._trace.outcome = "truncated_output"
                     self._json(200, result, getattr(response, "headers", None))
             except AdmissionDenied as exc:
-                self._error(429, str(exc), protocol, phase="admission", path=target_url.path, headers={"Retry-After": str(exc.retry_after)})
+                self._error(
+                    429,
+                    str(exc),
+                    protocol,
+                    phase="admission",
+                    path=target_url.path,
+                    headers={"Retry-After": str(exc.retry_after)},
+                )
                 self._trace.outcome = "shared_admission"
             except ClientDisconnected:
                 self._trace.outcome = "client_disconnected"
@@ -1313,22 +1646,37 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                             headers=exc.headers,
                         )
                 except (ValueError, TypeError, UnicodeError, OSError, HTTPException, RecursionError):
-                    self._error(exc.code, f"upstream HTTP {exc.code}", protocol, phase="upstream", path=target_url.path, headers=exc.headers)
+                    self._error(
+                        exc.code,
+                        f"upstream HTTP {exc.code}",
+                        protocol,
+                        phase="upstream",
+                        path=target_url.path,
+                        headers=exc.headers,
+                    )
                 finally:
                     self._trace.outcome = "upstream_http"
                     self._trace.phase = "upstream"
                     exc.close()
             except (URLError, TimeoutError, OSError, HTTPException) as exc:
-                timeout = isinstance(exc, TimeoutError) or isinstance(exc, URLError) and isinstance(exc.reason, TimeoutError)
+                timeout = (
+                    isinstance(exc, TimeoutError) or isinstance(exc, URLError) and isinstance(exc.reason, TimeoutError)
+                )
                 cause = exc.reason if isinstance(exc, URLError) else exc
                 self._error(
                     504 if timeout else 502,
                     f"upstream transport error: {type(exc).__name__}",
                     protocol,
-                    code=cause.kind if isinstance(cause, DeadlineExceeded) else "upstream_timeout" if timeout else "upstream_transport",
+                    code=cause.kind
+                    if isinstance(cause, DeadlineExceeded)
+                    else "upstream_timeout"
+                    if timeout
+                    else "upstream_transport",
                     phase="upstream",
                     path=target_url.path,
-                    headers={"x-should-retry": "false"} if isinstance(cause, DeadlineExceeded) or retry_policy is not None else None,
+                    headers={"x-should-retry": "false"}
+                    if isinstance(cause, DeadlineExceeded) or retry_policy is not None
+                    else None,
                 )
             except ToolPolicyViolation as exc:
                 self._error(
@@ -1360,12 +1708,13 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 if token_quota is not None:
                     for identifier in token_leases:
                         try:
-                            usage = (
+                            measured = (
                                 (self._trace.input_tokens, self._trace.output_tokens)
-                                if identifier == successful_token_lease and self._trace.outcome in ("success", "truncated_output")
+                                if identifier == successful_token_lease
+                                and self._trace.outcome in ("success", "truncated_output")
                                 else (None, None)
                             )
-                            token_quota.reconcile(identifier, *usage)
+                            token_quota.reconcile(identifier, *measured)
                         except AdmissionStorageError:
                             pass  # Crash/storage failure retains a finite conservative lease.
                 if watch is not None:
@@ -1384,30 +1733,35 @@ class GatewayHTTPServer(ThreadingHTTPServer):
 
     daemon_threads = True
 
-    def __init__(self, address, handler):
+    def __init__(self, address: tuple[str, int], handler: Any) -> None:
         self._connections = threading.BoundedSemaphore(handler.connection_limit)
         # Separate small bound for over-capacity replies; beyond it, close.
         self._rejections = threading.BoundedSemaphore(8)
-        self._active_clients = set()
-        self._request_budgets = {}
+        self._active_clients: set[socket.socket] = set()
+        self._request_budgets: dict[socket.socket, RequestBudget] = {}
         self._clients_changed = threading.Condition()
         self._closing = False
         super().__init__(address, handler)
 
-    def process_request(self, request, client_address):
+    def process_request(self, request: Any, client_address: Any) -> None:
         if not self._connections.acquire(blocking=False):
             # Off the accept loop: wait briefly for a slot (a handler frees it
             # just after its client saw the connection close, so an immediate
             # reconnect races the release), else tell the client to retry
             # instead of resetting the connection.
             if self._rejections.acquire(blocking=False):
-                threading.Thread(target=self._admit_or_reject, args=(request, client_address), name="protoverta-capacity-reply", daemon=True).start()
+                threading.Thread(
+                    target=self._admit_or_reject,
+                    args=(request, client_address),
+                    name="protoverta-capacity-reply",
+                    daemon=True,
+                ).start()
             else:
                 self.shutdown_request(request)
             return
         self._admit(request, client_address)
 
-    def _admit_or_reject(self, request, client_address):
+    def _admit_or_reject(self, request: socket.socket, client_address: Any) -> None:
         if not self._connections.acquire(timeout=REQUEST_SLOT_GRACE_SECONDS):
             self._reject_over_capacity(request)
             return
@@ -1418,7 +1772,7 @@ class GatewayHTTPServer(ThreadingHTTPServer):
             self.handle_error(request, client_address)
             self.shutdown_request(request)
 
-    def _admit(self, request, client_address):
+    def _admit(self, request: socket.socket, client_address: Any) -> None:
         """Serve a request whose connection slot is already held."""
         with self._clients_changed:
             closing = self._closing
@@ -1434,7 +1788,7 @@ class GatewayHTTPServer(ThreadingHTTPServer):
             self._client_finished(request)
             raise
 
-    def _reject_over_capacity(self, request):
+    def _reject_over_capacity(self, request: socket.socket) -> None:
         """Send 503, half-close, then drain briefly so close() does not reset.
 
         Closing a socket with unread request bytes makes Windows send RST,
@@ -1460,21 +1814,21 @@ class GatewayHTTPServer(ThreadingHTTPServer):
             finally:
                 self._rejections.release()
 
-    def handle_error(self, request, client_address):
+    def handle_error(self, request: Any, client_address: Any) -> None:
         """Never print tracebacks: the gateway shares the terminal with the CLI.
 
         Handlers answer their own faults (500 ``internal_error``); anything left
         is a connection-level failure with no client to report to.
         """
 
-    def _client_finished(self, request):
+    def _client_finished(self, request: socket.socket) -> None:
         self._connections.release()
         with self._clients_changed:
             self._active_clients.discard(request)
             self._request_budgets.pop(request, None)
             self._clients_changed.notify_all()
 
-    def register_request_budget(self, request, budget):
+    def register_request_budget(self, request: socket.socket, budget: RequestBudget) -> None:
         with self._clients_changed:
             closing = self._closing
             if not closing:
@@ -1482,13 +1836,13 @@ class GatewayHTTPServer(ThreadingHTTPServer):
         if closing:
             budget.cancel()
 
-    def process_request_thread(self, request, client_address):
+    def process_request_thread(self, request: Any, client_address: Any) -> None:
         try:
             super().process_request_thread(request, client_address)
         finally:
             self._client_finished(request)
 
-    def server_close(self):
+    def server_close(self) -> None:
         with self._clients_changed:
             self._closing = True
             clients = tuple(self._active_clients)
@@ -1514,7 +1868,9 @@ class GatewayHTTPServer(ThreadingHTTPServer):
             release_storage()
 
 
-def serve(config: GatewayConfig, host: str = "127.0.0.1", port: int = 0, *, observer: Observer | None = None) -> ThreadingHTTPServer:
+def serve(
+    config: GatewayConfig, host: str = "127.0.0.1", port: int = 0, *, observer: Observer | None = None
+) -> ThreadingHTTPServer:
     """Create a gateway server bound to ``127.0.0.1`` (port 0 picks a free port).
 
     Call ``serve_forever()`` on the result and ``server_close()`` when done;

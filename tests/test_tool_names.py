@@ -20,7 +20,11 @@ from protoverta.tool_names import ToolNameMap
 def request_body(name, protocol="messages"):
     common = {"model": "m", "messages": [{"role": "user", "content": "Hi"}], "max_tokens": 32}
     if protocol == "messages":
-        return dict(common, tools=[{"name": name, "input_schema": {"type": "object"}}], tool_choice={"type": "tool", "name": name})
+        return dict(
+            common,
+            tools=[{"name": name, "input_schema": {"type": "object"}}],
+            tool_choice={"type": "tool", "name": name},
+        )
     if protocol == "chat":
         return dict(
             common,
@@ -68,7 +72,10 @@ def test_history_forced_choice_and_collision_are_preserved_without_string_replac
     assert mapped["input"][0]["name"] == mapped["tool_choice"]["name"] == second_alias
     assert json.loads(mapped["input"][0]["arguments"])["name"] == name
     assert mapped["input"][1]["output"] == name
-    restored = mapper.restore({"output": [{"type": "function_call", "name": second_alias, "arguments": json.dumps({"value": second_alias})}]}, "responses")
+    restored = mapper.restore(
+        {"output": [{"type": "function_call", "name": second_alias, "arguments": json.dumps({"value": second_alias})}]},
+        "responses",
+    )
     assert restored["output"][0]["name"] == name
     assert json.loads(restored["output"][0]["arguments"])["value"] == second_alias
     with pytest.raises(ConversionError, match="unknown function alias"):
@@ -91,7 +98,10 @@ def test_strict_json_and_stream_responses_reject_nonportable_upstream_names(targ
     with pytest.raises(ConversionError, match="function names"):
         convert_response(body, "messages", target)
     encoder = StreamEncoder("messages")
-    deltas = [Delta("start", model="m", input_tokens=1, output_tokens=0), Delta("tool_start", index=0, call_id="c", name="x" * 102)]
+    deltas = [
+        Delta("start", model="m", input_tokens=1, output_tokens=0),
+        Delta("tool_start", index=0, call_id="c", name="x" * 102),
+    ]
     wire = b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta))
     with pytest.raises(StreamError, match="not portable"):
         StreamTranscoder("messages", target).feed(wire)
@@ -99,8 +109,15 @@ def test_strict_json_and_stream_responses_reject_nonportable_upstream_names(targ
 
 @pytest.mark.parametrize("profile,expected", [("strict", "reject"), ("codex", "alias"), ("claude", "alias")])
 def test_explicit_client_profiles_enable_aliases_but_reject_override_wins(profile, expected):
-    assert GatewayConfig("chat", "https://example.test/v1", "key", "local", client_profile=profile).tool_names == expected
-    assert GatewayConfig("chat", "https://example.test/v1", "key", "local", client_profile=profile, tool_names="reject").tool_names == "reject"
+    assert (
+        GatewayConfig("chat", "https://example.test/v1", "key", "local", client_profile=profile).tool_names == expected
+    )
+    assert (
+        GatewayConfig(
+            "chat", "https://example.test/v1", "key", "local", client_profile=profile, tool_names="reject"
+        ).tool_names
+        == "reject"
+    )
 
 
 @pytest.mark.parametrize("stream", [False, True])
@@ -118,7 +135,9 @@ def test_gateway_alias_json_stream_and_concurrent_isolation(stream):
                 Delta("tool_end", index=0),
                 Delta("finish", reason="tool_calls", input_tokens=2, output_tokens=3),
             ]
-            return io.BytesIO(b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta)))
+            return io.BytesIO(
+                b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta))
+            )
         return io.BytesIO(
             json.dumps(
                 {
@@ -129,7 +148,9 @@ def test_gateway_alias_json_stream_and_concurrent_isolation(stream):
                             "message": {
                                 "role": "assistant",
                                 "content": None,
-                                "tool_calls": [{"id": "c", "type": "function", "function": {"name": name, "arguments": "{}"}}],
+                                "tool_calls": [
+                                    {"id": "c", "type": "function", "function": {"name": name, "arguments": "{}"}}
+                                ],
                             },
                         }
                     ],
@@ -138,7 +159,9 @@ def test_gateway_alias_json_stream_and_concurrent_isolation(stream):
             ).encode()
         )
 
-    config = GatewayConfig("chat", "https://example.test/v1", "key", "local", tool_names="alias", messages_usage_policy="deferred")
+    config = GatewayConfig(
+        "chat", "https://example.test/v1", "key", "local", tool_names="alias", messages_usage_policy="deferred"
+    )
     with listener(config, upstream) as url:
 
         def run(name):
@@ -181,7 +204,9 @@ def test_alias_gateway_all_six_routes_restore_names_and_snapshots(source, target
                 Delta("tool_end", index=0),
                 Delta("finish", reason="tool_calls", input_tokens=1, output_tokens=1),
             ]
-            return io.BytesIO(b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta)))
+            return io.BytesIO(
+                b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta))
+            )
         chat = {
             "model": "m",
             "choices": [
@@ -198,7 +223,9 @@ def test_alias_gateway_all_six_routes_restore_names_and_snapshots(source, target
         }
         return io.BytesIO(json.dumps(convert_response(chat, "chat", target)).encode())
 
-    config = GatewayConfig(target, "https://example.test/v1", "key", "local", tool_names="alias", messages_usage_policy="deferred")
+    config = GatewayConfig(
+        target, "https://example.test/v1", "key", "local", tool_names="alias", messages_usage_policy="deferred"
+    )
     with listener(config, upstream) as origin:
         endpoint = {"chat": "chat/completions", "messages": "messages", "responses": "responses"}[source]
         with post(origin.removesuffix("responses") + endpoint, body) as response:
@@ -206,10 +233,16 @@ def test_alias_gateway_all_six_routes_restore_names_and_snapshots(source, target
     if stream:
         events = [json.loads(event.data) for event in SSEParser().feed(wire) if event.data != "[DONE]"]
         if source == "responses":
-            calls = [event["item"] for event in events if isinstance(event.get("item"), dict) and event["item"]["type"] == "function_call"]
+            calls = [
+                event["item"]
+                for event in events
+                if isinstance(event.get("item"), dict) and event["item"]["type"] == "function_call"
+            ]
             calls += [item for item in events[-1]["response"]["output"] if item["type"] == "function_call"]
         elif source == "messages":
-            calls = [event["content_block"] for event in events if event.get("content_block", {}).get("type") == "tool_use"]
+            calls = [
+                event["content_block"] for event in events if event.get("content_block", {}).get("type") == "tool_use"
+            ]
         else:
             calls = [
                 call["function"]
@@ -243,6 +276,9 @@ def test_alias_map_does_not_reuse_empty_request_and_keeps_native_gateway_unchang
         return io.BytesIO(b'{"native":true}')
 
     config = GatewayConfig("chat", "https://example.test/v1", "key", "local", tool_names="alias")
-    with listener(config, upstream) as origin, post(origin.removesuffix("responses") + "chat/completions", body) as response:
+    with (
+        listener(config, upstream) as origin,
+        post(origin.removesuffix("responses") + "chat/completions", body) as response,
+    ):
         assert json.load(response) == {"native": True}
     assert captured == [body]

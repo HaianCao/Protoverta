@@ -88,7 +88,8 @@ def test_schema_three_routes_and_older_registries_remain_separate():
 
 
 @pytest.mark.parametrize(
-    ("routes", "required", "expected"), [([], False, 200), ([], True, 422), ([record()], True, 200), ([record(features={"text": False})], False, 422)]
+    ("routes", "required", "expected"),
+    [([], False, 200), ([], True, 422), ([record()], True, 200), ([record(features={"text": False})], False, 422)],
 )
 def test_gateway_checks_exact_route_before_upstream(routes, required, expected):
     config = replace(

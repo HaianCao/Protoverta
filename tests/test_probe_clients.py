@@ -16,7 +16,10 @@ def test_codex_probe_requires_assistant_answer_not_tool_output(probe_module):
     stdout = "\n".join(
         json.dumps(item)
         for item in [
-            {"type": "item.completed", "item": {"type": "command_execution", "exit_code": 0, "aggregated_output": "secret-nonce"}},
+            {
+                "type": "item.completed",
+                "item": {"type": "command_execution", "exit_code": 0, "aggregated_output": "secret-nonce"},
+            },
             {"type": "item.completed", "item": {"type": "agent_message", "text": "actual-answer"}},
         ]
     )
@@ -56,7 +59,13 @@ def test_live_resume_probe_requires_old_nonce_and_same_session(probe_module, mon
 
     monkeypatch.setattr(probe_module, "run_client", run)
     result = probe_module.probe_resume(
-        client, probe_module.Protocol.CHAT, probe_module.Protocol.MESSAGES, "https://example.test/v1", "fake-key", "selected-model", tmp_path
+        client,
+        probe_module.Protocol.CHAT,
+        probe_module.Protocol.MESSAGES,
+        "https://example.test/v1",
+        "fake-key",
+        "selected-model",
+        tmp_path,
     )
     assert result["passed"] == (mode == "success")
     assert len(calls) == 2
@@ -117,7 +126,9 @@ def test_probe_redacts_before_truncating_long_failure_output(probe_module, monke
     secret = "synthetic-private-key-that-must-not-be-partially-shown"
     result = SimpleNamespace(returncode=1, stdout=secret + "x" * 2490, stderr="")
     monkeypatch.setattr(probe_module, "run_client", lambda *args, **kwargs: result)
-    observed = probe_module.probe("claude", probe_module.Protocol.CHAT, "https://example.test/v1", secret, "m", tmp_path)
+    observed = probe_module.probe(
+        "claude", probe_module.Protocol.CHAT, "https://example.test/v1", secret, "m", tmp_path
+    )
     assert "partially-shown" not in observed["error"]
     assert not observed["passed"]
 
@@ -135,7 +146,10 @@ def test_three_turn_probe_observes_real_public_reasoning_replay(probe_module, mo
         answer = "ACK" if len(calls) == 1 else "RESUME_NONCE_synthetic"
         output = "\n".join(
             json.dumps(item)
-            for item in [{"type": "thread.started", "thread_id": "same-session"}, {"type": "item.completed", "item": {"type": "agent_message", "text": answer}}]
+            for item in [
+                {"type": "thread.started", "thread_id": "same-session"},
+                {"type": "item.completed", "item": {"type": "agent_message", "text": answer}},
+            ]
         )
         return SimpleNamespace(returncode=0, stdout=output, stderr="")
 
@@ -165,7 +179,9 @@ def test_fresh_diagnostics_never_return_raw_client_output(probe_module, monkeypa
         return SimpleNamespace(returncode=1, stdout="private-reasoning key", stderr="private-client-output")
 
     monkeypatch.setattr(probe_module, "run_client", run)
-    result = probe_module.probe("claude", probe_module.Protocol.CHAT, "https://example.test/v1", "key", "synthetic", tmp_path, diagnostics=True)
+    result = probe_module.probe(
+        "claude", probe_module.Protocol.CHAT, "https://example.test/v1", "key", "synthetic", tmp_path, diagnostics=True
+    )
     assert not result["passed"] and result["error"] == "invalid_stream"
     assert result["diagnostics"]["failures"][0]["stage"] == "encoder"
     assert "private" not in json.dumps(result)
@@ -179,7 +195,16 @@ def test_codex_tool_probe_receives_and_returns_bounded_diagnostics(probe_module,
         return SimpleNamespace(returncode=1, stdout="private-client-output", stderr=""), False, 1
 
     monkeypatch.setattr(probe_module, "_probe_codex_goal", run)
-    result = probe_module.probe("codex", probe_module.Protocol.CHAT, "https://example.test/v1", "key", "synthetic", tmp_path, tool_loop=True, diagnostics=True)
+    result = probe_module.probe(
+        "codex",
+        probe_module.Protocol.CHAT,
+        "https://example.test/v1",
+        "key",
+        "synthetic",
+        tmp_path,
+        tool_loop=True,
+        diagnostics=True,
+    )
     assert result["requests"] == 1 and not result["tool_verified"]
     assert result["diagnostics"]["failures"][0]["stage"] == "parser"
     assert "private" not in json.dumps(result)
@@ -190,13 +215,26 @@ def test_budget_is_passed_to_isolated_trace_child_and_failure_cannot_be_a_pass(p
 
     def run(*args, **kwargs):
         assert args[5]["PROTOVERTA_PROBE_REQUEST_LIMIT"] == "1"
-        report = {"requests": 1, "max_upstream_requests": 1, "failures": [{"stage": "probe", "operation": "open", "category": "probe_request_budget"}]}
+        report = {
+            "requests": 1,
+            "max_upstream_requests": 1,
+            "failures": [{"stage": "probe", "operation": "open", "category": "probe_request_budget"}],
+        }
         kwargs["trace_file"].write_text(json.dumps([{"stream_diagnostics": report}]), encoding="utf-8")
-        return SimpleNamespace(returncode=0, stdout=json.dumps({"result": probe_module.MARKER, "is_error": False}), stderr="")
+        return SimpleNamespace(
+            returncode=0, stdout=json.dumps({"result": probe_module.MARKER, "is_error": False}), stderr=""
+        )
 
     monkeypatch.setattr(probe_module, "run_client", run)
     result = probe_module.probe(
-        "claude", probe_module.Protocol.CHAT, "https://example.test/v1", "key", "synthetic", tmp_path, diagnostics=True, max_upstream_requests=1
+        "claude",
+        probe_module.Protocol.CHAT,
+        "https://example.test/v1",
+        "key",
+        "synthetic",
+        tmp_path,
+        diagnostics=True,
+        max_upstream_requests=1,
     )
     assert result["returncode"] == 0 and not result["passed"]
     assert result["error"] == "probe_request_budget"
@@ -204,4 +242,12 @@ def test_budget_is_passed_to_isolated_trace_child_and_failure_cannot_be_a_pass(p
 
 def test_request_limit_without_diagnostics_is_rejected_before_launch(probe_module, tmp_path):
     with pytest.raises(ValueError, match="requires diagnostics"):
-        probe_module.probe("codex", probe_module.Protocol.CHAT, "https://example.test/v1", "key", "synthetic", tmp_path, max_upstream_requests=1)
+        probe_module.probe(
+            "codex",
+            probe_module.Protocol.CHAT,
+            "https://example.test/v1",
+            "key",
+            "synthetic",
+            tmp_path,
+            max_upstream_requests=1,
+        )

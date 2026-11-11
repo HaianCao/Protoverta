@@ -21,13 +21,24 @@ MESSAGE_START = sse(
     "message_start",
     {
         "type": "message_start",
-        "message": {"id": "m", "type": "message", "role": "assistant", "model": "x", "content": [], "usage": {"input_tokens": 1, "output_tokens": 0}},
+        "message": {
+            "id": "m",
+            "type": "message",
+            "role": "assistant",
+            "model": "x",
+            "content": [],
+            "usage": {"input_tokens": 1, "output_tokens": 0},
+        },
     },
 )
 OVERLOADED = sse("error", {"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}})
 BASE = {"id": "r", "object": "response", "created_at": 1, "status": "in_progress", "model": "m", "output": []}
 CREATED = sse("response.created", {"type": "response.created", "response": BASE, "sequence_number": 0})
-FAILED_RESPONSE = dict(BASE, status="failed", error={"code": "context_length_exceeded", "message": "Your input exceeds the context window."})
+FAILED_RESPONSE = dict(
+    BASE,
+    status="failed",
+    error={"code": "context_length_exceeded", "message": "Your input exceeds the context window."},
+)
 
 
 def _messages_url(url):
@@ -49,25 +60,49 @@ def test_native_messages_error_event_reaches_client_unchanged(wire):
     body = {"model": "x", "max_tokens": 5, "messages": [{"role": "user", "content": "hi"}], "stream": True}
     events, traces = _run(config, wire, _messages_url, body)
     assert events[-1].event == "error"
-    assert json.loads(events[-1].data) == {"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}}
+    assert json.loads(events[-1].data) == {
+        "type": "error",
+        "error": {"type": "overloaded_error", "message": "Overloaded"},
+    }
     assert [event.event for event in events].count("error") == 1
     assert traces[-1].outcome == "upstream_http" and traces[-1].phase == "upstream"
 
 
 @pytest.mark.parametrize("with_error_event", [False, True])
 def test_native_responses_failure_reaches_client_unchanged(with_error_event):
-    error = sse("error", {"type": "error", "code": "context_length_exceeded", "message": "too long", "param": None, "sequence_number": 1})
-    failed = sse("response.failed", {"type": "response.failed", "response": FAILED_RESPONSE, "sequence_number": 2 if with_error_event else 1})
+    error = sse(
+        "error",
+        {
+            "type": "error",
+            "code": "context_length_exceeded",
+            "message": "too long",
+            "param": None,
+            "sequence_number": 1,
+        },
+    )
+    failed = sse(
+        "response.failed",
+        {"type": "response.failed", "response": FAILED_RESPONSE, "sequence_number": 2 if with_error_event else 1},
+    )
     wire = CREATED + (error if with_error_event else b"") + failed
     config = GatewayConfig(Protocol.RESPONSES, "https://example.invalid/v1", "fake", "local")
     events, traces = _run(config, wire, lambda url: url, {"model": "m", "input": "hi", "stream": True})
-    assert [event.event for event in events] == ["response.created", *(["error"] if with_error_event else []), "response.failed"]
+    assert [event.event for event in events] == [
+        "response.created",
+        *(["error"] if with_error_event else []),
+        "response.failed",
+    ]
     assert json.loads(events[-1].data)["response"]["error"]["code"] == "context_length_exceeded"
     assert traces[-1].outcome == "upstream_http"
 
 
 def test_native_chat_error_chunk_and_done_marker_reach_client():
-    chunk = {"id": "c", "object": "chat.completion.chunk", "error": {"code": 502, "message": "provider failed"}, "choices": []}
+    chunk = {
+        "id": "c",
+        "object": "chat.completion.chunk",
+        "error": {"code": 502, "message": "provider failed"},
+        "choices": [],
+    }
     wire = f"data: {json.dumps(chunk)}\n\n".encode() + b"data: [DONE]\n\n"
     config = GatewayConfig(Protocol.CHAT, "https://example.invalid/v1", "fake", "local")
     events, traces = _run(
@@ -85,7 +120,10 @@ def test_native_chat_error_chunk_and_done_marker_reach_client():
     "protocol,wire",
     [
         ("messages", MESSAGE_START + OVERLOADED + sse("ping", {"type": "ping"})),
-        ("responses", CREATED + sse("error", {"type": "error", "code": "x", "message": "x", "sequence_number": 1}) + CREATED),
+        (
+            "responses",
+            CREATED + sse("error", {"type": "error", "code": "x", "message": "x", "sequence_number": 1}) + CREATED,
+        ),
         ("chat", b'data: {"error": {"message": "x"}, "choices": []}\n\ndata: {"choices": []}\n\n'),
     ],
 )

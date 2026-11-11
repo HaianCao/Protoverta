@@ -91,14 +91,22 @@ def test_cross_session_auth_is_rejected_before_invalid_json_or_upstream_dispatch
 @pytest.mark.parametrize("fault", [None, "shared_id", "wrong_protocol", "no_success", "key_leak"])
 def test_journal_gate_rejects_cross_provider_records_and_secret_leaks(harness, monkeypatch, tmp_path, fault):
     specs = [
-        {"provider": name, "protocol": protocol, "model": "model-" + name, "key": "key-" + name, "answer": "answer-" + name}
+        {
+            "provider": name,
+            "protocol": protocol,
+            "model": "model-" + name,
+            "key": "key-" + name,
+            "answer": "answer-" + name,
+        }
         for name, protocol in [("alpha", "chat"), ("beta", "messages")]
     ]
     records = {}
     for spec in specs:
         path = tmp_path / spec["provider"]
         path.mkdir()
-        (path / ("session-" + "a" * 32 + ".jsonl")).write_text(spec["key"] if fault == "key_leak" else "synthetic", encoding="utf-8")
+        (path / ("session-" + "a" * 32 + ".jsonl")).write_text(
+            spec["key"] if fault == "key_leak" else "synthetic", encoding="utf-8"
+        )
         records[spec["provider"]] = {
             "records": [
                 {

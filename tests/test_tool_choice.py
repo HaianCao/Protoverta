@@ -47,7 +47,12 @@ def test_forced_function_all_six_routes_and_round_trip(source, target):
 
 @pytest.mark.parametrize(
     "choice",
-    [{"type": "function", "name": "absent"}, {"type": "function", "name": "add", "extra": True}, {"type": "web_search"}, {"type": "function", "name": ""}],
+    [
+        {"type": "function", "name": "absent"},
+        {"type": "function", "name": "add", "extra": True},
+        {"type": "web_search"},
+        {"type": "function", "name": ""},
+    ],
 )
 def test_invalid_or_undeclared_forced_tools_fail(choice):
     body = request(Protocol.RESPONSES)
@@ -70,7 +75,12 @@ def test_duplicate_definitions_and_required_without_tools_fail():
 def test_forced_namespace_resolves_exact_definition(target):
     body = request(Protocol.RESPONSES)
     body["tools"] = [
-        {"type": "namespace", "name": ns, "tools": [{"type": "function", "name": "add", "parameters": {"type": "object"}}]} for ns in ("one", "two")
+        {
+            "type": "namespace",
+            "name": ns,
+            "tools": [{"type": "function", "name": "add", "parameters": {"type": "object"}}],
+        }
+        for ns in ("one", "two")
     ]
     body["tool_choice"] = {"type": "function", "namespace": "two", "name": "add"}
     mapper = NamespaceMap()

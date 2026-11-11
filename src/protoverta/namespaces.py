@@ -10,13 +10,14 @@ import copy
 import hashlib
 import json
 import re
+from typing import Any
 
 from .core import ConversionError
 
 _PREFIX = "pv_ns_"
 
 
-def _name(value, label):
+def _name(value: object, label: str) -> str:
     if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", value):
         raise ConversionError(f"invalid {label}")
     return value
@@ -25,11 +26,12 @@ def _name(value, label):
 class NamespaceMap:
     """Flatten namespace definitions/history and restore Responses call items."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.aliases: dict[str, tuple[str, str]] = {}
         self.flat_names: set[str] = set()
 
-    def alias(self, namespace: str, name: str) -> str:
+    def alias(self, namespace: object, name: object) -> str:
+        """The flat alias for one namespaced function; both parts are validated."""
         pair = (_name(namespace, "namespace"), _name(name, "function name"))
         alias = _PREFIX + hashlib.sha256(json.dumps(pair, separators=(",", ":")).encode()).hexdigest()[:48]
         if alias in self.flat_names or (alias in self.aliases and self.aliases[alias] != pair):
@@ -37,7 +39,7 @@ class NamespaceMap:
         self.aliases[alias] = pair
         return alias
 
-    def prepare(self, body: dict) -> dict:
+    def prepare(self, body: dict[str, Any]) -> dict[str, Any]:
         result = copy.deepcopy(body)
         tools = result.get("tools", [])
         if not isinstance(tools, list):
@@ -51,9 +53,13 @@ class NamespaceMap:
         inputs = result.get("input")
         if isinstance(inputs, list):
             for item in inputs:
-                if isinstance(item, dict) and item.get("type") in ("function_call", "custom_tool_call") and item.get("namespace") is None:
+                if (
+                    isinstance(item, dict)
+                    and item.get("type") in ("function_call", "custom_tool_call")
+                    and item.get("namespace") is None
+                ):
                     self.flat_names.add(_name(item.get("name"), "historical function name"))
-        flattened = []
+        flattened: list[Any] = []
         seen: set[tuple[str, str]] = set()
         seen_namespaces: set[str] = set()
         for tool in tools:
@@ -73,7 +79,11 @@ class NamespaceMap:
             if not isinstance(children, list) or not children:
                 raise ConversionError("namespace must contain function tools")
             for child in children:
-                if not isinstance(child, dict) or child.get("type") != "function" or set(child) - {"type", "name", "description", "parameters", "strict"}:
+                if (
+                    not isinstance(child, dict)
+                    or child.get("type") != "function"
+                    or set(child) - {"type", "name", "description", "parameters", "strict"}
+                ):
                     raise ConversionError("namespace mapping supports only synchronous function tools")
                 if child.get("strict") not in (None, False):
                     raise ConversionError("strict namespaced functions are not portable")
@@ -106,13 +116,13 @@ class NamespaceMap:
             result["tool_choice"] = {"type": "function", "name": self.alias(*pair)}
         return result
 
-    def restore(self, body: dict) -> dict:
+    def restore(self, body: dict[str, Any]) -> dict[str, Any]:
         """Restore JSON output, SSE item events and terminal response snapshots."""
         if not self.aliases:
             return body
         result = copy.deepcopy(body)
 
-        def restore_item(item):
+        def restore_item(item: Any) -> None:
             if not isinstance(item, dict) or item.get("type") != "function_call":
                 return
             name = item.get("name")

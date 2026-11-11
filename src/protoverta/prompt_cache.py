@@ -1,16 +1,22 @@
 """Explicit end-of-system Anthropic cache breakpoint for certified Chat wire."""
 
+from __future__ import annotations
+
 import copy
+from typing import TYPE_CHECKING, Any
 
 from .core import Protocol
 from .errors import ConversionError
 
+if TYPE_CHECKING:
+    from .server import GatewayConfig
+
 
 class CacheCheckpoint:
-    def __init__(self):
-        self.hint = None
+    def __init__(self) -> None:
+        self.hint: dict[str, Any] | None = None
 
-    def prepare(self, body, source, config):
+    def prepare(self, body: dict[str, Any], source: Protocol, config: GatewayConfig) -> dict[str, Any]:
         if source == config.upstream_protocol:
             return body
         value = copy.deepcopy(body)
@@ -19,7 +25,9 @@ class CacheCheckpoint:
             for index, block in enumerate(system):
                 if isinstance(block, dict) and "cache_control" in block:
                     if index != len(system) - 1 or block.get("type") != "text":
-                        raise ConversionError("only an end-of-system text cache checkpoint is portable under this policy")
+                        raise ConversionError(
+                            "only an end-of-system text cache checkpoint is portable under this policy"
+                        )
                     hint = block.pop("cache_control")
                     if (
                         not isinstance(hint, dict)
@@ -30,21 +38,28 @@ class CacheCheckpoint:
                         raise ConversionError("unsupported cache checkpoint")
                     self.hint = hint
 
-        def has_hint(block):
+        def has_hint(block: Any) -> bool:
             if isinstance(block, list):
                 return any(has_hint(item) for item in block)
             return isinstance(block, dict) and ("cache_control" in block or has_hint(block.get("content")))
 
-        if has_hint(value.get("messages")) or has_hint(value.get("input")) or has_hint(value.get("tools")) or has_hint(value.get("system")):
+        if (
+            has_hint(value.get("messages"))
+            or has_hint(value.get("input"))
+            or has_hint(value.get("tools"))
+            or has_hint(value.get("system"))
+        ):
             raise ConversionError("this cache checkpoint has no certified portable location")
+        profiles = config.provider_profiles
         if self.hint is not None and (
             config.upstream_protocol != Protocol.CHAT
-            or not config.provider_profiles.supports_prompt_cache(config.upstream_base_url, config.upstream_protocol, body.get("model"))
+            or profiles is None
+            or not profiles.supports_prompt_cache(config.upstream_base_url, config.upstream_protocol, body.get("model"))
         ):
             raise ConversionError("no exact provider/model evidence for the requested cache contract")
         return value
 
-    def restore(self, outbound):
+    def restore(self, outbound: dict[str, Any]) -> dict[str, Any]:
         if self.hint is None:
             return outbound
         result = copy.deepcopy(outbound)

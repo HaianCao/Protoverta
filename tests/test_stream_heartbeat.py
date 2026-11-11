@@ -22,27 +22,43 @@ def wire(source, *, tool=False):
     encoder = StreamEncoder(source)
 
     def emit(deltas):
-        return b"".join(encode_sse(event.event, event.data, id=event.id) for delta in deltas for event in encoder.feed(delta))
+        return b"".join(
+            encode_sse(event.event, event.data, id=event.id) for delta in deltas for event in encoder.feed(delta)
+        )
 
     first = emit([Delta("start", model="fixture", input_tokens=2, output_tokens=0), Delta("text", text="seed")])
     middle = b""
     tail = []
     if tool:
-        middle = emit([Delta("tool_start", index=0, name="work", call_id="call-1"), Delta("tool_delta", index=0, text='{"x":')])
+        middle = emit(
+            [Delta("tool_start", index=0, name="work", call_id="call-1"), Delta("tool_delta", index=0, text='{"x":')]
+        )
         tail = [Delta("tool_delta", index=0, text="1}"), Delta("tool_end", index=0)]
     last = emit([*tail, Delta("finish", reason="tool_calls" if tool else "stop", input_tokens=2, output_tokens=2)])
     return first, middle, last
 
 
 @contextmanager
-def slow_upstream(source, *, tool=False, terminal_before_pause=False, invalid_tail=False, unsupported_first=False, detect_disconnect=False):
+def slow_upstream(
+    source,
+    *,
+    tool=False,
+    terminal_before_pause=False,
+    invalid_tail=False,
+    unsupported_first=False,
+    detect_disconnect=False,
+):
     release, paused, closed = threading.Event(), threading.Event(), threading.Event()
     first, middle, last = wire(source, tool=tool)
     if unsupported_first:
         first = encode_sse(
             "message",
             json.dumps(
-                {"object": "chat.completion.chunk", "model": "fixture", "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}]}
+                {
+                    "object": "chat.completion.chunk",
+                    "model": "fixture",
+                    "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
+                }
             ),
         )
         last = encode_sse(
@@ -51,7 +67,9 @@ def slow_upstream(source, *, tool=False, terminal_before_pause=False, invalid_ta
                 {
                     "object": "chat.completion.chunk",
                     "model": "fixture",
-                    "choices": [{"index": 0, "delta": {"reasoning_content": "synthetic-private"}, "finish_reason": None}],
+                    "choices": [
+                        {"index": 0, "delta": {"reasoning_content": "synthetic-private"}, "finish_reason": None}
+                    ],
                 }
             ),
         )
@@ -75,7 +93,13 @@ def slow_upstream(source, *, tool=False, terminal_before_pause=False, invalid_ta
                     return
                 if not release.wait(3):
                     return
-                self.wfile.write(b'event: invalid\ndata: {"invalid":true}\n\n' if invalid_tail else b"" if terminal_before_pause else last)
+                self.wfile.write(
+                    b'event: invalid\ndata: {"invalid":true}\n\n'
+                    if invalid_tail
+                    else b""
+                    if terminal_before_pause
+                    else last
+                )
                 self.wfile.flush()
             except (ConnectionError, OSError):
                 pass
@@ -107,10 +131,20 @@ def connect(origin, target):
         payload.update(messages=[{"role": "user", "content": "hi"}], max_completion_tokens=32)
     from protoverta import convert_request
 
-    definition = {"model": "fixture", "input": "hi", "max_output_tokens": 32, "tools": [{"type": "function", "name": "work", "parameters": {"type": "object"}}]}
+    definition = {
+        "model": "fixture",
+        "input": "hi",
+        "max_output_tokens": 32,
+        "tools": [{"type": "function", "name": "work", "parameters": {"type": "object"}}],
+    }
     payload["tools"] = convert_request(definition, "responses", target)["tools"]
     path = {"chat": "chat/completions", "messages": "messages", "responses": "responses"}[target]
-    connection.request("POST", "/v1/" + path, json.dumps(payload), {"Authorization": "Bearer local", "Content-Type": "application/json"})
+    connection.request(
+        "POST",
+        "/v1/" + path,
+        json.dumps(payload),
+        {"Authorization": "Bearer local", "Content-Type": "application/json"},
+    )
     connection.fixture_socket = connection.sock  # HTTP/1.0 transfers ownership to response.fp.
     response = connection.getresponse()
     assert response.status == 200
@@ -133,7 +167,16 @@ def test_translated_stream_stays_readable_during_upstream_silence(monkeypatch, s
     # Test-only interval; production is automatic at 15 seconds after payload.
     monkeypatch.setattr(gateway, "STREAM_HEARTBEAT_INTERVAL", 0.03, raising=False)
     with slow_upstream(source) as (base, release, paused, closed, _):
-        config = GatewayConfig(source, base, "synthetic", "local", timeout=1, total_timeout=3, progress_timeout=2, messages_usage_policy="deferred")
+        config = GatewayConfig(
+            source,
+            base,
+            "synthetic",
+            "local",
+            timeout=1,
+            total_timeout=3,
+            progress_timeout=2,
+            messages_usage_policy="deferred",
+        )
         with gateway_session(config) as origin:
             connection, response = connect(origin, target)
             try:
@@ -211,7 +254,9 @@ def test_heartbeats_do_not_renew_deadlines_or_produce_completion(monkeypatch, de
 def test_keepalive_during_arguments_and_unverified_eof(monkeypatch, mode):
     monkeypatch.setattr(gateway, "STREAM_HEARTBEAT_INTERVAL", 0.03, raising=False)
     with (
-        slow_upstream("chat", tool=mode == "tool", terminal_before_pause=mode != "tool", invalid_tail=mode == "bad_terminal") as (base, release, _, _, _),
+        slow_upstream(
+            "chat", tool=mode == "tool", terminal_before_pause=mode != "tool", invalid_tail=mode == "bad_terminal"
+        ) as (base, release, _, _, _),
         gateway_session(GatewayConfig("chat", base, "synthetic", "local", messages_usage_policy="deferred")) as origin,
     ):
         connection, response = connect(origin, "messages")
@@ -246,7 +291,12 @@ def test_first_unsupported_block_still_returns_http_422(monkeypatch):
         timer = threading.Timer(0.15, release.set)
         timer.start()
         try:
-            connection.request("POST", "/v1/responses", json.dumps({"model": "fixture", "input": "hi", "stream": True}), {"Authorization": "Bearer local"})
+            connection.request(
+                "POST",
+                "/v1/responses",
+                json.dumps({"model": "fixture", "input": "hi", "stream": True}),
+                {"Authorization": "Bearer local"},
+            )
             response = connection.getresponse()
             assert response.status == 422
             assert response.getheader("x-should-retry") == "false"

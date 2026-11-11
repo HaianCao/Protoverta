@@ -137,7 +137,13 @@ def test_mid_turn_schema_conflict_and_incomplete_search_output_rejected():
     # 1. Mid-turn schema change in tool_search_output for an already declared namespace child rejects
     conflict = copy.deepcopy(base)
     conflict["input"] = [
-        {"type": "tool_search_call", "execution": "client", "status": "completed", "call_id": "s1", "arguments": {"query": "fn"}},
+        {
+            "type": "tool_search_call",
+            "execution": "client",
+            "status": "completed",
+            "call_id": "s1",
+            "arguments": {"query": "fn"},
+        },
         {
             "type": "tool_search_output",
             "execution": "client",
@@ -164,7 +170,13 @@ def test_mid_turn_schema_conflict_and_incomplete_search_output_rejected():
     # 2. Incomplete tool_search_output status rejects
     incomplete = copy.deepcopy(base)
     incomplete["input"] = [
-        {"type": "tool_search_call", "execution": "client", "status": "completed", "call_id": "s1", "arguments": {"query": "fn"}},
+        {
+            "type": "tool_search_call",
+            "execution": "client",
+            "status": "completed",
+            "call_id": "s1",
+            "arguments": {"query": "fn"},
+        },
         {"type": "tool_search_output", "execution": "client", "status": "incomplete", "call_id": "s1", "tools": []},
     ]
     with pytest.raises(ConversionError, match="only completed explicit client tool search is supported"):
@@ -252,7 +264,11 @@ def test_streamed_client_tool_search_holds_until_valid_json_object_and_rejects_t
     events = [json.loads(ev.data) for ev in SSEParser().feed(out)]
     types = [ev["type"] for ev in events]
     assert "response.function_call_arguments.delta" not in types
-    added = next(ev["item"] for ev in events if ev["type"] == "response.output_item.added" and ev["item"].get("type") == "tool_search_call")
+    added = next(
+        ev["item"]
+        for ev in events
+        if ev["type"] == "response.output_item.added" and ev["item"].get("type") == "tool_search_call"
+    )
     assert added == {
         "id": added["id"],
         "type": "tool_search_call",

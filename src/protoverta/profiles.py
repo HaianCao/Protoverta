@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import copy
+from typing import Any
 
 from .core import ConversionError, Protocol
 from .formats import decode_output_format
 
 
-def _blank_assistant_message(item: dict) -> bool:
+def _blank_assistant_message(item: dict[str, Any]) -> bool:
     """Recognize only validated, whitespace-only Codex text placeholders."""
     if (
         item.get("type", "message") != "message"
@@ -32,7 +33,7 @@ def _blank_assistant_message(item: dict) -> bool:
     )
 
 
-def prepare_claude_request(body: dict) -> dict:
+def prepare_claude_request(body: dict[str, Any]) -> dict[str, Any]:
     """Opt-in text/function policy, never a silent thinking/feature downgrade.
 
     Cache hints and client telemetry are deliberately not forwarded across
@@ -47,14 +48,19 @@ def prepare_claude_request(body: dict) -> dict:
     if "thinking" in result and result.pop("thinking") != {"type": "disabled"}:
         raise ConversionError("Claude cross-protocol gateway requires thinking disabled")
 
-    def strip_cache(value):
+    def strip_cache(value: Any) -> None:
         if not isinstance(value, dict) or "cache_control" not in value:
             return
         hint = value.pop("cache_control")
-        if not isinstance(hint, dict) or hint.get("type") != "ephemeral" or set(hint) - {"type", "ttl"} or hint.get("ttl", "5m") not in ("5m", "1h"):
+        if (
+            not isinstance(hint, dict)
+            or hint.get("type") != "ephemeral"
+            or set(hint) - {"type", "ttl"}
+            or hint.get("ttl", "5m") not in ("5m", "1h")
+        ):
             raise ConversionError("unsupported Claude cache hint")
 
-    def content(blocks):
+    def content(blocks: Any) -> None:
         if not isinstance(blocks, list):
             return
         for block in blocks:
@@ -84,7 +90,13 @@ def prepare_claude_request(body: dict) -> dict:
     return result
 
 
-def prepare_codex_request(body: dict, target: Protocol, *, default_max_output_tokens: int | None = None, messages_mid_system: bool = False) -> dict:
+def prepare_codex_request(
+    body: dict[str, Any],
+    target: Protocol,
+    *,
+    default_max_output_tokens: int | None = None,
+    messages_mid_system: bool = False,
+) -> dict[str, Any]:
     """Adapt Codex's stateless text/function subset under an opt-in policy.
 
     Cache hints and client telemetry have no cross-provider equivalent. Hidden
@@ -98,7 +110,7 @@ def prepare_codex_request(body: dict, target: Protocol, *, default_max_output_to
         # function call and its result. Chat cannot represent this ordering.
         # This explicit client profile omits only those validated placeholders;
         # meaningful text, annotations and unknown features still fail strictly.
-        inputs = []
+        inputs: list[Any] = []
         after_call = False
         for item in result["input"]:
             if isinstance(item, dict):
@@ -119,7 +131,9 @@ def prepare_codex_request(body: dict, target: Protocol, *, default_max_output_to
             raise ConversionError("Codex prompt_cache_key must be a string")
         result.pop("prompt_cache_key")
     include = result.pop("include", [])
-    if not isinstance(include, list) or any(value not in ("reasoning.encrypted_content", "message.output_text.logprobs") for value in include):
+    if not isinstance(include, list) or any(
+        value not in ("reasoning.encrypted_content", "message.output_text.logprobs") for value in include
+    ):
         raise ConversionError("Codex profile only permits the encrypted reasoning include hint")
     if "message.output_text.logprobs" in include:
         result["include"] = ["message.output_text.logprobs"]
@@ -144,15 +158,15 @@ def prepare_codex_request(body: dict, target: Protocol, *, default_max_output_to
     if target == Protocol.MESSAGES:
         if "max_output_tokens" not in result and default_max_output_tokens is not None:
             result["max_output_tokens"] = default_max_output_tokens
-        inputs = result.get("input")
-        if isinstance(inputs, str):
-            inputs = [{"role": "user", "content": inputs}]
-            result["input"] = inputs
-        if isinstance(inputs, list):
+        entries = result.get("input")
+        if isinstance(entries, str):
+            entries = [{"role": "user", "content": entries}]
+            result["input"] = entries
+        if isinstance(entries, list):
             if "instructions" in result:
-                inputs.insert(0, {"role": "system", "content": result.pop("instructions")})
+                entries.insert(0, {"role": "system", "content": result.pop("instructions")})
             conversation_started = False
-            for item in inputs:
+            for item in entries:
                 if not isinstance(item, dict):
                     continue  # The strict decoder reports invalid items.
                 if item.get("role") in ("system", "developer"):

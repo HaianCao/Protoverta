@@ -16,7 +16,9 @@ from protoverta.streaming import Delta
 @pytest.mark.parametrize("source", ["chat", "messages", "responses"])
 @pytest.mark.parametrize("upstream_protocol", ["chat", "messages", "responses"])
 def test_route_doctor_checks_real_local_gateway_all_protocol_pairs(source, upstream_protocol):
-    config = GatewayConfig(upstream_protocol, "https://example.invalid/v1", "fixture", "local", messages_usage_policy="deferred")
+    config = GatewayConfig(
+        upstream_protocol, "https://example.invalid/v1", "fixture", "local", messages_usage_policy="deferred"
+    )
 
     def upstream(request, timeout):
         body = convert_request(json.loads(request.data), upstream_protocol, "chat")
@@ -26,7 +28,9 @@ def test_route_doctor_checks_real_local_gateway_all_protocol_pairs(source, upstr
             message = {
                 "role": "assistant",
                 "content": None,
-                "tool_calls": [{"id": "call_fixture", "type": "function", "function": {"name": "fixture_nonce", "arguments": "{}"}}],
+                "tool_calls": [
+                    {"id": "call_fixture", "type": "function", "function": {"name": "fixture_nonce", "arguments": "{}"}}
+                ],
             }
             finish = "tool_calls"
         else:
@@ -43,8 +47,14 @@ def test_route_doctor_checks_real_local_gateway_all_protocol_pairs(source, upstr
             else:
                 deltas += [Delta("text", index=0, text=nonce)]
             deltas += [Delta("finish", reason=finish, input_tokens=1, output_tokens=1)]
-            return io.BytesIO(b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta)))
-        result = {"model": "m", "choices": [{"message": message, "finish_reason": finish}], "usage": {"prompt_tokens": 1, "completion_tokens": 1}}
+            return io.BytesIO(
+                b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta))
+            )
+        result = {
+            "model": "m",
+            "choices": [{"message": message, "finish_reason": finish}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+        }
         return io.BytesIO(json.dumps(convert_response(result, "chat", upstream_protocol)).encode())
 
     report = check_route(config, "m", source, upstream_open=upstream)
@@ -84,7 +94,9 @@ def test_truncated_outputs_never_certify_success(source, streaming):
                 Delta("text", index=0, text=nonce),
                 Delta("finish", reason="length", input_tokens=1, output_tokens=1),
             ]
-            return io.BytesIO(b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta)))
+            return io.BytesIO(
+                b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta))
+            )
         return io.BytesIO(
             json.dumps(
                 {
@@ -117,13 +129,22 @@ def test_doctor_obeys_public_reasoning_policy_without_certifying_reasoning(sourc
                 Delta("text", index=0, text=nonce),
                 Delta("finish", reason="stop", input_tokens=1, output_tokens=1),
             ]
-            return io.BytesIO(b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta)))
+            return io.BytesIO(
+                b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta))
+            )
         return io.BytesIO(
             json.dumps(
                 {
                     "model": "m",
                     "choices": [
-                        {"message": {"role": "assistant", "content": nonce, "reasoning_content": "synthetic public reasoning"}, "finish_reason": "stop"}
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": nonce,
+                                "reasoning_content": "synthetic public reasoning",
+                            },
+                            "finish_reason": "stop",
+                        }
                     ],
                 }
             ).encode()
@@ -147,7 +168,12 @@ def test_public_reasoning_doctor_still_rejects_opaque_reasoning():
                     "status": "completed",
                     "output": [
                         {"id": "rs_fixture", "type": "reasoning", "summary": [], "encrypted_content": "opaque-fixture"},
-                        {"type": "message", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": nonce}]},
+                        {
+                            "type": "message",
+                            "role": "assistant",
+                            "status": "completed",
+                            "content": [{"type": "output_text", "text": nonce}],
+                        },
                     ],
                 }
             ).encode()

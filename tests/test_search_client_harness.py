@@ -38,7 +38,9 @@ def test_codex_fixture_settings_and_search_policy_reach_client(harness, monkeypa
         return {"features.multi_agent": False, "model_reasoning_summary": "none", "web_search": "disabled"}
 
     monkeypatch.setattr(smoke, "codex_settings", settings)
-    config = GatewayConfig("chat", "http://127.0.0.1:1234/v1", "fake-upstream-key", "local", client_tool_search="function")
+    config = GatewayConfig(
+        "chat", "http://127.0.0.1:1234/v1", "fake-upstream-key", "local", client_tool_search="function"
+    )
     smoke.run_client(
         "codex",
         "codex.exe",
@@ -60,7 +62,12 @@ def test_codex_fixture_settings_and_search_policy_reach_client(harness, monkeypa
     if not adapter:
         assert "features.multi_agent=false" in args
     assert "features.daemon_auto_start=false" in args
-    for setting in ("features.plugins=false", "features.apps=false", "features.remote_plugin=false", "check_for_update_on_startup=false"):
+    for setting in (
+        "features.plugins=false",
+        "features.apps=false",
+        "features.remote_plugin=false",
+        "check_for_update_on_startup=false",
+    ):
         assert setting in args
     assert 'model_catalog_json="fixture-models.json"' in args
     if adapter:
@@ -94,10 +101,21 @@ def test_search_fixture_uses_only_advertised_query_schema(harness):
 def test_native_loaded_namespace_is_read_from_search_history(harness):
     body = {
         "input": [
-            {"type": "tool_search_output", "tools": [{"type": "namespace", "name": "mcp__fixture", "tools": [{"type": "function", "name": "fixture_lookup"}]}]}
+            {
+                "type": "tool_search_output",
+                "tools": [
+                    {
+                        "type": "namespace",
+                        "name": "mcp__fixture",
+                        "tools": [{"type": "function", "name": "fixture_lookup"}],
+                    }
+                ],
+            }
         ]
     }
-    assert list(harness.functions(body, Protocol.RESPONSES)) == [{"type": "function", "name": "fixture_lookup", "namespace": "mcp__fixture"}]
+    assert list(harness.functions(body, Protocol.RESPONSES)) == [
+        {"type": "function", "name": "fixture_lookup", "namespace": "mcp__fixture"}
+    ]
 
 
 @pytest.mark.parametrize("error", [None, {"message": "fixture denied"}])
@@ -153,7 +171,11 @@ def test_mcp_fixture_can_require_real_environment_expansion(harness, monkeypatch
     else:
         monkeypatch.delenv("PROTOVERTA_MCP_FIXTURE_TOKEN", raising=False)
     output = io.StringIO()
-    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"id": 1, "method": "tools/call", "params": {"name": harness.LOOKUP}}) + "\n"))
+    monkeypatch.setattr(
+        sys,
+        "stdin",
+        io.StringIO(json.dumps({"id": 1, "method": "tools/call", "params": {"name": harness.LOOKUP}}) + "\n"),
+    )
     monkeypatch.setattr(sys, "stdout", output)
     harness.serve_mcp(verify_env=True)
     result = json.loads(output.getvalue())["result"]

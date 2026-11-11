@@ -51,7 +51,9 @@ ERROR_CLASSES: tuple[ErrorClass, ...] = (
 
 # Transient failures, plus errors whose cause is not known: the original
 # request ("many other red errors should be retried") is kept for those.
-DEFAULT_RETRY_CLASSES: frozenset[ErrorClass] = frozenset({"rate_limit", "overloaded", "server", "network", "stream_interrupted", "backend_mismatch", "unknown"})
+DEFAULT_RETRY_CLASSES: frozenset[ErrorClass] = frozenset(
+    {"rate_limit", "overloaded", "server", "network", "stream_interrupted", "backend_mismatch", "unknown"}
+)
 
 _TYPE_CLASSES: dict[str, ErrorClass] = {
     "rate_limit_error": "rate_limit",
@@ -79,11 +81,26 @@ _CONTENT_POLICY = re.compile(r"content (filter|policy|management)|safety system|
 # Ordered: the first matching pattern wins. Patterns are lower-case.
 _MESSAGE_RULES: tuple[tuple[str, ErrorClass], ...] = (
     (r"different azure openai resource|created under a different|item with id .* not found", "backend_mismatch"),
-    (r"unauthori[sz]ed client|invalid api key|incorrect api key|invalid x-api-key|api key (is )?(invalid|expired|revoked)", "auth"),
-    (r"insufficient (credits|quota|balance|funds)|payment required|out of credits|exceeded your current quota|billing", "billing"),
-    (r"context (length|window)|maximum context|too many tokens|prompt is too long|input is too long|max_tokens .* exceed", "context_length"),
-    (r"model .*(not found|does not exist|not available|is not supported)|not a valid model|unknown model|no such model|invalid model", "model_not_found"),
-    (r"无可用渠道|no available (channel|provider|endpoint)|temporarily unavailable|overloaded|capacity|try again later", "overloaded"),
+    (
+        r"unauthori[sz]ed client|invalid api key|incorrect api key|invalid x-api-key|api key (is )?(invalid|expired|revoked)",
+        "auth",
+    ),
+    (
+        r"insufficient (credits|quota|balance|funds)|payment required|out of credits|exceeded your current quota|billing",
+        "billing",
+    ),
+    (
+        r"context (length|window)|maximum context|too many tokens|prompt is too long|input is too long|max_tokens .* exceed",
+        "context_length",
+    ),
+    (
+        r"model .*(not found|does not exist|not available|is not supported)|not a valid model|unknown model|no such model|invalid model",
+        "model_not_found",
+    ),
+    (
+        r"无可用渠道|no available (channel|provider|endpoint)|temporarily unavailable|overloaded|capacity|try again later",
+        "overloaded",
+    ),
     (r"rate.?limit|too many requests", "rate_limit"),
     (_CONTENT_POLICY.pattern, "content_policy"),
     (
@@ -91,7 +108,9 @@ _MESSAGE_RULES: tuple[tuple[str, ErrorClass], ...] = (
         "invalid_request",
     ),
 )
-_MESSAGE_CLASSES: tuple[tuple[re.Pattern[str], ErrorClass], ...] = tuple((re.compile(pattern), kind) for pattern, kind in _MESSAGE_RULES)
+_MESSAGE_CLASSES: tuple[tuple[re.Pattern[str], ErrorClass], ...] = tuple(
+    (re.compile(pattern), kind) for pattern, kind in _MESSAGE_RULES
+)
 
 _STATUS_CLASSES: dict[int, ErrorClass] = {
     401: "auth",
@@ -136,7 +155,9 @@ def error_detail(body: object) -> tuple[str, str]:
     return kind.lower(), message[:2000] if isinstance(message, str) else ""
 
 
-def classify(status: int | None, body: object = None, *, transport: bool = False, stream_before_output: bool = False) -> ErrorClass:
+def classify(
+    status: int | None, body: object = None, *, transport: bool = False, stream_before_output: bool = False
+) -> ErrorClass:
     """Classify one failed attempt.
 
     ``transport`` marks a connection failure (no HTTP answer); ``stream_before_output``
@@ -180,7 +201,12 @@ def _bounded_int(value: object, name: str, low: int, high: int) -> int:
 
 
 def _bounded_number(value: object, name: str, low: float, high: float) -> float:
-    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value) or not low <= value <= high:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int | float)
+        or not math.isfinite(value)
+        or not low <= value <= high
+    ):
         raise ValueError(f"{name} must be a number from {low} to {high}")
     return float(value)
 
@@ -223,12 +249,23 @@ class RetryPolicy:
         _bounded_number(self.max_total_seconds, "max_total_seconds", 0, 86400)
         _bounded_number(self.give_up_window_seconds, "give_up_window_seconds", 0, 3600)
         object.__setattr__(self, "retry_classes", _classes(self.retry_classes, "retry_classes"))
-        object.__setattr__(self, "skip_status", frozenset(_bounded_int(status, "skip_status", 400, 599) for status in self.skip_status))
+        object.__setattr__(
+            self, "skip_status", frozenset(_bounded_int(status, "skip_status", 400, 599) for status in self.skip_status)
+        )
 
     @classmethod
     def from_mapping(cls, raw: Mapping[str, object]) -> RetryPolicy:
         """Build from a ``[retry]`` config table; unknown keys are rejected."""
-        allowed = {"enabled", "max_retries", "delay_seconds", "jitter", "max_total_seconds", "retry_classes", "no_retry_classes", "skip_status"}
+        allowed = {
+            "enabled",
+            "max_retries",
+            "delay_seconds",
+            "jitter",
+            "max_total_seconds",
+            "retry_classes",
+            "no_retry_classes",
+            "skip_status",
+        }
         unknown = set(raw) - allowed
         if unknown:
             raise ValueError(f"[retry] has unknown settings: {', '.join(sorted(unknown))}")
@@ -252,7 +289,9 @@ class RetryPolicy:
             skip_status=frozenset(statuses),
         )
 
-    def retryable(self, error_class: ErrorClass, status: int | None = None, headers: Mapping[str, str] | None = None) -> bool:
+    def retryable(
+        self, error_class: ErrorClass, status: int | None = None, headers: Mapping[str, str] | None = None
+    ) -> bool:
         if not self.enabled or self.max_retries == 0 or (status is not None and status in self.skip_status):
             return False
         hint = (headers.get("x-should-retry") or "").strip().lower() if headers is not None else ""

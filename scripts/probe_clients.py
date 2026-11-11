@@ -30,7 +30,18 @@ from protoverta.server import GatewayConfig
 
 
 def _probe_codex_goal(
-    upstream, base_url, key, model, adapter_source, env, directory, timeout, *, nonce=None, reasoning="openrouter_disabled", diagnostics=None
+    upstream,
+    base_url,
+    key,
+    model,
+    adapter_source,
+    env,
+    directory,
+    timeout,
+    *,
+    nonce=None,
+    reasoning="openrouter_disabled",
+    diagnostics=None,
 ):
     """Observe the real transport; use a read-only tool, never bypass shell policy."""
     import sys
@@ -45,13 +56,19 @@ def _probe_codex_goal(
         "smoke",
         "Smoke",
         base_url,
-        protocol={Protocol.CHAT: "chat_completions", Protocol.MESSAGES: "anthropic_messages", Protocol.RESPONSES: "responses"}[upstream],
+        protocol={
+            Protocol.CHAT: "chat_completions",
+            Protocol.MESSAGES: "anthropic_messages",
+            Protocol.RESPONSES: "responses",
+        }[upstream],
         execution_mode="gateway",
         auth_secret_ref="smoke-main",
         upstream_reasoning=reasoning,
     )
     config = Config(
-        providers={"smoke": provider}, secrets={"smoke-main": SecretReference("smoke-main", env_var="SMOKE_TOKEN")}, path=Path(directory) / "adapter.toml"
+        providers={"smoke": provider},
+        secrets={"smoke-main": SecretReference("smoke-main", env_var="SMOKE_TOKEN")},
+        path=Path(directory) / "adapter.toml",
     )
     env = dict(env, SMOKE_TOKEN=key)
     completed = None
@@ -66,7 +83,9 @@ def _probe_codex_goal(
         requests += 1
         body = json.loads(request.data)
         if upstream == Protocol.CHAT:
-            calls = {call["id"]: call["function"]["name"] for item in body["messages"] for call in item.get("tool_calls", [])}
+            calls = {
+                call["id"]: call["function"]["name"] for item in body["messages"] for call in item.get("tool_calls", [])
+            }
             results = [item["tool_call_id"] for item in body["messages"] if item.get("role") == "tool"]
         elif upstream == Protocol.RESPONSES:
             calls = {item["call_id"]: item["name"] for item in body["input"] if item.get("type") == "function_call"}
@@ -86,15 +105,25 @@ def _probe_codex_goal(
             return _REAL_SUBPROCESS_RUN(args, **kwargs)
         # All retry overrides belong to Codex's root scope, not exec's scope.
         at = args.index("exec")
-        args[at:at] = ["-c", "model_providers.smoke.request_max_retries=0", "-c", "model_providers.smoke.stream_max_retries=0"]
-        kwargs.update(cwd=directory, capture_output=True, text=True, encoding="utf-8", errors="replace", input="", timeout=timeout)
+        args[at:at] = [
+            "-c",
+            "model_providers.smoke.request_max_retries=0",
+            "-c",
+            "model_providers.smoke.stream_max_retries=0",
+        ]
+        kwargs.update(
+            cwd=directory, capture_output=True, text=True, encoding="utf-8", errors="replace", input="", timeout=timeout
+        )
         completed = run_process(args, **kwargs)
         return completed
 
     with (
         diagnostics.capture(observe_transport=False) if diagnostics is not None else nullcontext(),
         patch.dict(os.environ, env, clear=True),
-        patch("protoverta.server.make_handler", side_effect=lambda config, **options: real_handler(config, upstream_open=observed_open, **options)),
+        patch(
+            "protoverta.server.make_handler",
+            side_effect=lambda config, **options: real_handler(config, upstream_open=observed_open, **options),
+        ),
         patch("codexapter.launcher.subprocess.run", side_effect=run),
     ):
         marker = nonce or "PROTOVERTA_SMOKE_OK"
@@ -121,7 +150,9 @@ def _completed_answer(client: str, stdout: str) -> tuple[str, bool]:
     """Require final assistant output, not just a nonce echoed by a tool event."""
     if client == "claude":
         result = json.loads(stdout)
-        return str(result.get("result", "")), not result.get("is_error", True) and not result.get("permission_denials") and result.get("num_turns", 0) >= 2
+        return str(result.get("result", "")), not result.get("is_error", True) and not result.get(
+            "permission_denials"
+        ) and result.get("num_turns", 0) >= 2
     answer = []
     executed_tool = False
     for line in stdout.splitlines():
@@ -155,13 +186,23 @@ def probe(
     if not executable:
         raise ValueError(f"{client} is not on PATH")
     # "auto" is a launcher policy; validate the gateway with its explicit base.
-    config = GatewayConfig(upstream, base_url, key, "isolated-probe", upstream_reasoning="provider_default" if reasoning == "auto" else reasoning)
+    config = GatewayConfig(
+        upstream,
+        base_url,
+        key,
+        "isolated-probe",
+        upstream_reasoning="provider_default" if reasoning == "auto" else reasoning,
+    )
     # run_client receives the prefix before /v1; validate rather than guess it.
     if not base_url.endswith("/v1"):
         raise ValueError("This probe requires an explicit /v1 API prefix")
     with tempfile.TemporaryDirectory(prefix="protoverta-client-probe-") as directory:
         root = Path(directory)
-        env = {name: value for name, value in os.environ.items() if name.upper() in {"PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP"}}
+        env = {
+            name: value
+            for name, value in os.environ.items()
+            if name.upper() in {"PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP"}
+        }
         env.update(
             {
                 "HOME": directory,
@@ -191,7 +232,16 @@ def probe(
         trace_file = root / "trace.json" if diagnostics else None
         if tool_loop and client == "codex":
             result, observed_tool, requests = _probe_codex_goal(
-                upstream, base_url, key, model, adapter_source, env, directory, timeout, reasoning=reasoning, diagnostics=diagnostic
+                upstream,
+                base_url,
+                key,
+                model,
+                adapter_source,
+                env,
+                directory,
+                timeout,
+                reasoning=reasoning,
+                diagnostics=diagnostic,
             )
         else:
             result = run_client(
@@ -223,12 +273,23 @@ def probe(
         except (ValueError, TypeError):
             answer, executed_tool = "", False
         executed_tool = executed_tool or observed_tool
-        passed = result.returncode == 0 and expected in answer and (not tool_loop or executed_tool) and (not diagnostics or not report.get("failures"))
+        passed = (
+            result.returncode == 0
+            and expected in answer
+            and (not tool_loop or executed_tool)
+            and (not diagnostics or not report.get("failures"))
+        )
         error = ""
         if not passed:
             if diagnostics:
                 failures = report.get("failures", [])
-                error = "client_timeout" if result.returncode == 124 else failures[0]["category"] if failures else "client_or_verification_failed"
+                error = (
+                    "client_timeout"
+                    if result.returncode == 124
+                    else failures[0]["category"]
+                    if failures
+                    else "client_or_verification_failed"
+                )
             else:
                 error = (result.stderr + result.stdout).replace(key, "[REDACTED]")[-2500:]
         output = {
@@ -283,7 +344,11 @@ def probe_resume(
     nonce = "RESUME_NONCE_" + secrets.token_hex(12)
     with tempfile.TemporaryDirectory(prefix="protoverta-live-resume-") as directory:
         root = Path(directory)
-        env = {name: value for name, value in os.environ.items() if name.upper() in {"PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP"}}
+        env = {
+            name: value
+            for name, value in os.environ.items()
+            if name.upper() in {"PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP"}
+        }
         env.update(
             {
                 "HOME": directory,
@@ -300,7 +365,11 @@ def probe_resume(
         for name in ("roaming", "local", "codex", "claude"):
             (root / name).mkdir()
         config = GatewayConfig(
-            source, base_url, key, "isolated-probe", upstream_reasoning="provider_default" if source_reasoning == "auto" else source_reasoning
+            source,
+            base_url,
+            key,
+            "isolated-probe",
+            upstream_reasoning="provider_default" if source_reasoning == "auto" else source_reasoning,
         )
         fixture = root / "fixture.txt"
         if tool_loop and client == "claude":
@@ -329,7 +398,16 @@ def probe_resume(
                 tool_verified = False
         elif tool_loop:
             first, tool_verified, _ = _probe_codex_goal(
-                source, base_url, key, model, adapter_source, env, directory, timeout, nonce=nonce, reasoning=source_reasoning
+                source,
+                base_url,
+                key,
+                model,
+                adapter_source,
+                env,
+                directory,
+                timeout,
+                nonce=nonce,
+                reasoning=source_reasoning,
             )
         else:
             first = run_client(
@@ -351,7 +429,12 @@ def probe_resume(
             )
             tool_verified = False
         if first.returncode != 0 or (tool_loop and not tool_verified):
-            return {"passed": False, "client": client, "stage": "initial", "error": redact(first.stderr + first.stdout)[-2000:]}
+            return {
+                "passed": False,
+                "client": client,
+                "stage": "initial",
+                "error": redact(first.stderr + first.stdout)[-2000:],
+            }
         identifier = session_id(client, first.stdout)
         config = GatewayConfig(
             target,
@@ -418,7 +501,9 @@ def probe_resume(
             )
             try:
                 third_answer, _ = _completed_answer(client, third.stdout)
-                passed = third.returncode == 0 and session_id(client, third.stdout) == identifier and nonce in third_answer
+                passed = (
+                    third.returncode == 0 and session_id(client, third.stdout) == identifier and nonce in third_answer
+                )
             except (ValueError, KeyError, StopIteration):
                 passed = False
             observations = json.loads(trace.read_text(encoding="utf-8")) if trace.is_file() else []
@@ -454,21 +539,46 @@ def main() -> int:
     parser.add_argument("--key-env", required=True)
     parser.add_argument("--base-url", default="https://openrouter.ai/api/v1")
     parser.add_argument("--adapter-source", type=Path, required=True)
-    parser.add_argument("--tool-loop", action="store_true", help="Verify a real tool round trip: Claude reads a nonce file; Codex queries get_goal")
     parser.add_argument(
-        "--diagnostics", action="store_true", help="Fresh probes: bounded stage/transport shapes and fixed failure categories, without client output"
+        "--tool-loop",
+        action="store_true",
+        help="Verify a real tool round trip: Claude reads a nonce file; Codex queries get_goal",
     )
-    parser.add_argument("--max-upstream-requests", type=int, help="Diagnostics only: stop locally before another upstream request exceeds this budget")
+    parser.add_argument(
+        "--diagnostics",
+        action="store_true",
+        help="Fresh probes: bounded stage/transport shapes and fixed failure categories, without client output",
+    )
+    parser.add_argument(
+        "--max-upstream-requests",
+        type=int,
+        help="Diagnostics only: stop locally before another upstream request exceeds this budget",
+    )
     parser.add_argument("--timeout", type=int, default=120, help="Maximum client runtime in seconds")
-    parser.add_argument("--resume-target", type=Protocol, choices=list(Protocol), help="Run two persistent turns, resuming against this protocol")
+    parser.add_argument(
+        "--resume-target",
+        type=Protocol,
+        choices=list(Protocol),
+        help="Run two persistent turns, resuming against this protocol",
+    )
     parser.add_argument("--target-base-url", help="Resume on a different real API prefix")
     parser.add_argument("--target-model", help="Resume using a different real model")
     parser.add_argument("--target-key-env", help="Environment variable for the resume provider's key")
-    parser.add_argument("--source-reasoning", choices=["auto", "provider_default", "disabled", "openrouter_disabled"], default="openrouter_disabled")
-    parser.add_argument("--target-reasoning", choices=["auto", "provider_default", "disabled", "openrouter_disabled"])
-    parser.add_argument("--target-public-reasoning", action="store_true", help="Opt in to unsigned Chat reasoning_content for the Codex resume target")
     parser.add_argument(
-        "--verify-replay", action="store_true", help="Resume a third turn on the target and observe whether public reasoning history is replayed"
+        "--source-reasoning",
+        choices=["auto", "provider_default", "disabled", "openrouter_disabled"],
+        default="openrouter_disabled",
+    )
+    parser.add_argument("--target-reasoning", choices=["auto", "provider_default", "disabled", "openrouter_disabled"])
+    parser.add_argument(
+        "--target-public-reasoning",
+        action="store_true",
+        help="Opt in to unsigned Chat reasoning_content for the Codex resume target",
+    )
+    parser.add_argument(
+        "--verify-replay",
+        action="store_true",
+        help="Resume a third turn on the target and observe whether public reasoning history is replayed",
     )
     parser.add_argument("--allow-live", action="store_true", help="Acknowledge real API calls and possible charges")
     args = parser.parse_args()
@@ -487,7 +597,14 @@ def main() -> int:
     if not target_key:
         parser.error("The target key environment variable is empty")
     if not args.resume_target and any(
-        (args.target_base_url, args.target_model, args.target_key_env, args.target_reasoning, args.target_public_reasoning, args.verify_replay)
+        (
+            args.target_base_url,
+            args.target_model,
+            args.target_key_env,
+            args.target_reasoning,
+            args.target_public_reasoning,
+            args.verify_replay,
+        )
     ):
         parser.error("Target options require --resume-target")
     if args.target_public_reasoning and (args.client != "codex" or args.resume_target != Protocol.CHAT):

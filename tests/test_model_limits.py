@@ -37,7 +37,10 @@ def test_v2_limits_are_immutable_and_v1_does_not_accept_new_fields():
     assert registry.lookup("https://example.test/v1", "chat", "m").context_window_tokens == 1024
     assert registry.lookup("https://other.test/v1", "chat", "m") is None
     registry.preflight(
-        "https://example.test/v1", "chat", {"model": "m", "max_completion_tokens": 64, "top_p": 0.2, "reasoning_effort": "low"}, require_verified=True
+        "https://example.test/v1",
+        "chat",
+        {"model": "m", "max_completion_tokens": 64, "top_p": 0.2, "reasoning_effort": "low"},
+        require_verified=True,
     )
     body["models"][0]["reasoning_efforts"].append("medium")
     with pytest.raises(ConversionError, match="reasoning effort"):
@@ -103,7 +106,9 @@ def test_gateway_rejects_recorded_limit_before_any_network_io():
         calls.append(request)
         return io.BytesIO(b"{}")
 
-    config = GatewayConfig("chat", "https://example.test/v1", "key", "local", capabilities=CapabilityRegistry.from_dict(document()))
+    config = GatewayConfig(
+        "chat", "https://example.test/v1", "key", "local", capabilities=CapabilityRegistry.from_dict(document())
+    )
     with listener(config, upstream) as url, pytest.raises(HTTPError) as caught:
         post(url, {"model": "m", "input": "Hi", "max_output_tokens": 65})
     assert caught.value.code == 422

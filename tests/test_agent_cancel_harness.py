@@ -16,7 +16,12 @@ def harness(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "value", ['{"agent_id":"child-a"}', "agentId: child-a (internal metadata)", [{"type": "text", "text": "agentId: child-a\noutput_file: C:/synthetic"}]]
+    "value",
+    [
+        '{"agent_id":"child-a"}',
+        "agentId: child-a (internal metadata)",
+        [{"type": "text", "text": "agentId: child-a\noutput_file: C:/synthetic"}],
+    ],
 )
 def test_cancel_target_comes_from_actual_spawn_metadata(harness, value):
     assert harness.task_identifier(value) == "child-a"
@@ -50,7 +55,13 @@ def scenario():
         cancel_target="child-a",
         sibling_target="child-b",
         notification_seen=True,
-        parent_results=[{"cancel_a": json.dumps({"task_id": "child-a", "task_type": "local_agent", "message": "Successfully stopped task: child-a"})}],
+        parent_results=[
+            {
+                "cancel_a": json.dumps(
+                    {"task_id": "child-a", "task_type": "local_agent", "message": "Successfully stopped task: child-a"}
+                )
+            }
+        ],
     )
 
 
@@ -58,11 +69,19 @@ def claude_result():
     return {
         "is_error": False,
         "permission_denials": [],
-        "subagent_stats": {"spawned": 2, "completed": 1, "failed": 0, "started_in_background": 2, "killed": {"parent": 1, "user": 0, "system": 0}},
+        "subagent_stats": {
+            "spawned": 2,
+            "completed": 1,
+            "failed": 0,
+            "started_in_background": 2,
+            "killed": {"parent": 1, "user": 0, "system": 0},
+        },
     }
 
 
-@pytest.mark.parametrize("fault", [None, "missing_notification", "wrong_target", "no_stop", "failed_sibling", "boolean_kill"])
+@pytest.mark.parametrize(
+    "fault", [None, "missing_notification", "wrong_target", "no_stop", "failed_sibling", "boolean_kill"]
+)
 def test_claude_cancellation_gate_requires_real_stop_notification_and_sibling_completion(harness, fault):
     state, output = scenario(), claude_result()
     if fault == "missing_notification":
@@ -81,14 +100,28 @@ def test_claude_cancellation_gate_requires_real_stop_notification_and_sibling_co
 @pytest.mark.parametrize("fault", [None, "wrong_stop", "wrong_wait", "extra_spawn"])
 def test_codex_cancellation_gate_correlates_task_close_and_successful_sibling(harness, fault):
     tasks = harness.parallel.TASKS
-    items = [{"tool": "spawn_agent", "prompt": tasks[index], "receiver_thread_ids": [f"child-{label}"]} for index, label in enumerate(("a", "b"))]
+    items = [
+        {"tool": "spawn_agent", "prompt": tasks[index], "receiver_thread_ids": [f"child-{label}"]}
+        for index, label in enumerate(("a", "b"))
+    ]
     items += [
         {"tool": "close_agent", "receiver_thread_ids": ["child-b" if fault == "wrong_stop" else "child-a"]},
-        {"tool": "wait", "agents_states": {"child-a" if fault == "wrong_wait" else "child-b": {"status": "completed", "message": harness.parallel.FINALS[1]}}},
+        {
+            "tool": "wait",
+            "agents_states": {
+                "child-a" if fault == "wrong_wait" else "child-b": {
+                    "status": "completed",
+                    "message": harness.parallel.FINALS[1],
+                }
+            },
+        },
     ]
     if fault == "extra_spawn":
         items.append({"tool": "spawn_agent", "prompt": "unknown", "receiver_thread_ids": ["extra"]})
-    raw = "\n".join(json.dumps({"type": "item.completed", "item": {"type": "collab_tool_call", "status": "completed", **item}}) for item in items)
+    raw = "\n".join(
+        json.dumps({"type": "item.completed", "item": {"type": "collab_tool_call", "status": "completed", **item}})
+        for item in items
+    )
     assert harness.verified_lifecycle("codex", raw, scenario()) is (fault is None)
 
 
@@ -96,7 +129,11 @@ def test_fixture_redirects_native_temp_artifacts_under_its_owned_root(harness, m
     captured = {}
     single = harness.single
     monkeypatch.setattr(single.shutil, "which", lambda _: "fixture-claude.exe")
-    monkeypatch.setattr(single.smoke_clients, "run_process", lambda args, **kwargs: subprocess.CompletedProcess(args, 0, "2.1.308 (Claude Code)", ""))
+    monkeypatch.setattr(
+        single.smoke_clients,
+        "run_process",
+        lambda args, **kwargs: subprocess.CompletedProcess(args, 0, "2.1.308 (Claude Code)", ""),
+    )
 
     def client(*args, **kwargs):
         captured.update(args[5])

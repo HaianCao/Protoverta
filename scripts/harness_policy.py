@@ -36,7 +36,9 @@ def _prefix(package, name, prefix, source):
             spec.loader.exec_module(command)
         else:
             command = importlib.import_module(package + ".command")
-        return command.command_prefix(prefix[0], name, "@openai/codex" if name == "codex" else "@anthropic-ai/claude-code")
+        return command.command_prefix(
+            prefix[0], name, "@openai/codex" if name == "codex" else "@anthropic-ai/claude-code"
+        )
     return prefix
 
 

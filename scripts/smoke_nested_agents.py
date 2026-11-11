@@ -31,7 +31,11 @@ class Scenario(parallel.Scenario):
         self.read_verified = False
 
     def open(self, request, *, timeout):
-        expected_path = {Protocol.CHAT: "/v1/chat/completions", Protocol.MESSAGES: "/v1/messages", Protocol.RESPONSES: "/v1/responses"}[self.protocol]
+        expected_path = {
+            Protocol.CHAT: "/v1/chat/completions",
+            Protocol.MESSAGES: "/v1/messages",
+            Protocol.RESPONSES: "/v1/responses",
+        }[self.protocol]
         if urlsplit(request.full_url).path != expected_path:
             raise ValueError("Unexpected nested upstream endpoint")
         body = json.loads(request.data)
@@ -43,7 +47,14 @@ class Scenario(parallel.Scenario):
         tools = list(functions(body, self.protocol))
         self.stages[role] += 1
         stage = self.stages[role]
-        self.observed.append({"role": role, "stage": stage, "result_call_ids": sorted(records), "tool_names": [tool.get("name") for tool in tools]})
+        self.observed.append(
+            {
+                "role": role,
+                "stage": stage,
+                "result_call_ids": sorted(records),
+                "tool_names": [tool.get("name") for tool in tools],
+            }
+        )
         if len(self.observed) > 8:
             raise ValueError("Nested fixture request budget exhausted")
         if stage == 1 and role == "parent":
@@ -88,7 +99,9 @@ class Scenario(parallel.Scenario):
                 raise ValueError("Agent still advertised at explicit depth limit")
         if (role == "leaf" or role == "child" and self.depth == 1) and stage == 1:
             return parallel.calls_wire(
-                self.protocol, body["model"], [(single.find_tool(tools, "read"), {"file_path": str(self.root / "fixture.txt")}, "nested_read")]
+                self.protocol,
+                body["model"],
+                [(single.find_tool(tools, "read"), {"file_path": str(self.root / "fixture.txt")}, "nested_read")],
             )
         if role == "leaf" or role == "child" and self.depth == 1:
             if stage != 2 or single.VALUE not in json.dumps(records.get("nested_read")):
@@ -97,7 +110,11 @@ class Scenario(parallel.Scenario):
             return single.encode(self.protocol, body["model"], text=LEAF_DONE if role == "leaf" else BLOCKED)
         if role == "child" and stage == 2 and LEAF_DONE in json.dumps(records.get("same_spawn")):
             return single.encode(self.protocol, body["model"], text=CHILD_DONE)
-        if role == "parent" and stage == 2 and (CHILD_DONE if self.depth > 1 else BLOCKED) in json.dumps(records.get("same_spawn")):
+        if (
+            role == "parent"
+            and stage == 2
+            and (CHILD_DONE if self.depth > 1 else BLOCKED) in json.dumps(records.get("same_spawn"))
+        ):
             return single.encode(self.protocol, body["model"], text=DONE)
         raise ValueError("Nested lifecycle did not return correlated results")
 
@@ -109,7 +126,10 @@ def verified_lifecycle(output, depth):
     expected = 2 if depth > 1 else 1
     return (
         isinstance(stats, dict)
-        and all(type(stats.get(key)) is int for key in ("spawned", "completed", "failed", "max_depth", "spawned_by_subagents"))
+        and all(
+            type(stats.get(key)) is int
+            for key in ("spawned", "completed", "failed", "max_depth", "spawned_by_subagents")
+        )
         and output.get("is_error") is False
         and output.get("permission_denials") == []
         and stats.get("spawned") == stats.get("completed") == expected
@@ -121,7 +141,9 @@ def verified_lifecycle(output, depth):
 
 def run(upstream, adapter_source, *, depth=2):
     scenario = Scenario(upstream, depth)
-    driver = parallel.drive(scenario, adapter_source, claude_tools="Agent,Read", claude_agent_tools=["Agent", "Read"], claude_depth=depth)
+    driver = parallel.drive(
+        scenario, adapter_source, claude_tools="Agent,Read", claude_agent_tools=["Agent", "Read"], claude_depth=depth
+    )
     result = scenario.result
     try:
         output = json.loads(result.stdout) if result else {}
@@ -178,11 +200,18 @@ def main():
     parser.add_argument("--report", type=Path)
     args = parser.parse_args()
     result = (
-        codex_profile_control(args.upstream, args.adapter_source) if args.client == "codex" else run(args.upstream, args.adapter_source, depth=args.depth_limit)
+        codex_profile_control(args.upstream, args.adapter_source)
+        if args.client == "codex"
+        else run(args.upstream, args.adapter_source, depth=args.depth_limit)
     )
     if args.report:
         args.report.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps({key: value for key, value in result.items() if not result["passed"] or key not in {"stdout", "stderr"}}, indent=2))
+    print(
+        json.dumps(
+            {key: value for key, value in result.items() if not result["passed"] or key not in {"stdout", "stderr"}},
+            indent=2,
+        )
+    )
     return 0 if result["passed"] else 1
 
 

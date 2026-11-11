@@ -35,7 +35,9 @@ class Fragmented(io.BytesIO):
 @contextmanager
 def listener(source, *, tools=True, length=False, wire=None, **options):
     raw = source_wire(source, tools=tools, length=length) if wire is None else wire
-    config = GatewayConfig(source, "https://example.invalid/v1", "synthetic-upstream", "local", messages_usage_policy="deferred", **options)
+    config = GatewayConfig(
+        source, "https://example.invalid/v1", "synthetic-upstream", "local", messages_usage_policy="deferred", **options
+    )
     calls = []
 
     def upstream(request, *, timeout):
@@ -86,7 +88,9 @@ def response_policy():
 
 
 def portable_tool_policy(target):
-    request = convert_request({"model": MODEL, "input": "synthetic", "max_output_tokens": 32, **response_policy()}, "responses", target)
+    request = convert_request(
+        {"model": MODEL, "input": "synthetic", "max_output_tokens": 32, **response_policy()}, "responses", target
+    )
     return {key: request[key] for key in ("tools", "tool_choice", "parallel_tool_calls") if key in request}
 
 
@@ -102,7 +106,12 @@ def probability_wire(source):
             for choice in body.get("choices", []):
                 text = choice.get("delta", {}).get("content")
                 if text:
-                    value = {"token": text, "bytes": list(text.encode()), "logprob": -0.25, "top_logprobs": [{"token": "x", "bytes": [120], "logprob": -1.5}]}
+                    value = {
+                        "token": text,
+                        "bytes": list(text.encode()),
+                        "logprob": -0.25,
+                        "top_logprobs": [{"token": "x", "bytes": [120], "logprob": -1.5}],
+                    }
                     probabilities.append(value)
                     choice["logprobs"] = {"content": [value], "refusal": None}
         else:
@@ -133,7 +142,12 @@ def verify_probability_sdk(source, target):
     with listener(source, wire=raw) as (origin, calls), client_for(target, origin) as client:
         if target == "responses":
             with client.responses.stream(
-                model=MODEL, input="synthetic", max_output_tokens=32, include=["message.output_text.logprobs"], top_logprobs=2, **response_policy()
+                model=MODEL,
+                input="synthetic",
+                max_output_tokens=32,
+                include=["message.output_text.logprobs"],
+                top_logprobs=2,
+                **response_policy(),
             ) as stream:
                 list(stream)
                 observed = stream.get_final_response().output[0].content[0].logprobs
@@ -148,16 +162,29 @@ def verify_probability_sdk(source, target):
                     top_logprobs=2,
                 )
             )
-            observed = [token for chunk in chunks for choice in chunk.choices for token in (choice.logprobs.content if choice.logprobs else [])]
-    assert [(p.token, p.bytes, p.logprob, [(c.token, c.bytes, c.logprob) for c in p.top_logprobs]) for p in observed] == [
-        (p["token"], p["bytes"], p["logprob"], [(c["token"], c["bytes"], c["logprob"]) for c in p["top_logprobs"]]) for p in expected
+            observed = [
+                token
+                for chunk in chunks
+                for choice in chunk.choices
+                for token in (choice.logprobs.content if choice.logprobs else [])
+            ]
+    assert [
+        (p.token, p.bytes, p.logprob, [(c.token, c.bytes, c.logprob) for c in p.top_logprobs]) for p in observed
+    ] == [
+        (p["token"], p["bytes"], p["logprob"], [(c["token"], c["bytes"], c["logprob"]) for c in p["top_logprobs"]])
+        for p in expected
     ]
     assert len(calls) == 1 and calls[0]["top_logprobs"] == 2
     if source == "chat":
         completed = {
             "model": MODEL,
             "choices": [
-                {"index": 0, "message": {"role": "assistant", "content": TEXT}, "finish_reason": "stop", "logprobs": {"content": expected, "refusal": None}}
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": TEXT},
+                    "finish_reason": "stop",
+                    "logprobs": {"content": expected, "refusal": None},
+                }
             ],
             "usage": {
                 "prompt_tokens": 19,
@@ -167,23 +194,39 @@ def verify_probability_sdk(source, target):
             },
         }
     else:
-        completed = next(json.loads(e.data)["response"] for e in SSEParser().feed(raw) if e.event == "response.completed")
+        completed = next(
+            json.loads(e.data)["response"] for e in SSEParser().feed(raw) if e.event == "response.completed"
+        )
     with listener(source, wire=json.dumps(completed).encode()) as (origin, calls), client_for(target, origin) as client:
         if target == "responses":
             result = client.responses.create(
-                model=MODEL, input="synthetic", max_output_tokens=32, include=["message.output_text.logprobs"], top_logprobs=2, **response_policy()
+                model=MODEL,
+                input="synthetic",
+                max_output_tokens=32,
+                include=["message.output_text.logprobs"],
+                top_logprobs=2,
+                **response_policy(),
             )
             observed = result.output[0].content[0].logprobs
         else:
-            result = client.chat.completions.create(model=MODEL, messages=[{"role": "user", "content": "synthetic"}], logprobs=True, top_logprobs=2)
+            result = client.chat.completions.create(
+                model=MODEL, messages=[{"role": "user", "content": "synthetic"}], logprobs=True, top_logprobs=2
+            )
             observed = result.choices[0].logprobs.content
-    assert [(p.token, p.bytes, p.logprob) for p in observed] == [(p["token"], p["bytes"], p["logprob"]) for p in expected]
+    assert [(p.token, p.bytes, p.logprob) for p in observed] == [
+        (p["token"], p["bytes"], p["logprob"]) for p in expected
+    ]
     assert len(calls) == 1
 
 
 def consume(client, target):
     if target == "messages":
-        with client.messages.stream(model=MODEL, max_tokens=32, messages=[{"role": "user", "content": "synthetic"}], **portable_tool_policy(target)) as stream:
+        with client.messages.stream(
+            model=MODEL,
+            max_tokens=32,
+            messages=[{"role": "user", "content": "synthetic"}],
+            **portable_tool_policy(target),
+        ) as stream:
             events = list(stream)
             result = stream.get_final_message()
         return {
@@ -194,14 +237,23 @@ def consume(client, target):
             "events": events,
         }
     if target == "responses":
-        with client.responses.stream(model=MODEL, input="synthetic", max_output_tokens=32, **response_policy()) as stream:
+        with client.responses.stream(
+            model=MODEL, input="synthetic", max_output_tokens=32, **response_policy()
+        ) as stream:
             try:
                 events = list(stream)
             except openai.APIResponseValidationError as exc:
                 cause = exc.__cause__
-                kinds = {"ResponseCompletedEvent", "ResponseIncompleteEvent", "ResponseCreatedEvent", "ResponseFunctionCallArgumentsDoneEvent"}
+                kinds = {
+                    "ResponseCompletedEvent",
+                    "ResponseIncompleteEvent",
+                    "ResponseCreatedEvent",
+                    "ResponseFunctionCallArgumentsDoneEvent",
+                }
                 details = [
-                    error for error in cause.errors(include_input=False, include_url=False) if error["loc"][0] in kinds and error["type"] != "literal_error"
+                    error
+                    for error in cause.errors(include_input=False, include_url=False)
+                    if error["loc"][0] in kinds and error["type"] != "literal_error"
                 ]
                 raise AssertionError(json.dumps(details, default=str)) from None
             if events[-1].type == "response.incomplete":
@@ -215,7 +267,11 @@ def consume(client, target):
                 result = stream.get_final_response()
         return {
             "text": result.output_text,
-            "calls": [(item.call_id, item.name, json.loads(item.arguments)) for item in result.output if item.type == "function_call"],
+            "calls": [
+                (item.call_id, item.name, json.loads(item.arguments))
+                for item in result.output
+                if item.type == "function_call"
+            ],
             "reason": result.status,
             "usage": (result.usage.input_tokens, result.usage.output_tokens),
             "events": events,
@@ -320,16 +376,23 @@ def test_sdk_sees_max_tokens_as_incomplete_not_full_success(source, target):
 
 @pytest.mark.parametrize("length", [False, True])
 def test_strict_responses_sdk_rejects_unknown_messages_reasoning_usage(length):
-    with listener("messages", tools=not length, length=length) as (origin, calls), client_for("responses", origin) as client:
+    with (
+        listener("messages", tools=not length, length=length) as (origin, calls),
+        client_for("responses", origin) as client,
+    ):
         with (
-            client.responses.stream(model=MODEL, input="synthetic", max_output_tokens=32, **response_policy()) as stream,
+            client.responses.stream(
+                model=MODEL, input="synthetic", max_output_tokens=32, **response_policy()
+            ) as stream,
             pytest.raises(openai.APIResponseValidationError) as caught,
         ):
             list(stream)
         terminal = "ResponseIncompleteEvent" if length else "ResponseCompletedEvent"
         errors = caught.value.__cause__.errors(include_input=False, include_url=False)
         relevant = [error for error in errors if error["loc"][0] == terminal]
-        assert [(error["type"], error["loc"][1:]) for error in relevant] == [("missing", ("response", "usage", "output_tokens_details"))]
+        assert [(error["type"], error["loc"][1:]) for error in relevant] == [
+            ("missing", ("response", "usage", "output_tokens_details"))
+        ]
     assert len(calls) == 1
 
 
@@ -369,14 +432,27 @@ def test_sdk_reasoning_prefix_does_not_shift_per_item_content_index():
             "created": 1,
             "object": "chat.completion.chunk",
             "model": MODEL,
-            "choices": [{"index": 0, "delta": {"role": "assistant", "reasoning_content": "public fixture reasoning"}, "finish_reason": None}],
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {"role": "assistant", "reasoning_content": "public fixture reasoning"},
+                    "finish_reason": None,
+                }
+            ],
         },
     )
     raw = prefix + source_wire("chat", tools=False).replace(b'"reasoning_tokens": 0', b'"reasoning_tokens": 2')
-    with listener("chat", wire=raw, public_reasoning=True) as (origin, calls), client_for("responses", origin) as client:
+    with (
+        listener("chat", wire=raw, public_reasoning=True) as (origin, calls),
+        client_for("responses", origin) as client,
+    ):
         result = consume(client, "responses")
     assert result["text"] == TEXT and len(calls) == 1
     text_events = [item for item in result["events"] if item.type == "response.output_text.delta"]
     assert text_events and all(item.output_index == 1 and item.content_index == 0 for item in text_events)
-    reasoning = [item.item for item in result["events"] if item.type == "response.output_item.done" and item.item.type == "reasoning"]
+    reasoning = [
+        item.item
+        for item in result["events"]
+        if item.type == "response.output_item.done" and item.item.type == "reasoning"
+    ]
     assert len(reasoning) == 1 and reasoning[0].content[0].text == "public fixture reasoning"

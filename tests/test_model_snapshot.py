@@ -54,7 +54,9 @@ def test_auth_bounded_paging_and_no_upstream_or_private_metadata():
         assert last["has_more"] is False and [m["id"] for m in last["data"]] == ["c"]
         with get(url, "?after_id=c") as response:
             assert json.load(response)["data"] == []
-        assert all(text.encode() not in wire for text in (BASE, "secret-key", "local", "context_window", "owned_by", "created"))
+        assert all(
+            text.encode() not in wire for text in (BASE, "secret-key", "local", "context_window", "owned_by", "created")
+        )
     assert all(record.protocol == "models" for record in records)
     assert all(record.requested_model_digest is None and record.input_tokens is None for record in records)
 
@@ -101,11 +103,21 @@ def test_missing_snapshot_and_explicit_empty_are_distinct():
                 assert exc.value.code == status
             else:
                 with get(url) as response:
-                    assert json.load(response) == {"object": "list", "data": [], "has_more": False, "first_id": None, "last_id": None}
+                    assert json.load(response) == {
+                        "object": "list",
+                        "data": [],
+                        "has_more": False,
+                        "first_id": None,
+                        "last_id": None,
+                    }
 
 
 def test_snapshot_identity_requires_exact_prefix_and_protocol():
-    for base, protocol in (("https://other.example.test/team/v1", "chat"), (BASE + "/other", "chat"), (BASE, "messages")):
+    for base, protocol in (
+        ("https://other.example.test/team/v1", "chat"),
+        (BASE + "/other", "chat"),
+        (BASE, "messages"),
+    ):
         with pytest.raises(ValueError, match="exact upstream"):
             GatewayConfig(protocol, base, "key", "local", model_snapshot=snapshot("a"))
     assert snapshot("a").matches(BASE + "/", "chat")
@@ -164,7 +176,10 @@ def test_explicit_id_constructor_is_bounded_and_deduplicates():
 
 
 def test_concurrent_gateways_keep_snapshots_and_tokens_isolated():
-    configs = [GatewayConfig("chat", BASE, "key", token, model_snapshot=snapshot(model)) for token, model in (("alpha", "A"), ("beta", "B"))]
+    configs = [
+        GatewayConfig("chat", BASE, "key", token, model_snapshot=snapshot(model))
+        for token, model in (("alpha", "A"), ("beta", "B"))
+    ]
     with listener(configs[0], unavailable) as a, listener(configs[1], unavailable) as b:
 
         def read(pair):
@@ -208,7 +223,11 @@ def test_duplicate_auth_and_malformed_target_are_safe_errors():
 
 def test_model_list_observation_roundtrips_private_journal(tmp_path):
     config = GatewayConfig("chat", BASE, "key", "local", model_snapshot=snapshot("a"))
-    with diagnostic_journal(tmp_path) as sink, listener(config, unavailable, observer=sink) as url, get(url) as response:
+    with (
+        diagnostic_journal(tmp_path) as sink,
+        listener(config, unavailable, observer=sink) as url,
+        get(url) as response,
+    ):
         response.read()
     records = latest_diagnostics(tmp_path)["records"]
     assert len(records) == 1 and records[0]["protocol"] == "models"
@@ -232,7 +251,14 @@ def test_catalog_obeys_local_admission_while_inference_is_active():
         assert release.wait(4)
         return io.BytesIO(b'{"id":"r","object":"response","output":[]}')
 
-    config = GatewayConfig("responses", BASE, "key", "local", max_concurrent_requests=1, model_snapshot=ModelSnapshot.from_ids(BASE, "responses", ("a",)))
+    config = GatewayConfig(
+        "responses",
+        BASE,
+        "key",
+        "local",
+        max_concurrent_requests=1,
+        model_snapshot=ModelSnapshot.from_ids(BASE, "responses", ("a",)),
+    )
     with listener(config, upstream) as url, ThreadPoolExecutor(max_workers=1) as pool:
 
         def infer():

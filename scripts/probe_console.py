@@ -37,7 +37,12 @@ def wait_file(path, process, seconds):
 
 
 def console_is_owned(members, job_members, controller, wrapper):
-    return controller in members and wrapper in members and controller not in job_members and members <= job_members | {controller}
+    return (
+        controller in members
+        and wrapper in members
+        and controller not in job_members
+        and members <= job_members | {controller}
+    )
 
 
 def run(bundle):
@@ -60,7 +65,13 @@ def run(bundle):
 
     if not kernel.SetConsoleCtrlHandler(keep_controller_alive, True):
         raise ctypes.WinError(ctypes.get_last_error())
-    report = {"event_sent": False, "console_owned": False, "timed_out": False, "upstream_closed_before_cleanup": False, "remaining_before_cleanup": None}
+    report = {
+        "event_sent": False,
+        "console_owned": False,
+        "timed_out": False,
+        "upstream_closed_before_cleanup": False,
+        "remaining_before_cleanup": None,
+    }
     with windows_probe_process(
         bundle["args"],
         cwd=str(root),

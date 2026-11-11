@@ -48,7 +48,11 @@ def selection_status(
         "context_window_tokens": window,
     }
     count_note = f" Token count: {count_category}; context window: {window if window is not None else 'unavailable'}."
-    unknown = {"status": "unverified", "message": "Unverified route. Model discovery is not capability certification." + count_note, **meta}
+    unknown = {
+        "status": "unverified",
+        "message": "Unverified route. Model discovery is not capability certification." + count_note,
+        **meta,
+    }
     if registry is None:
         return unknown
     from .server import GatewayConfig
@@ -61,11 +65,26 @@ def selection_status(
     reports = [
         registry.assess(base_url, protocol, model, features),
         registry.assess_route(
-            base_url, protocol, model, features, source_protocol=source_protocol, streaming=True, client_profile=client_profile, policies=policies
+            base_url,
+            protocol,
+            model,
+            features,
+            source_protocol=source_protocol,
+            streaming=True,
+            client_profile=client_profile,
+            policies=policies,
         ),
     ]
     if any(report.unsupported for report in reports):
-        return {"status": "unsupported", "message": "Text streaming is unsupported on this route according to configured evidence." + count_note, **meta}
+        return {
+            "status": "unsupported",
+            "message": "Text streaming is unsupported on this route according to configured evidence." + count_note,
+            **meta,
+        }
     if freshness_required or any(report.unknown for report in reports):
         return unknown
-    return {"status": "verified", "message": "Text streaming verified. Tools, effort and context are checked separately at Run." + count_note, **meta}
+    return {
+        "status": "verified",
+        "message": "Text streaming verified. Tools, effort and context are checked separately at Run." + count_note,
+        **meta,
+    }

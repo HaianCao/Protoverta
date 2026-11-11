@@ -16,7 +16,13 @@ from test_environment import sanitized_environment
 
 
 def command(args, cwd, *, env=None):
-    subprocess.run([str(arg) for arg in args], cwd=cwd, env=sanitized_environment() if env is None else env, check=True, timeout=900)
+    subprocess.run(
+        [str(arg) for arg in args],
+        cwd=cwd,
+        env=sanitized_environment() if env is None else env,
+        check=True,
+        timeout=900,
+    )
 
 
 def validate(core, codex, claude, output):
@@ -35,11 +41,15 @@ def validate(core, codex, claude, output):
         if project != projects[0]:
             metadata = tomllib.loads((project / "pyproject.toml").read_text(encoding="utf-8"))["project"]
             # Launchers depend on the core directly; older ones used a gateway extra.
-            requirements = metadata.get("dependencies", []) + metadata.get("optional-dependencies", {}).get("gateway", [])
+            requirements = metadata.get("dependencies", []) + metadata.get("optional-dependencies", {}).get(
+                "gateway", []
+            )
             if "protoverta==" + version not in requirements:
                 raise ValueError("Consumer gateway pin does not match this core snapshot: " + project.name)
         env = sanitized_environment()
-        env["PYTHONPATH"] = os.pathsep.join((str(project / "src"), str(projects[0] / "src"), str(projects[0] / "scripts")))
+        env["PYTHONPATH"] = os.pathsep.join(
+            (str(project / "src"), str(projects[0] / "src"), str(projects[0] / "scripts"))
+        )
         guard = ["-p", "gateway_test_guard"] if project != projects[0] else []
         command(
             [
@@ -62,7 +72,15 @@ def validate(core, codex, claude, output):
             env=env,
         )
         if project != projects[0]:
-            command([sys.executable, projects[0] / "scripts/check_test_report.py", reports / ("source-" + project.name + ".xml")], project, env=env)
+            command(
+                [
+                    sys.executable,
+                    projects[0] / "scripts/check_test_report.py",
+                    reports / ("source-" + project.name + ".xml"),
+                ],
+                project,
+                env=env,
+            )
         lint_paths = ["src", "tests", "scripts"]
         if (project / "sdk_tests").is_dir():
             lint_paths.append("sdk_tests")
@@ -81,7 +99,9 @@ def validate(core, codex, claude, output):
     venv.EnvBuilder(with_pip=True).create(environment)
     python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     command([python, "-m", "pip", "install", "--disable-pip-version-check", "--no-deps", *wheels], output)
-    sdk_requirements = tomllib.loads((projects[0] / "pyproject.toml").read_text(encoding="utf-8"))["project"]["optional-dependencies"]["sdk-test"]
+    sdk_requirements = tomllib.loads((projects[0] / "pyproject.toml").read_text(encoding="utf-8"))["project"][
+        "optional-dependencies"
+    ]["sdk-test"]
     command([python, "-m", "pip", "install", "--disable-pip-version-check", "pytest>=8", *sdk_requirements], output)
     command([python, "-m", "pip", "check"], output)
     script = """
@@ -141,8 +161,20 @@ print('Three isolated wheels: runtime API compatibility PASS')
             env=clean,
         )
         if project != projects[0]:
-            command([python, projects[0] / "scripts/check_test_report.py", reports / ("installed-" + project.name + ".xml")], output, env=clean)
-    command([python, projects[0] / "scripts/check_sdk.py", "--installed", "--report-dir", reports / "sdk"], output, env=clean)
+            command(
+                [
+                    python,
+                    projects[0] / "scripts/check_test_report.py",
+                    reports / ("installed-" + project.name + ".xml"),
+                ],
+                output,
+                env=clean,
+            )
+    command(
+        [python, projects[0] / "scripts/check_sdk.py", "--installed", "--report-dir", reports / "sdk"],
+        output,
+        env=clean,
+    )
     return {"passed": True, "output": str(output), "local_validation_only": True}
 
 

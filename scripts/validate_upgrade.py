@@ -65,7 +65,11 @@ def validate(previous, next_wheel, codex, claude):
     previous_version = wheel_version(previous)
     if wheel_version(next_wheel) != version:
         raise ValueError("Next wheel version does not match this checkout")
-    env = {key: value for key, value in os.environ.items() if key.upper() in {"PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP"}}
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key.upper() in {"PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP"}
+    }
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     with tempfile.TemporaryDirectory(prefix="protoverta-upgrade-check-") as directory:
         root = Path(directory)
@@ -84,9 +88,26 @@ def validate(previous, next_wheel, codex, claude):
         def command(*args):
             subprocess.run([str(python), *map(str, args)], cwd=root, env=env, check=True, timeout=180)
 
-        command("-m", "pip", "install", "--no-deps", "--disable-pip-version-check", previous.resolve(), codex.resolve(), claude.resolve())
+        command(
+            "-m",
+            "pip",
+            "install",
+            "--no-deps",
+            "--disable-pip-version-check",
+            previous.resolve(),
+            codex.resolve(),
+            claude.resolve(),
+        )
         command("-B", "-c", FIXTURE, root, "legacy", previous_version)
-        command("-m", "pip", "install", "--no-deps", "--disable-pip-version-check", "--force-reinstall", next_wheel.resolve())
+        command(
+            "-m",
+            "pip",
+            "install",
+            "--no-deps",
+            "--disable-pip-version-check",
+            "--force-reinstall",
+            next_wheel.resolve(),
+        )
         command("-B", "-c", FIXTURE, root, "upgraded", version)
 
 

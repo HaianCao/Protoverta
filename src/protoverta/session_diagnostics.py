@@ -1,14 +1,19 @@
 """Bounded opt-in session journals containing fixed observations only."""
 
+from __future__ import annotations
+
 import json
 import os
 import queue
 import re
 import secrets
 import threading
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict
+from os import PathLike
 from pathlib import Path
+from typing import Any, TextIO
 
 from .observability import RequestObservation
 
@@ -31,10 +36,10 @@ _FEATURES = {
 }
 
 
-def _journals(root):
+def _journals(root: Path) -> tuple[list[Path], bool]:
     # Inspect at most 512 directory entries, including unrelated filenames.
     # A crowded directory yields a bounded sample, never a global newest claim.
-    paths = []
+    paths: list[tuple[float, Path]] = []
     limited = False
     with os.scandir(root) as entries:
         for index, entry in enumerate(entries):
@@ -52,22 +57,27 @@ def _journals(root):
 class _JournalSink:
     """Nonblocking producer; the daemon writer exclusively owns its stream."""
 
-    def __init__(self, stream):
+    def __init__(self, stream: TextIO) -> None:
         self.stream = stream
-        self.pending = queue.Queue(maxsize=128)
+        self.pending: queue.Queue[str] = queue.Queue(maxsize=128)
         self.lock = threading.Lock()
         self.stopping = threading.Event()
         self.accepted = self.dropped = self.byte_count = 0
         self.thread = threading.Thread(target=self._write, name="protoverta-journal", daemon=True)
         self.thread.start()
 
-    def __call__(self, record):
+    def __call__(self, record: object) -> None:
         if type(record) is not RequestObservation:
             return
         line = json.dumps(asdict(record), separators=(",", ":")) + "\n"
         size = len(line.encode())
         with self.lock:
-            if self.stopping.is_set() or self.accepted >= 1024 or size > 4096 or self.byte_count + size > 1024 * 1024 - 512:
+            if (
+                self.stopping.is_set()
+                or self.accepted >= 1024
+                or size > 4096
+                or self.byte_count + size > 1024 * 1024 - 512
+            ):
                 self.dropped += 1
                 return
             try:
@@ -78,7 +88,7 @@ class _JournalSink:
             self.accepted += 1
             self.byte_count += size
 
-    def _write(self):
+    def _write(self) -> None:
         try:
             while not self.stopping.is_set() or not self.pending.empty():
                 try:
@@ -96,7 +106,7 @@ class _JournalSink:
         finally:
             self.stream.close()
 
-    def close(self):
+    def close(self) -> None:
         with self.lock:
             self.stopping.set()
         # Never close a stream from under a blocked writer. It remains daemon-
@@ -105,7 +115,7 @@ class _JournalSink:
 
 
 @contextmanager
-def diagnostic_journal(directory):
+def diagnostic_journal(directory: str | PathLike[str]) -> Iterator[_JournalSink]:
     root = Path(directory).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
     # Only our fixed-name, non-symlink journals with the ownership header qualify.
@@ -114,7 +124,11 @@ def diagnostic_journal(directory):
         try:
             with path.open("r", encoding="utf-8") as source:
                 header = json.loads(source.readline(512))
-            if isinstance(header, dict) and header.get("kind") == "protoverta-session" and header.get("schema_version") in (1, 2):
+            if (
+                isinstance(header, dict)
+                and header.get("kind") == "protoverta-session"
+                and header.get("schema_version") in (1, 2)
+            ):
                 path.unlink()
         except (OSError, ValueError):
             pass
@@ -133,7 +147,7 @@ def diagnostic_journal(directory):
         observe.close()
 
 
-def latest_diagnostics(directory):
+def latest_diagnostics(directory: str | PathLike[str]) -> dict[str, Any]:
     root = Path(directory).expanduser().resolve()
     if not root.is_dir():
         return {"records": [], "limited": False}
@@ -152,7 +166,7 @@ def latest_diagnostics(directory):
                 ):
                     continue
                 schema_version = header["schema_version"]
-                records = []
+                records: list[dict[str, Any]] = []
                 dropped = 0
                 for index, line in enumerate(stream):
                     if index >= 1025 or len(line) > 4096:
@@ -167,7 +181,11 @@ def latest_diagnostics(directory):
                     ):
                         dropped = value["dropped_records"]
                         continue
-                    if not isinstance(value, dict) or set(value) - _FIELDS or not (_FIELDS - _OPTIONAL - _DIGESTS - _TRACE_META) <= set(value):
+                    if (
+                        not isinstance(value, dict)
+                        or set(value) - _FIELDS
+                        or not (_FIELDS - _OPTIONAL - _DIGESTS - _TRACE_META) <= set(value)
+                    ):
                         continue
                     for key in _OPTIONAL:
                         value.setdefault(key, None)
@@ -176,16 +194,22 @@ def latest_diagnostics(directory):
                     for key in _TRACE_META:
                         value.setdefault(key, None)
                     if any(
-                        value[key] is not None and (not isinstance(value[key], str) or re.fullmatch(r"[a-f0-9]{64}", value[key]) is None) for key in _DIGESTS
+                        value[key] is not None
+                        and (not isinstance(value[key], str) or re.fullmatch(r"[a-f0-9]{64}", value[key]) is None)
+                        for key in _DIGESTS
                     ):
                         continue
                     if value["phase"] is not None and value["phase"] not in _PHASES:
                         continue
                     if value["feature"] is not None and value["feature"] not in _FEATURES:
                         continue
-                    if not isinstance(value["request_id"], str) or not re.fullmatch(r"[a-f0-9]{32}", value["request_id"]):
+                    if not isinstance(value["request_id"], str) or not re.fullmatch(
+                        r"[a-f0-9]{32}", value["request_id"]
+                    ):
                         continue
-                    if value["protocol"] not in ("chat", "messages", "responses", "models", "unknown") or value["upstream_protocol"] not in (
+                    if value["protocol"] not in ("chat", "messages", "responses", "models", "unknown") or value[
+                        "upstream_protocol"
+                    ] not in (
                         "chat",
                         "messages",
                         "responses",
@@ -203,9 +227,13 @@ def latest_diagnostics(directory):
                         or type(value["streaming"]) is not bool
                     ):
                         continue
-                    if value["status"] is not None and (type(value["status"]) is not int or not 100 <= value["status"] <= 599):
+                    if value["status"] is not None and (
+                        type(value["status"]) is not int or not 100 <= value["status"] <= 599
+                    ):
                         continue
-                    if any(value[key] is not None and (type(value[key]) is not int or value[key] < 0) for key in _OPTIONAL):
+                    if any(
+                        value[key] is not None and (type(value[key]) is not int or value[key] < 0) for key in _OPTIONAL
+                    ):
                         continue
                     records.append(value)
             return {

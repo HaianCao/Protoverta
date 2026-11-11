@@ -33,7 +33,10 @@ DONE = "P04_PARENT_VERIFIED"
 
 
 # Native CLI releases this fixture was exercised with; extend after review.
-FIXTURE_VERSIONS = {"codex": {"codex-cli 0.166.0", "codex-cli 0.167.0"}, "claude": {"2.1.308 (Claude Code)", "2.1.318 (Claude Code)", "2.1.319 (Claude Code)"}}
+FIXTURE_VERSIONS = {
+    "codex": {"codex-cli 0.166.0", "codex-cli 0.167.0"},
+    "claude": {"2.1.308 (Claude Code)", "2.1.318 (Claude Code)", "2.1.319 (Claude Code)"},
+}
 
 
 def user_text(body, protocol):
@@ -46,7 +49,11 @@ def user_text(body, protocol):
         if isinstance(content, str):
             result.append(content)
         elif isinstance(content, list):
-            result.extend(block["text"] for block in content if isinstance(block, dict) and block.get("type") in {"text", "input_text"})
+            result.extend(
+                block["text"]
+                for block in content
+                if isinstance(block, dict) and block.get("type") in {"text", "input_text"}
+            )
     return "\n".join(result)
 
 
@@ -57,10 +64,16 @@ def tool_results(body, protocol):
 def tool_records(body, protocol):
     if protocol == Protocol.RESPONSES:
         return [
-            (item.get("call_id"), item.get("output")) for item in body.get("input", []) if isinstance(item, dict) and item.get("type") == "function_call_output"
+            (item.get("call_id"), item.get("output"))
+            for item in body.get("input", [])
+            if isinstance(item, dict) and item.get("type") == "function_call_output"
         ]
     if protocol == Protocol.CHAT:
-        return [(item.get("tool_call_id"), item.get("content")) for item in body.get("messages", []) if item.get("role") == "tool"]
+        return [
+            (item.get("tool_call_id"), item.get("content"))
+            for item in body.get("messages", [])
+            if item.get("role") == "tool"
+        ]
     return [
         (block.get("tool_use_id"), block.get("content"))
         for item in body.get("messages", [])
@@ -115,7 +128,11 @@ def lifecycle_verified(client, stdout):
         item = event.get("item", {})
         if not isinstance(item, dict):
             continue
-        if event.get("type") != "item.completed" or item.get("type") != "collab_tool_call" or item.get("status") != "completed":
+        if (
+            event.get("type") != "item.completed"
+            or item.get("type") != "collab_tool_call"
+            or item.get("status") != "completed"
+        ):
             continue
         if item.get("tool") == "spawn_agent":
             children.update(item.get("receiver_thread_ids", []))
@@ -125,7 +142,9 @@ def lifecycle_verified(client, stdout):
                 waited.update(
                     key
                     for key, value in states.items()
-                    if isinstance(value, dict) and value.get("status") == "completed" and value.get("message") == CHILD_DONE
+                    if isinstance(value, dict)
+                    and value.get("status") == "completed"
+                    and value.get("message") == CHILD_DONE
                 )
     return len(children) == 1 and children == waited
 
@@ -176,7 +195,8 @@ def run(
         raise ValueError("Fixture Claude depth must be an integer from 1 to 3")
     limits = dict(gateway_limits or {})
     if set(limits) - {"timeout", "progress_timeout", "total_timeout"} or any(
-        isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value) or value <= 0 for value in limits.values()
+        isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value) or value <= 0
+        for value in limits.values()
     ):
         raise ValueError("Fixture gateway timeouts must be finite positive numbers")
     executable = shutil.which(client)
@@ -213,7 +233,9 @@ def run(
             NO_PROXY="127.0.0.1,localhost",
             PROTOVERTA_SMOKE_TOKEN="p04-local-token",
         )
-        version = original_process([executable, "--version"], cwd=directory, env=env, text=True, encoding="utf-8", errors="replace", timeout=3)
+        version = original_process(
+            [executable, "--version"], cwd=directory, env=env, text=True, encoding="utf-8", errors="replace", timeout=3
+        )
         cli_version = version.stdout.strip()
         expected = FIXTURE_VERSIONS[client]
         if version.returncode or (not inspect_only and cli_version not in expected):
@@ -226,7 +248,13 @@ def run(
         }
         if client == "codex":
             bundled = original_process(
-                [executable, "debug", "models", "--bundled"], cwd=directory, env=env, text=True, encoding="utf-8", errors="replace", timeout=15
+                [executable, "debug", "models", "--bundled"],
+                cwd=directory,
+                env=env,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=15,
             )
             if bundled.returncode:
                 raise ValueError("Could not read bundled CLI model metadata")
@@ -251,7 +279,14 @@ def run(
             codex_options.update(
                 {
                     "mcp_servers.p04.command": sys.executable,
-                    "mcp_servers.p04.args": [str(Path(__file__).resolve()), "--mcp", "--fixture-file", str(fixture), "--audit-file", str(audit)],
+                    "mcp_servers.p04.args": [
+                        str(Path(__file__).resolve()),
+                        "--mcp",
+                        "--fixture-file",
+                        str(fixture),
+                        "--audit-file",
+                        str(audit),
+                    ],
                     "mcp_servers.p04.required": True,
                 }
             )
@@ -260,7 +295,12 @@ def run(
             if adapter_source is not None:
                 env.update(CODEX_CA_ENABLE_SUBAGENTS="1", CODEX_CA_MODEL_CATALOG=str(catalog_path))
                 # Exercise the launcher's gated opt-in, not a manual -c bypass.
-                for key in ("agents.enabled", "features.multi_agent", "agents.default_subagent_model", "agents.max_concurrent_threads_per_session"):
+                for key in (
+                    "agents.enabled",
+                    "features.multi_agent",
+                    "agents.default_subagent_model",
+                    "agents.max_concurrent_threads_per_session",
+                ):
                     codex_options.pop(key)
 
         def process(args, **kwargs):
@@ -304,7 +344,11 @@ def run(
 
         def open_upstream(request, *, timeout):
             path = urlsplit(request.full_url).path
-            expected_path = {Protocol.CHAT: "/v1/chat/completions", Protocol.MESSAGES: "/v1/messages", Protocol.RESPONSES: "/v1/responses"}[upstream]
+            expected_path = {
+                Protocol.CHAT: "/v1/chat/completions",
+                Protocol.MESSAGES: "/v1/messages",
+                Protocol.RESPONSES: "/v1/responses",
+            }[upstream]
             if path != expected_path:
                 raise ValueError("Unexpected upstream endpoint in subagent fixture")
             body = json.loads(request.data)
@@ -315,13 +359,24 @@ def run(
             with lock:
                 state[role] += 1
                 stage = state[role]
-                observation = {"role": role, "stage": stage, "model": body["model"], "path": path, "tool_names": [tool.get("name") for tool in tools]}
+                observation = {
+                    "role": role,
+                    "stage": stage,
+                    "model": body["model"],
+                    "path": path,
+                    "tool_names": [tool.get("name") for tool in tools],
+                }
                 observed.append(observation)
                 if len(observed) > 10:
                     raise ValueError("Fixture exceeded request budget")
             for tool in tools:
-                if any(word in tool.get("name", "").lower() for word in ("spawn", "agent", "wait", "exec_command", "shell_command", "read", "task")):
-                    schemas[tool["name"]] = {key: tool[key] for key in ("name", "namespace", "parameters") if key in tool}
+                if any(
+                    word in tool.get("name", "").lower()
+                    for word in ("spawn", "agent", "wait", "exec_command", "shell_command", "read", "task")
+                ):
+                    schemas[tool["name"]] = {
+                        key: tool[key] for key in ("name", "namespace", "parameters") if key in tool
+                    }
             if inspect_only:
                 return encode(upstream, body["model"], text=DONE)
             results = tool_results(body, upstream)
@@ -339,7 +394,12 @@ def run(
             if stage == 1:
                 tool = find_tool(tools, "agent" if client == "claude" else "spawn_agent")
                 args = (
-                    {"prompt": TASK + " Read " + str(fixture), "description": "Read local fixture", "subagent_type": "p04-worker", "run_in_background": False}
+                    {
+                        "prompt": TASK + " Read " + str(fixture),
+                        "description": "Read local fixture",
+                        "subagent_type": "p04-worker",
+                        "run_in_background": False,
+                    }
                     if client == "claude"
                     else {"message": TASK + " Read fixture.txt"}
                 )
@@ -385,7 +445,9 @@ def run(
                     model,
                     prompt="Delegate one local read-only task to a subagent, wait for its result, then summarize.",
                     codex_config=codex_options,
-                    agent_model_policy=("custom" if child_model else "selected") if adapter_source is not None else None,
+                    agent_model_policy=("custom" if child_model else "selected")
+                    if adapter_source is not None
+                    else None,
                     agent_model_id=child_model,
                 )
         audited = audit.exists() and audit.read_text(encoding="utf-8").splitlines() == ["read"]
@@ -393,7 +455,13 @@ def run(
         passed = (
             result.returncode == 0
             and DONE in result.stdout
-            and (inspect_only or state["child"] == 2 and state["parent"] == (3 if client == "codex" else 2) and (client != "codex" or audited) and lifecycle)
+            and (
+                inspect_only
+                or state["child"] == 2
+                and state["parent"] == (3 if client == "codex" else 2)
+                and (client != "codex" or audited)
+                and lifecycle
+            )
         )
         return {
             "passed": passed,
@@ -439,14 +507,25 @@ def main():
             return request
 
         with patch.object(smoke_tool_search.json, "loads", record):
-            smoke_tool_search.serve_mcp(lane_values={lane: VALUE + "_" + lane for lane in ("parent", "a", "b")} if args.mcp_lanes else None)
+            smoke_tool_search.serve_mcp(
+                lane_values={lane: VALUE + "_" + lane for lane in ("parent", "a", "b")} if args.mcp_lanes else None
+            )
         return 0
     if not args.client or args.upstream is None:
         parser.error("Client and upstream are required")
     result = run(args.client, args.upstream, inspect_only=args.inspect_only, adapter_source=args.adapter_source)
     if args.report:
         args.report.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps({key: value for key, value in result.items() if key != "schemas" and (not result["passed"] or key not in {"stdout", "stderr"})}, indent=2))
+    print(
+        json.dumps(
+            {
+                key: value
+                for key, value in result.items()
+                if key != "schemas" and (not result["passed"] or key not in {"stdout", "stderr"})
+            },
+            indent=2,
+        )
+    )
     return 0 if result["passed"] else 1
 
 

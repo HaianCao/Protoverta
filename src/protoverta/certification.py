@@ -1,20 +1,24 @@
 """Bounded, opt-in route probes with synthetic text and a pure local tool."""
 
+from __future__ import annotations
+
 import json
 import secrets
 import threading
 import time
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import date
+from typing import Any
 from urllib.error import HTTPError
 from urllib.request import ProxyHandler, Request, build_opener
 
 from .capabilities import route_policies
 from .core import Protocol, _decode_result, convert_request
 from .evidence_identity import route_identity
-from .resources import RequestBudget
-from .server import GatewayHTTPServer, make_handler
+from .resources import RequestBudget, attach_budget
+from .server import GatewayConfig, GatewayHTTPServer, make_handler
 from .sse import SSEParser
 from .streaming import StreamDecoder
 from .transport import DeadlineHTTPHandler
@@ -37,7 +41,7 @@ class CheckResult:
 
 
 @contextmanager
-def _listener(config, upstream_open):
+def _listener(config: GatewayConfig, upstream_open: Callable[..., Any] | None) -> Iterator[str]:
     server = GatewayHTTPServer(("127.0.0.1", 0), make_handler(config, upstream_open=upstream_open))
     server.daemon_threads = True
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -50,7 +54,15 @@ def _listener(config, upstream_open):
         thread.join(timeout=3)
 
 
-def check_route(config, model, source_protocol, *, cases=CASES, allow_live=False, upstream_open=None):
+def check_route(
+    config: GatewayConfig,
+    model: str,
+    source_protocol: Protocol | str,
+    *,
+    cases: Sequence[str] = CASES,
+    allow_live: bool = False,
+    upstream_open: Callable[..., Any] | None = None,
+) -> list[dict[str, Any]]:
     """Never run a provider request implicitly; injected transport is fixture-only.
 
     history_replay is explicit transcript replay, NOT a real CLI resume test.
@@ -61,31 +73,47 @@ def check_route(config, model, source_protocol, *, cases=CASES, allow_live=False
         raise ValueError("probe transport/permission must be explicit")
     if upstream_open is None and not allow_live:
         raise ValueError("route probes require explicit allow_live (requests may incur cost)")
-    if not isinstance(model, str) or not model or any(c.isspace() for c in model) or not cases or len(cases) != len(set(cases)) or set(cases) - set(CASES):
+    if (
+        not isinstance(model, str)
+        or not model
+        or any(c.isspace() for c in model)
+        or not cases
+        or len(cases) != len(set(cases))
+        or set(cases) - set(CASES)
+    ):
         raise ValueError("invalid exact model or probe case selection")
-    results = []
+    results: list[CheckResult] = []
     with _listener(config, upstream_open) as base:
         opener = build_opener(ProxyHandler({}), DeadlineHTTPHandler())
         for case in cases:
             started = time.monotonic()
             used = 0
             nonce = "nonce_" + secrets.token_hex(8)
-            body = {"model": model, "messages": [{"role": "user", "content": "Reply with exactly " + nonce}], "max_tokens": 96}
+            body: dict[str, Any] = {
+                "model": model,
+                "messages": [{"role": "user", "content": "Reply with exactly " + nonce}],
+                "max_tokens": 96,
+            }
 
-            def send(value, expected_nonce=nonce):
+            # Streaming probes return the decoded deltas, JSON probes the decoded result.
+            def send(value: dict[str, Any], expected_nonce: str | None = nonce) -> Any:
                 nonlocal used
                 used += 1
                 if used > 2:
                     raise ValueError("probe request budget exceeded")
                 value = convert_request(value, Protocol.CHAT, source)
-                suffix = {Protocol.CHAT: "/chat/completions", Protocol.MESSAGES: "/messages", Protocol.RESPONSES: "/responses"}[source]
+                suffix = {
+                    Protocol.CHAT: "/chat/completions",
+                    Protocol.MESSAGES: "/messages",
+                    Protocol.RESPONSES: "/responses",
+                }[source]
                 request = Request(
                     base + "/v1" + suffix,
                     data=json.dumps(value).encode(),
                     headers={"Authorization": "Bearer " + config.inbound_token, "Content-Type": "application/json"},
                 )
                 budget = RequestBudget(10, 30, 15)
-                request.protoverta_budget = budget
+                attach_budget(request, budget)
                 with opener.open(request, timeout=budget.remaining()) as response:
                     raw = bytearray()
                     while len(raw) <= 2 * 1024 * 1024:
@@ -102,7 +130,9 @@ def check_route(config, model, source_protocol, *, cases=CASES, allow_live=False
                     decoder.finish()
                     if any(delta.kind == "finish" and delta.reason == "length" for delta in deltas):
                         raise _IncompleteCheck()
-                    if expected_nonce is not None and expected_nonce not in "".join(delta.text or "" for delta in deltas if delta.kind == "text"):
+                    if expected_nonce is not None and expected_nonce not in "".join(
+                        delta.text or "" for delta in deltas if delta.kind == "text"
+                    ):
                         raise ValueError("stream did not preserve synthetic nonce")
                     return deltas
                 result = _decode_result(json.loads(raw), source, public_reasoning=config.public_reasoning)
@@ -130,12 +160,22 @@ def check_route(config, model, source_protocol, *, cases=CASES, allow_live=False
                         deltas = send(body | {"stream": True}, expected_nonce=None)
                         calls = [part for part in deltas if part.kind == "tool_start"]
                         arguments = "".join(part.text or "" for part in deltas if part.kind == "tool_delta")
-                        if len(calls) != 1 or calls[0].name != "fixture_nonce" or not calls[0].call_id or json.loads(arguments) != {}:
+                        if (
+                            len(calls) != 1
+                            or calls[0].name != "fixture_nonce"
+                            or not calls[0].call_id
+                            or json.loads(arguments) != {}
+                        ):
                             raise ValueError("streaming tool contract not satisfied")
                     else:
                         result = send(body)
                         calls = [part for part in result.parts if part.kind == "tool_call"]
-                        if len(calls) != 1 or calls[0].name != "fixture_nonce" or not calls[0].call_id or json.loads(calls[0].arguments) != {}:
+                        if (
+                            len(calls) != 1
+                            or calls[0].name != "fixture_nonce"
+                            or not calls[0].call_id
+                            or json.loads(calls[0].arguments) != {}
+                        ):
                             raise ValueError("tool call contract not satisfied")
                     if case == "tool_result":
                         call = calls[0]
@@ -144,7 +184,13 @@ def check_route(config, model, source_protocol, *, cases=CASES, allow_live=False
                             {
                                 "role": "assistant",
                                 "content": None,
-                                "tool_calls": [{"id": call.call_id, "type": "function", "function": {"name": call.name, "arguments": call.arguments}}],
+                                "tool_calls": [
+                                    {
+                                        "id": call.call_id,
+                                        "type": "function",
+                                        "function": {"name": call.name, "arguments": call.arguments},
+                                    }
+                                ],
                             },
                             {"role": "tool", "tool_call_id": call.call_id, "content": nonce},
                         ]
@@ -157,7 +203,10 @@ def check_route(config, model, source_protocol, *, cases=CASES, allow_live=False
                     if nonce not in text:
                         raise ValueError("text contract not satisfied")
                     if case == "history_replay":
-                        body["messages"] += [{"role": "assistant", "content": text}, {"role": "user", "content": "Repeat the nonce from earlier exactly."}]
+                        body["messages"] += [
+                            {"role": "assistant", "content": text},
+                            {"role": "user", "content": "Repeat the nonce from earlier exactly."},
+                        ]
                         result = send(body)
                         if nonce not in "".join(part.text for part in result.parts if part.kind == "text"):
                             raise ValueError("history replay contract not satisfied")
@@ -167,18 +216,35 @@ def check_route(config, model, source_protocol, *, cases=CASES, allow_live=False
             except HTTPError as exc:
                 status = exc.code
                 exc.close()
-                results.append(CheckResult(case, False, "http_" + str(status), used, int((time.monotonic() - started) * 1000)))
+                results.append(
+                    CheckResult(case, False, "http_" + str(status), used, int((time.monotonic() - started) * 1000))
+                )
             except (OSError, ValueError, TypeError, KeyError, RecursionError):
-                results.append(CheckResult(case, False, "contract_or_transport_failure", used, int((time.monotonic() - started) * 1000)))
+                results.append(
+                    CheckResult(
+                        case, False, "contract_or_transport_failure", used, int((time.monotonic() - started) * 1000)
+                    )
+                )
     return [asdict(result) for result in results]
 
 
-def evidence_report(config, model, source_protocol, results, *, verified_with):
+def evidence_report(
+    config: GatewayConfig,
+    model: str,
+    source_protocol: Protocol | str,
+    results: Sequence[Mapping[str, Any]],
+    *,
+    verified_with: str,
+) -> dict[str, Any]:
     """Export only tested positive features. Failures never certify unsupported."""
-    routes = []
+    routes: list[dict[str, Any]] = []
     for streaming in (False, True):
-        relevant = [item for item in results if (item["case"] in ("streaming", "streaming_tools")) == streaming and item["passed"] is True]
-        features = {}
+        relevant = [
+            item
+            for item in results
+            if (item["case"] in ("streaming", "streaming_tools")) == streaming and item["passed"] is True
+        ]
+        features: dict[str, bool] = {}
         for item in relevant:
             if item["case"] in ("text", "streaming"):
                 features["text"] = True

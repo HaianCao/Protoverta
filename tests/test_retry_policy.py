@@ -15,12 +15,27 @@ from protoverta.error_classes import DEFAULT_RETRY_CLASSES, RetryPolicy, classif
 from protoverta.server import GatewayConfig, GatewayHTTPServer, make_handler
 
 # Messages seen from real providers (2026-11-07 .. 2026-11-10 live checks).
-AZURE = {"error": {"message": "The requested item was created under a different Azure OpenAI resource.", "type": "invalid_request_error"}}
-AGENTROUTER_NO_CHANNEL = {"error": {"message": "当前分组 default 下对于模型 no-such-model 无可用渠道 (request id: x)", "type": "new_api_error"}}
-OPENROUTER_BAD_MODEL = {"error": {"message": "nonexistent-vendor/no-such-model-xyz is not a valid model ID", "code": 400}}
+AZURE = {
+    "error": {
+        "message": "The requested item was created under a different Azure OpenAI resource.",
+        "type": "invalid_request_error",
+    }
+}
+AGENTROUTER_NO_CHANNEL = {
+    "error": {
+        "message": "当前分组 default 下对于模型 no-such-model 无可用渠道 (request id: x)",
+        "type": "new_api_error",
+    }
+}
+OPENROUTER_BAD_MODEL = {
+    "error": {"message": "nonexistent-vendor/no-such-model-xyz is not a valid model ID", "code": 400}
+}
 AGENTROUTER_CLIENT = {"error": {"message": "unauthorized client detected, contact support", "type": "new_api_error"}}
 NIM_REQUIRED = {"error": {"message": "model field is required", "type": "invalid_request_error"}}
-OPENROUTER_MESSAGES_400 = {"type": "error", "error": {"type": "invalid_request_error", "message": "Invalid Anthropic Messages API request"}}
+OPENROUTER_MESSAGES_400 = {
+    "type": "error",
+    "error": {"type": "invalid_request_error", "message": "Invalid Anthropic Messages API request"},
+}
 
 
 @pytest.mark.parametrize(
@@ -52,17 +67,35 @@ def test_real_provider_errors_are_classified(status, body, expected):
 def test_stream_and_transport_failures():
     assert classify(None, transport=True) == "network"
     assert classify(None, None, stream_before_output=True) == "stream_interrupted"
-    failed = {"type": "response.failed", "response": {"status": "failed", "error": {"code": "server_error", "message": "backend busy"}}}
+    failed = {
+        "type": "response.failed",
+        "response": {"status": "failed", "error": {"code": "server_error", "message": "backend busy"}},
+    }
     assert classify(None, json.dumps(failed), stream_before_output=True) == "server"
 
 
 def test_policy_from_config_table():
     assert RetryPolicy.from_mapping({}).retry_classes == DEFAULT_RETRY_CLASSES
-    policy = RetryPolicy.from_mapping({"max_retries": 3, "delay_seconds": 5, "retry_classes": ["auth"], "no_retry_classes": ["unknown"], "skip_status": [418]})
+    policy = RetryPolicy.from_mapping(
+        {
+            "max_retries": 3,
+            "delay_seconds": 5,
+            "retry_classes": ["auth"],
+            "no_retry_classes": ["unknown"],
+            "skip_status": [418],
+        }
+    )
     assert policy.max_retries == 3 and policy.delay_seconds == 5
     assert "auth" in policy.retry_classes and "unknown" not in policy.retry_classes
     assert not policy.retryable("server", 418)
-    for bad in ({"max_retries": -1}, {"delay_seconds": 4000}, {"retry_classes": ["nope"]}, {"enabled": 1}, {"surprise": 1}, {"skip_status": "429"}):
+    for bad in (
+        {"max_retries": -1},
+        {"delay_seconds": 4000},
+        {"retry_classes": ["nope"]},
+        {"enabled": 1},
+        {"surprise": 1},
+        {"skip_status": "429"},
+    ):
         with pytest.raises(ValueError):
             RetryPolicy.from_mapping(bad)
 
@@ -157,7 +190,10 @@ def test_retryable_http_error_is_resent_until_success():
 
 def test_upstream_retry_hint_overrides_the_class():
     # An explicit upstream ``x-should-retry: true`` makes even a 401 retryable.
-    upstream = Upstream(lambda: http_error(401, AGENTROUTER_CLIENT, {"Content-Type": "application/json", "x-should-retry": "true"}), CHAT_OK)
+    upstream = Upstream(
+        lambda: http_error(401, AGENTROUTER_CLIENT, {"Content-Type": "application/json", "x-should-retry": "true"}),
+        CHAT_OK,
+    )
     with gateway(upstream) as address:
         status, _, _ = call(address, "/v1/chat/completions", CHAT_REQUEST)
     assert (status, upstream.calls) == (200, 2)
@@ -197,14 +233,23 @@ def sse(*events):
     return b"".join(f"event: {event['type']}\ndata: {json.dumps(event)}\n\n".encode() for event in events)
 
 
-CREATED = {"type": "response.created", "response": {"id": "r", "object": "response", "status": "in_progress", "model": "m", "output": []}}
-FAILED = {"type": "response.failed", "response": {"id": "r", "status": "failed", "error": {"code": "server_error", "message": "backend busy"}}}
+CREATED = {
+    "type": "response.created",
+    "response": {"id": "r", "object": "response", "status": "in_progress", "model": "m", "output": []},
+}
+FAILED = {
+    "type": "response.failed",
+    "response": {"id": "r", "status": "failed", "error": {"code": "server_error", "message": "backend busy"}},
+}
 
 
 def test_stream_failing_before_output_is_retried_on_a_native_route(monkeypatch):
     from protoverta import server
 
-    good = sse(CREATED, {"type": "response.output_text.delta", "item_id": "m", "output_index": 0, "content_index": 0, "delta": "PONG"})
+    good = sse(
+        CREATED,
+        {"type": "response.output_text.delta", "item_id": "m", "output_index": 0, "content_index": 0, "delta": "PONG"},
+    )
     upstream = Upstream(sse(CREATED, FAILED), b"", good)
     # The native validator would reject this deliberately short stream; only
     # the retry decision is under test, so let it pass bytes through.

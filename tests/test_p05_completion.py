@@ -28,7 +28,9 @@ from protoverta.token_quota import SharedTokenQuota
 
 @pytest.mark.parametrize("source", list(Protocol))
 @pytest.mark.parametrize("target", [Protocol.RESPONSES, Protocol.MESSAGES])
-def test_cancel_retains_unknown_token_charge_releases_only_its_concurrency_and_keeps_rate_usage(tmp_path, source, target):
+def test_cancel_retains_unknown_token_charge_releases_only_its_concurrency_and_keeps_rate_usage(
+    tmp_path, source, target
+):
     database = tmp_path / "quota.sqlite"
     observations = []
     clients = []
@@ -64,8 +66,12 @@ def test_cancel_retains_unknown_token_charge_releases_only_its_concurrency_and_k
             deadline = time.monotonic() + 2
             while True:
                 with sqlite3.connect(database) as db:
-                    cancelled_token = db.execute("SELECT amount,active_until FROM token_reservations WHERE scope=?", (quota.storage.scope,)).fetchall()
-                    active_leases = db.execute("SELECT COUNT(*) FROM attempts WHERE active_until>?", (time.time(),)).fetchone()[0]
+                    cancelled_token = db.execute(
+                        "SELECT amount,active_until FROM token_reservations WHERE scope=?", (quota.storage.scope,)
+                    ).fetchall()
+                    active_leases = db.execute(
+                        "SELECT COUNT(*) FROM attempts WHERE active_until>?", (time.time(),)
+                    ).fetchone()[0]
                 if cancelled_token == [(42, 0.0)] and active_leases == 2:
                     break
                 assert time.monotonic() < deadline, (cancelled_token, active_leases)
@@ -124,7 +130,13 @@ def test_worktree_gate_requires_relative_read_correct_cwd_and_unchanged_main(scr
         "worktree_cwd_verified",
         "main_checkout_unchanged",
     ]
-    result = {**dict.fromkeys(flags, True), "worktrees": True, "upstream_counts": [2, 2], "fixture_errors": [[], []], "errors": []}
+    result = {
+        **dict.fromkeys(flags, True),
+        "worktrees": True,
+        "upstream_counts": [2, 2],
+        "fixture_errors": [[], []],
+        "errors": [],
+    }
     if fault == "wrong_cwd":
         result["worktree_cwd_verified"] = False
     elif fault == "wrong_read":
@@ -137,7 +149,9 @@ def test_worktree_gate_requires_relative_read_correct_cwd_and_unchanged_main(scr
 
 
 @pytest.mark.parametrize("lane,expected", [("parent", "own-parent"), ("a", "own-a"), ("b", "own-b"), ("unknown", None)])
-def test_readonly_mcp_values_correlate_lane_arguments_without_tool_id_global_state(scripts, monkeypatch, lane, expected):
+def test_readonly_mcp_values_correlate_lane_arguments_without_tool_id_global_state(
+    scripts, monkeypatch, lane, expected
+):
     module = importlib.import_module("smoke_tool_search")
     request = {"id": 1, "method": "tools/call", "params": {"name": module.LOOKUP, "arguments": {"lane": lane}}}
     output = io.StringIO()

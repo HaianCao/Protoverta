@@ -33,9 +33,17 @@ def history(source, *, ids=("opaque:/+=",), duplicate=False):
     if duplicate:
         results.append(copy.deepcopy(results[-1]))
     if source == "chat":
-        return {"model": "m", "max_tokens": 20, "messages": [{"role": "assistant", "content": None, "tool_calls": calls}, *results]}
+        return {
+            "model": "m",
+            "max_tokens": 20,
+            "messages": [{"role": "assistant", "content": None, "tool_calls": calls}, *results],
+        }
     if source == "messages":
-        return {"model": "m", "max_tokens": 20, "messages": [{"role": "assistant", "content": calls}, {"role": "user", "content": results}]}
+        return {
+            "model": "m",
+            "max_tokens": 20,
+            "messages": [{"role": "assistant", "content": calls}, {"role": "user", "content": results}],
+        }
     return {"model": "m", "max_output_tokens": 20, "input": calls + results}
 
 
@@ -81,14 +89,26 @@ def test_bad_history_never_dispatches_and_next_valid_request_recovers(target, ba
 def messages_wire(fragments=None, trailing_text=None):
     events = [
         ("message_start", {"message": {"model": "m", "content": [], "usage": {"input_tokens": 2, "output_tokens": 0}}}),
-        ("content_block_start", {"index": 0, "content_block": {"type": "tool_use", "id": "c", "name": "fixture", "input": {}}}),
+        (
+            "content_block_start",
+            {"index": 0, "content_block": {"type": "tool_use", "id": "c", "name": "fixture", "input": {}}},
+        ),
     ]
     for fragment in fragments or []:
-        events.append(("content_block_delta", {"index": 0, "delta": {"type": "input_json_delta", "partial_json": fragment}}))
+        events.append(
+            ("content_block_delta", {"index": 0, "delta": {"type": "input_json_delta", "partial_json": fragment}})
+        )
     events.append(("content_block_stop", {"index": 0}))
     if trailing_text is not None:
-        events.extend([("content_block_start", {"index": 1, "content_block": {"type": "text", "text": trailing_text}}), ("content_block_stop", {"index": 1})])
-    events.extend([("message_delta", {"delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 1}}), ("message_stop", {})])
+        events.extend(
+            [
+                ("content_block_start", {"index": 1, "content_block": {"type": "text", "text": trailing_text}}),
+                ("content_block_stop", {"index": 1}),
+            ]
+        )
+    events.extend(
+        [("message_delta", {"delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 1}}), ("message_stop", {})]
+    )
     return b"".join(encode_sse(kind, json.dumps({"type": kind, **body})) for kind, body in events)
 
 
@@ -118,7 +138,10 @@ def test_invalid_messages_arguments_are_never_replaced_with_empty_object(target,
 def test_sse_text_after_tool_uses_same_strict_subset_as_json(target):
     body = {
         "model": "m",
-        "content": [{"type": "tool_use", "id": "c", "name": "fixture", "input": {}}, {"type": "text", "text": "after tool"}],
+        "content": [
+            {"type": "tool_use", "id": "c", "name": "fixture", "input": {}},
+            {"type": "text", "text": "after tool"},
+        ],
         "stop_reason": "tool_use",
         "usage": {"input_tokens": 2, "output_tokens": 1},
     }
@@ -151,11 +174,19 @@ def test_chat_choice_index_requires_exact_integer_in_initial_and_usage_chunks(in
             SSEEvent(
                 "message",
                 json.dumps(
-                    {"object": "chat.completion.chunk", "model": "m", "choices": [{"index": 0, "delta": {"content": "synthetic"}, "finish_reason": "stop"}]}
+                    {
+                        "object": "chat.completion.chunk",
+                        "model": "m",
+                        "choices": [{"index": 0, "delta": {"content": "synthetic"}, "finish_reason": "stop"}],
+                    }
                 ),
             )
         )
-    body = {"object": "chat.completion.chunk", "model": "m", "choices": [{"index": index, "delta": {}, "finish_reason": "stop" if postlude else None}]}
+    body = {
+        "object": "chat.completion.chunk",
+        "model": "m",
+        "choices": [{"index": index, "delta": {}, "finish_reason": "stop" if postlude else None}],
+    }
     if postlude:
         body["usage"] = {"prompt_tokens": 2, "completion_tokens": 1}
     with pytest.raises(StreamError, match="index"):
@@ -170,7 +201,11 @@ def test_chat_empty_argument_string_is_not_normalized_like_messages_input():
         "choices": [
             {
                 "index": 0,
-                "delta": {"tool_calls": [{"index": 0, "id": "c", "type": "function", "function": {"name": "f", "arguments": ""}}]},
+                "delta": {
+                    "tool_calls": [
+                        {"index": 0, "id": "c", "type": "function", "function": {"name": "f", "arguments": ""}}
+                    ]
+                },
                 "finish_reason": "tool_calls",
             }
         ],
@@ -188,4 +223,8 @@ def test_messages_empty_argument_normalization_requires_explicit_object_input(va
     if value != "missing":
         block["input"] = value
     with pytest.raises(StreamError, match="tool_use.input"):
-        decoder.feed(SSEEvent("content_block_start", json.dumps({"type": "content_block_start", "index": 0, "content_block": block})))
+        decoder.feed(
+            SSEEvent(
+                "content_block_start", json.dumps({"type": "content_block_start", "index": 0, "content_block": block})
+            )
+        )

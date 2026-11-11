@@ -31,7 +31,15 @@ class WindowsProbeJob:
 
         class IOCounters(ctypes.Structure):
             _fields_ = [
-                (name, ctypes.c_ulonglong) for name in ("read_operations", "write_operations", "other_operations", "read_bytes", "write_bytes", "other_bytes")
+                (name, ctypes.c_ulonglong)
+                for name in (
+                    "read_operations",
+                    "write_operations",
+                    "other_operations",
+                    "read_bytes",
+                    "write_bytes",
+                    "other_bytes",
+                )
             ]
 
         class ExtendedLimits(ctypes.Structure):
@@ -47,14 +55,26 @@ class WindowsProbeJob:
         self.kernel = ctypes.WinDLL("kernel32", use_last_error=True)
         for name, args, result in (
             ("CreateJobObjectW", [ctypes.c_void_p, wintypes.LPCWSTR], wintypes.HANDLE),
-            ("SetInformationJobObject", [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD], wintypes.BOOL),
+            (
+                "SetInformationJobObject",
+                [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD],
+                wintypes.BOOL,
+            ),
             ("AssignProcessToJobObject", [wintypes.HANDLE, wintypes.HANDLE], wintypes.BOOL),
             ("TerminateJobObject", [wintypes.HANDLE, wintypes.UINT], wintypes.BOOL),
             ("CloseHandle", [wintypes.HANDLE], wintypes.BOOL),
             ("ResumeThread", [wintypes.HANDLE], wintypes.DWORD),
-            ("QueryInformationJobObject", [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD, ctypes.c_void_p], wintypes.BOOL),
+            (
+                "QueryInformationJobObject",
+                [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD, ctypes.c_void_p],
+                wintypes.BOOL,
+            ),
             ("OpenProcess", [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD], wintypes.HANDLE),
-            ("QueryFullProcessImageNameW", [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)], wintypes.BOOL),
+            (
+                "QueryFullProcessImageNameW",
+                [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)],
+                wintypes.BOOL,
+            ),
         ):
             function = getattr(self.kernel, name)
             function.argtypes, function.restype = args, result
@@ -89,7 +109,10 @@ class WindowsProbeJob:
         count = ctypes.c_uint32.from_buffer(buffer, 4).value
         if assigned != count or count > 128:
             raise RuntimeError("Probe job membership snapshot was truncated")
-        return {ctypes.c_size_t.from_buffer(buffer, 8 + index * ctypes.sizeof(ctypes.c_size_t)).value for index in range(count)}
+        return {
+            ctypes.c_size_t.from_buffer(buffer, 8 + index * ctypes.sizeof(ctypes.c_size_t)).value
+            for index in range(count)
+        }
 
     def process_images(self):
         """Image basenames of this probe job only; never inspect command lines."""

@@ -47,7 +47,9 @@ class SetupLaunchFixture:
         self.exit_codes = []
         self.child = self.root / "synthetic_cli.py"
         version = "codex-cli 0.166.0" if launcher.__name__.startswith("codexapter") else "2.1.308 (Claude Code)"
-        version_query = f"import sys\nif sys.argv[1:] == ['--version']:\n    print({version!r})\n    raise SystemExit(0)\n"
+        version_query = (
+            f"import sys\nif sys.argv[1:] == ['--version']:\n    print({version!r})\n    raise SystemExit(0)\n"
+        )
         self.child.write_text(version_query + CHILD, encoding="utf-8")
 
     def launch(self, *args):
@@ -62,12 +64,18 @@ class SetupLaunchFixture:
         }
 
         def make_handler(config, *, observer=None, upstream_open=None):
-            return original_handler(config, upstream_open=lambda *_args, **_kwargs: io.BytesIO(json.dumps(response).encode()), observer=observer)
+            return original_handler(
+                config,
+                upstream_open=lambda *_args, **_kwargs: io.BytesIO(json.dumps(response).encode()),
+                observer=observer,
+            )
 
         with ExitStack() as stack:
             stack.enter_context(patch.dict("os.environ", {"PROTOVERTA_SETUP_FIXTURE_ROOT": str(self.root)}))
             stack.enter_context(patch.object(self.launcher.shutil, "which", return_value=sys.executable))
-            stack.enter_context(patch.object(self.launcher, "command_prefix", return_value=[sys.executable, str(self.child)]))
+            stack.enter_context(
+                patch.object(self.launcher, "command_prefix", return_value=[sys.executable, str(self.child)])
+            )
             stack.enter_context(patch.object(server, "make_handler", make_handler))
             result = self.original_launch(*args)
         self.exit_codes.append(result)

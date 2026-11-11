@@ -24,7 +24,12 @@ def test_child_role_marker_is_not_inherited_from_tool_result_text(harness, proto
     elif protocol == Protocol.CHAT:
         body = {"messages": [user, {"role": "tool", "content": harness.TASK}]}
     else:
-        body = {"messages": [user, {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "spawn", "content": harness.TASK}]}]}
+        body = {
+            "messages": [
+                user,
+                {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "spawn", "content": harness.TASK}]},
+            ]
+        }
     assert harness.TASK not in harness.user_text(body, protocol)
 
 
@@ -80,7 +85,10 @@ def test_mcp_fixture_reads_only_the_fixed_file_and_audits_only_real_calls(harnes
     assert audit.read_text(encoding="utf-8") == "read\n"
 
 
-@pytest.mark.parametrize("stdout", ["not json", "[]", '{"item":null}', '{"result":"P04_PARENT_VERIFIED"}', '{"is_error":false,"subagent_stats":null}'])
+@pytest.mark.parametrize(
+    "stdout",
+    ["not json", "[]", '{"item":null}', '{"result":"P04_PARENT_VERIFIED"}', '{"is_error":false,"subagent_stats":null}'],
+)
 @pytest.mark.parametrize("client", ["codex", "claude"])
 def test_claimed_completion_without_real_lifecycle_never_passes(harness, client, stdout):
     assert not harness.lifecycle_verified(client, stdout)
@@ -88,14 +96,26 @@ def test_claimed_completion_without_real_lifecycle_never_passes(harness, client,
 
 @pytest.mark.parametrize("failed,denied", [(0, False), (1, False), (0, True)])
 def test_claude_requires_exactly_one_completed_child_and_no_permission_denials(harness, failed, denied):
-    result = {"is_error": False, "permission_denials": ["fixture denied"] if denied else [], "subagent_stats": {"spawned": 1, "completed": 1, "failed": failed}}
+    result = {
+        "is_error": False,
+        "permission_denials": ["fixture denied"] if denied else [],
+        "subagent_stats": {"spawned": 1, "completed": 1, "failed": failed},
+    }
     assert harness.lifecycle_verified("claude", json.dumps(result)) is (failed == 0 and not denied)
 
 
 @pytest.mark.parametrize("status,child", [("completed", "child"), ("errored", "child"), ("completed", "other")])
 def test_codex_wait_must_confirm_the_actual_spawned_child(harness, status, child):
     events = [
-        {"type": "item.completed", "item": {"type": "collab_tool_call", "status": "completed", "tool": "spawn_agent", "receiver_thread_ids": ["child"]}},
+        {
+            "type": "item.completed",
+            "item": {
+                "type": "collab_tool_call",
+                "status": "completed",
+                "tool": "spawn_agent",
+                "receiver_thread_ids": ["child"],
+            },
+        },
         {
             "type": "item.completed",
             "item": {
@@ -106,4 +126,6 @@ def test_codex_wait_must_confirm_the_actual_spawned_child(harness, status, child
             },
         },
     ]
-    assert harness.lifecycle_verified("codex", "\n".join(map(json.dumps, events))) is (status == "completed" and child == "child")
+    assert harness.lifecycle_verified("codex", "\n".join(map(json.dumps, events))) is (
+        status == "completed" and child == "child"
+    )

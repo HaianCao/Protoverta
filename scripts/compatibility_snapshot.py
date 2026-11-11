@@ -39,7 +39,13 @@ def project_identity(root):
     env = sanitized_environment()
     head = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], env=env, text=True).strip()
     dirty = bool(subprocess.check_output(["git", "-C", str(root), "status", "--porcelain"], env=env, text=True).strip())
-    return {"name": body["name"], "version": body["version"], "head": head, "dirty": dirty, "runtime_sha256": digest.hexdigest()}
+    return {
+        "name": body["name"],
+        "version": body["version"],
+        "head": head,
+        "dirty": dirty,
+        "runtime_sha256": digest.hexdigest(),
+    }
 
 
 def snapshot(workspace):
@@ -53,7 +59,9 @@ def snapshot(workspace):
         "schema_version": 1,
         "python": platform.python_version(),
         "os": sys.platform,
-        "projects": [project_identity(workspace / name) for name in ("protoverta", "free-codex-cli", "free-claude-cli")],
+        "projects": [
+            project_identity(workspace / name) for name in ("protoverta", "free-codex-cli", "free-claude-cli")
+        ],
         "test_dependencies": dependencies,
         "cli_version_matrix": CLI_VERSION_MATRIX,
         "pinned_sdk_baseline": PINNED_SDK_BASELINE,

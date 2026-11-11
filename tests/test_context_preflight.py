@@ -39,7 +39,9 @@ def test_unknown_inputs_never_get_a_false_fit_claim(missing):
     if missing == "output":
         body.pop("max_tokens")
     if missing == "image":
-        body["messages"][-1]["content"] = [{"type": "image_url", "image_url": {"url": "https://example.test/image.png"}}]
+        body["messages"][-1]["content"] = [
+            {"type": "image_url", "image_url": {"url": "https://example.test/image.png"}}
+        ]
     result = assess_context(body, "chat", None if missing == "limit" else 10000)
     assert result.verdict == "unknown" and not result.exact
     with pytest.raises(ConversionError, match="unknown"):
@@ -76,10 +78,18 @@ def test_callback_failures_are_sanitized_and_bad_count_types_rejected():
             TokenCount(number)
 
 
-@pytest.mark.parametrize(("policy", "status", "calls"), [("off", 200, 1), ("estimate", 200, 1), ("reject_estimate", 422, 0)])
+@pytest.mark.parametrize(
+    ("policy", "status", "calls"), [("off", 200, 1), ("estimate", 200, 1), ("reject_estimate", 422, 0)]
+)
 def test_gateway_context_preflight_is_opt_in_and_rejection_never_calls_upstream(policy, status, calls):
-    record = CapabilityRecord("https://example.test/v1", "chat", "m", {}, "2026-10-25", "synthetic", context_window_tokens=1)
-    config = replace(GatewayConfig("chat", "https://example.test/v1", "key", "local"), context_preflight=policy, capabilities=CapabilityRegistry((record,)))
+    record = CapabilityRecord(
+        "https://example.test/v1", "chat", "m", {}, "2026-10-25", "synthetic", context_window_tokens=1
+    )
+    config = replace(
+        GatewayConfig("chat", "https://example.test/v1", "key", "local"),
+        context_preflight=policy,
+        capabilities=CapabilityRegistry((record,)),
+    )
     received = []
 
     def upstream(request, timeout):
@@ -112,7 +122,15 @@ def test_media_never_gets_a_fake_byte_token_count(kind):
 
 def test_tool_schema_field_names_are_not_media():
     body = request() | {
-        "tools": [{"type": "function", "function": {"name": "image", "parameters": {"type": "object", "properties": {"type": {"const": "image"}}}}}]
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "image",
+                    "parameters": {"type": "object", "properties": {"type": {"const": "image"}}},
+                },
+            }
+        ]
     }
     assert assess_context(body, "chat", 10000).input_tokens is not None
 

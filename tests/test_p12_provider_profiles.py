@@ -331,9 +331,17 @@ def test_p12_token_cap_and_reasoning_effort_never_clamp_or_downgrade_and_unknown
 
     # 3. Unknown vendor fields are rejected across protocols, never blindly passed through
     for source, target, payload in (
-        (Protocol.CHAT, Protocol.RESPONSES, {"model": "m", "messages": [{"role": "user", "content": "hi"}], "vendor_extra": 123}),
+        (
+            Protocol.CHAT,
+            Protocol.RESPONSES,
+            {"model": "m", "messages": [{"role": "user", "content": "hi"}], "vendor_extra": 123},
+        ),
         (Protocol.RESPONSES, Protocol.CHAT, {"model": "m", "input": "hi", "vendor_extra": 123}),
-        (Protocol.MESSAGES, Protocol.CHAT, {"model": "m", "max_tokens": 16, "messages": [{"role": "user", "content": "hi"}], "vendor_extra": 123}),
+        (
+            Protocol.MESSAGES,
+            Protocol.CHAT,
+            {"model": "m", "max_tokens": 16, "messages": [{"role": "user", "content": "hi"}], "vendor_extra": 123},
+        ),
     ):
         with pytest.raises(ConversionError, match="unsupported fields: vendor_extra"):
             convert_request(payload, source, target)

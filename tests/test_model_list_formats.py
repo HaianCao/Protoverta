@@ -20,14 +20,23 @@ def test_messages_shape_and_bidirectional_paging_with_unknown_release():
     config = GatewayConfig("chat", BASE, "key", "local", model_snapshot=snapshot)
     with listener(config, no_upstream) as endpoint:
         url = endpoint.replace("/responses", "/models")
-        with urlopen(Request(url, headers={"x-api-key": "local", "anthropic-version": "2023-06-01"}), timeout=3) as response:
+        with urlopen(
+            Request(url, headers={"x-api-key": "local", "anthropic-version": "2023-06-01"}), timeout=3
+        ) as response:
             first = json.load(response)
         assert len(first["data"]) == 20 and first["has_more"] is True and "object" not in first
-        assert first["data"][0] == {"id": "m0", "display_name": "m0", "type": "model", "created_at": "1970-01-01T00:00:00Z"}
+        assert first["data"][0] == {
+            "id": "m0",
+            "display_name": "m0",
+            "type": "model",
+            "created_at": "1970-01-01T00:00:00Z",
+        }
         assert snapshot.page("before_id=m20&limit=3&format=messages")["first_id"] == "m17"
         assert snapshot.page("before_id=m1&limit=3&format=messages")["has_more"] is False
         # Claude Code 2.1.248+ sends both credentials; both matching is accepted.
-        with urlopen(Request(url, headers={"x-api-key": "local", "Authorization": "Bearer local"}), timeout=3) as response:
+        with urlopen(
+            Request(url, headers={"x-api-key": "local", "Authorization": "Bearer local"}), timeout=3
+        ) as response:
             assert response.status == 200
         with pytest.raises(HTTPError) as exc:
             urlopen(Request(url, headers={"x-api-key": "local", "Authorization": "Bearer other"}), timeout=3)
@@ -44,16 +53,22 @@ def test_openai_projection_requires_actual_metadata_not_fabricated_values():
     with pytest.raises(ValueError, match="reported lifecycle"):
         unknown.page("format=messages", messages_api_version="2026-10-21")
     reported = ModelSnapshot(BASE, "chat", (SnapshotModel("m", "Display", 123, "provider-owner"),))
-    assert reported.page("format=openai")["data"] == [{"id": "m", "object": "model", "created": 123, "owned_by": "provider-owner"}]
+    assert reported.page("format=openai")["data"] == [
+        {"id": "m", "object": "model", "created": 123, "owned_by": "provider-owner"}
+    ]
 
 
-@pytest.mark.parametrize("query", ["format=unknown", "after_id=m&before_id=m", "before_id=", "format=messages&format=openai"])
+@pytest.mark.parametrize(
+    "query", ["format=unknown", "after_id=m&before_id=m", "before_id=", "format=messages&format=openai"]
+)
 def test_invalid_projection_or_cursor_query(query):
     with pytest.raises(ValueError):
         ModelSnapshot.from_ids(BASE, "chat", ("m",)).page(query)
 
 
-@pytest.mark.parametrize("metadata", [{"created": True}, {"created": -1}, {"created": 253402300800}, {"owned_by": "\n"}])
+@pytest.mark.parametrize(
+    "metadata", [{"created": True}, {"created": -1}, {"created": 253402300800}, {"owned_by": "\n"}]
+)
 def test_invalid_reported_metadata_is_not_advertised(metadata):
     with pytest.raises(ValueError):
         SnapshotModel("m", "Display", **metadata)
@@ -72,16 +87,26 @@ def test_pinned_sdk_model_list_parsing_is_strictly_validated():
     from openai import OpenAI
     from openai.types import Model
 
-    snapshot = ModelSnapshot(BASE, "chat", (SnapshotModel("vendor/model:free", "Human name", 123, "fixture-owner", "active"),))
+    snapshot = ModelSnapshot(
+        BASE, "chat", (SnapshotModel("vendor/model:free", "Human name", 123, "fixture-owner", "active"),)
+    )
     assert Model.model_validate(snapshot.models[0].wire("openai")).id == "vendor/model:free"
-    assert ModelInfo.model_validate(snapshot.models[0].wire("messages", messages_api_version="2026-10-21")).capabilities is None
+    assert (
+        ModelInfo.model_validate(snapshot.models[0].wire("messages", messages_api_version="2026-10-21")).capabilities
+        is None
+    )
     config = GatewayConfig("chat", BASE, "key", "local", model_snapshot=snapshot)
     with listener(config, no_upstream) as endpoint:
         base = endpoint.removesuffix("/responses")
         with OpenAI(api_key="local", base_url=base, max_retries=0) as client:
             rows = client.models.list(extra_query={"format": "openai"}).data
             assert Model.model_validate(rows[0].model_dump()).id == "vendor/model:free"
-        with Anthropic(api_key="local", base_url=base.removesuffix("/v1"), max_retries=0, default_headers={"anthropic-version": "2026-10-21"}) as client:
+        with Anthropic(
+            api_key="local",
+            base_url=base.removesuffix("/v1"),
+            max_retries=0,
+            default_headers={"anthropic-version": "2026-10-21"},
+        ) as client:
             rows = client.models.list().data
             assert ModelInfo.model_validate(rows[0].model_dump()).display_name == "Human name"
 

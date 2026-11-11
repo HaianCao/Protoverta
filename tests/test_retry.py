@@ -27,11 +27,17 @@ def test_explicit_rejection_can_retry_before_response_delivery():
             raise HTTPError("https://example.test", 503, "fixture", {"Retry-After": "1"}, io.BytesIO(b"{}"))
         return response
 
-    assert open_with_retry(opener, object(), RequestBudget(10, 10, 10), attempts=2, sleep=sleeps.append) == (response, None)
+    assert open_with_retry(opener, object(), RequestBudget(10, 10, 10), attempts=2, sleep=sleeps.append) == (
+        response,
+        None,
+    )
     assert len(calls) == 2 and sleeps == [1]
 
 
-@pytest.mark.parametrize("status,headers", [(400, {}), (401, {}), (403, {}), (422, {}), (503, {"x-should-retry": "false"}), (429, {"Retry-After": "60"})])
+@pytest.mark.parametrize(
+    "status,headers",
+    [(400, {}), (401, {}), (403, {}), (422, {}), (503, {"x-should-retry": "false"}), (429, {"Retry-After": "60"})],
+)
 def test_permanent_or_long_cooldown_errors_are_not_retried(status, headers):
     calls = []
 
@@ -64,7 +70,9 @@ def test_gateway_retries_only_open_not_read_or_conversion():
         calls.append(1)
         if len(calls) == 1:
             raise HTTPError(request.full_url, 503, "busy", {"Retry-After": "0"}, io.BytesIO(b"{}"))
-        return io.BytesIO(b'{"model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}')
+        return io.BytesIO(
+            b'{"model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}'
+        )
 
     config = GatewayConfig("chat", "https://example.test/v1", "key", "local", retry_attempts=2)
     with listener(config, upstream) as url, post(url, {"model": "m", "input": "Hi"}) as response:

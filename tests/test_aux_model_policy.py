@@ -23,7 +23,10 @@ BASE = "https://example.invalid/provider/v1"
 
 def response(protocol, model):
     if protocol == Protocol.CHAT:
-        value = {"model": model, "choices": [{"message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}]}
+        value = {
+            "model": model,
+            "choices": [{"message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
+        }
     elif protocol == Protocol.MESSAGES:
         value = {
             "model": model,
@@ -74,7 +77,13 @@ def test_child_rejection_uses_child_capabilities_and_budget_before_dispatch(prot
     calls = []
     registry = CapabilityRegistry(tuple(records(protocol, child_context=12 if fault == "context" else 64)))
     config = GatewayConfig(
-        protocol, BASE, "fake", "local", capabilities=registry, context_preflight="reject_estimate", token_counter=lambda *_: TokenCount(10, exact=True)
+        protocol,
+        BASE,
+        "fake",
+        "local",
+        capabilities=registry,
+        context_preflight="reject_estimate",
+        token_counter=lambda *_: TokenCount(10, exact=True),
     )
 
     def upstream(request, *, timeout):
@@ -106,11 +115,24 @@ def test_unknown_child_never_borrows_parent_evidence_or_silently_falls_back(veri
     calls = []
     config = GatewayConfig("chat", BASE, "fake", "local")
     route_record = RouteCapabilityRecord(
-        BASE, "chat", "main", "responses", False, "strict", route_policies(config), {"text": True}, "2026-11-04", "synthetic", "fixture"
+        BASE,
+        "chat",
+        "main",
+        "responses",
+        False,
+        "strict",
+        route_policies(config),
+        {"text": True},
+        "2026-11-04",
+        "synthetic",
+        "fixture",
     )
     registry = CapabilityRegistry(tuple(records("chat", child=False)), (route_record,))
     config = replace(
-        config, capabilities=registry, require_verified_routes=verified if route else False, require_verified_capabilities=verified if not route else False
+        config,
+        capabilities=registry,
+        require_verified_routes=verified if route else False,
+        require_verified_capabilities=verified if not route else False,
     )
 
     def upstream(request, *, timeout):
@@ -135,11 +157,23 @@ def test_both_models_require_their_own_positive_route_evidence_in_verified_mode(
     config = GatewayConfig("chat", BASE, "fake", "local")
     routes = tuple(
         RouteCapabilityRecord(
-            BASE, "chat", model, "responses", False, "strict", route_policies(config), {"text": True}, "2026-11-04", "synthetic-" + model, "fixture"
+            BASE,
+            "chat",
+            model,
+            "responses",
+            False,
+            "strict",
+            route_policies(config),
+            {"text": True},
+            "2026-11-04",
+            "synthetic-" + model,
+            "fixture",
         )
         for model in ("main", "worker")
     )
-    config = replace(config, capabilities=CapabilityRegistry(tuple(records("chat")), routes), require_verified_routes=True)
+    config = replace(
+        config, capabilities=CapabilityRegistry(tuple(records("chat")), routes), require_verified_routes=True
+    )
     called = []
 
     def upstream(request, *, timeout):
@@ -184,7 +218,9 @@ def test_gateway_records_actual_models_separately_with_one_session_identity():
     assert len(observed) == 3
     assert observed[0].requested_model_digest == observed[2].requested_model_digest
     assert observed[0].requested_model_digest != observed[1].requested_model_digest
-    assert all(item.requested_model_digest == item.effective_model_digest and item.requested_model_digest for item in observed)
+    assert all(
+        item.requested_model_digest == item.effective_model_digest and item.requested_model_digest for item in observed
+    )
 
 
 @pytest.mark.parametrize("value", [None, {}, "", "x" * 513, chr(0xD800)])

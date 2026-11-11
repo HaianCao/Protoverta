@@ -16,7 +16,9 @@ def checker(monkeypatch):
 def test_failed_suite_names_are_reported_without_assertion_values(checker, monkeypatch, tmp_path):
     monkeypatch.setitem(sys.modules, "coverage", SimpleNamespace(Coverage=None, CoverageData=None))
     report = b"FAILED tests/test_fixture.py::test_contract - AssertionError: private-fixture-value\n1 failed\n"
-    monkeypatch.setattr(checker.subprocess, "run", lambda *args, **kwargs: subprocess.CompletedProcess([], 1, report, b""))
+    monkeypatch.setattr(
+        checker.subprocess, "run", lambda *args, **kwargs: subprocess.CompletedProcess([], 1, report, b"")
+    )
     output = tmp_path / "report"
     with pytest.raises(RuntimeError) as caught:
         checker.measure(tmp_path, "protoverta", output, tmp_path)
@@ -28,7 +30,17 @@ def test_failed_suite_names_are_reported_without_assertion_values(checker, monke
 
 def test_failed_coverage_command_returns_nonzero_without_traceback(checker, monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(
-        sys, "argv", ["check_coverage.py", "--codex-source", str(tmp_path), "--claude-source", str(tmp_path), "--output", str(tmp_path / "output")]
+        sys,
+        "argv",
+        [
+            "check_coverage.py",
+            "--codex-source",
+            str(tmp_path),
+            "--claude-source",
+            str(tmp_path),
+            "--output",
+            str(tmp_path / "output"),
+        ],
     )
     monkeypatch.setattr(checker.importlib.metadata, "version", lambda _: "7.17.0")
 

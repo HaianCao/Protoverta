@@ -8,11 +8,26 @@ import pytest
 
 def test_integration_guard_rejects_skipped_gateway_tests(tmp_path):
     fixture = tmp_path / "test_gateway_runtime.py"
-    fixture.write_text("import pytest\ndef test_required():\n    pytest.skip('synthetic missing integration')\n", encoding="utf-8")
+    fixture.write_text(
+        "import pytest\ndef test_required():\n    pytest.skip('synthetic missing integration')\n", encoding="utf-8"
+    )
     root = Path(__file__).resolve().parents[1]
     env = dict(os.environ, PYTHONPATH=os.pathsep.join((str(root / "src"), str(root / "scripts"))))
     result = subprocess.run(
-        [sys.executable, "-B", "-m", "pytest", "-p", "gateway_test_guard", "-p", "no:cacheprovider", "-o", "addopts=", "-q", str(fixture)],
+        [
+            sys.executable,
+            "-B",
+            "-m",
+            "pytest",
+            "-p",
+            "gateway_test_guard",
+            "-p",
+            "no:cacheprovider",
+            "-o",
+            "addopts=",
+            "-q",
+            str(fixture),
+        ],
         cwd=tmp_path,
         env=env,
         text=True,
@@ -57,7 +72,20 @@ def test_integration_guard_catches_missing_api_in_new_modules_at_collection_or_r
     root = Path(__file__).resolve().parents[1]
     env = dict(os.environ, PYTHONPATH=os.pathsep.join((str(root / "src"), str(root / "scripts"))))
     result = subprocess.run(
-        [sys.executable, "-B", "-m", "pytest", "-p", "gateway_test_guard", "-p", "no:cacheprovider", "-o", "addopts=", "-q", str(fixture)],
+        [
+            sys.executable,
+            "-B",
+            "-m",
+            "pytest",
+            "-p",
+            "gateway_test_guard",
+            "-p",
+            "no:cacheprovider",
+            "-o",
+            "addopts=",
+            "-q",
+            str(fixture),
+        ],
         cwd=tmp_path,
         env=env,
         text=True,

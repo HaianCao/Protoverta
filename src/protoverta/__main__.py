@@ -35,19 +35,36 @@ def build_parser() -> argparse.ArgumentParser:
         help="Explicit upstream override; disabled replaces request effort, not output filtering",
     )
     parser.add_argument("--port", type=int, default=0)
-    parser.add_argument("--diagnostics", action="store_true", help="Opt-in payload-free request outcome JSON lines on stderr; no log file is created")
-    parser.add_argument("--timeout", type=float, default=300, help="Socket I/O timeout in seconds; not a total generation deadline")
-    parser.add_argument("--max-concurrent-requests", type=int, default=16, help="Maximum accepted handler connections, including unauthenticated clients")
+    parser.add_argument(
+        "--diagnostics",
+        action="store_true",
+        help="Opt-in payload-free request outcome JSON lines on stderr; no log file is created",
+    )
+    parser.add_argument(
+        "--timeout", type=float, default=300, help="Socket I/O timeout in seconds; not a total generation deadline"
+    )
+    parser.add_argument(
+        "--max-concurrent-requests",
+        type=int,
+        default=16,
+        help="Maximum accepted handler connections, including unauthenticated clients",
+    )
     parser.add_argument("--total-timeout", type=float, default=3600)
     parser.add_argument("--progress-timeout", type=float, default=300)
     parser.add_argument("--max-stream-bytes", type=int, default=32 * 1024 * 1024)
     parser.add_argument("--max-stream-items", type=int, default=1024)
     parser.add_argument("--max-tool-argument-bytes", type=int, default=8 * 1024 * 1024)
     parser.add_argument(
-        "--namespace-tools", choices=["reject", "flatten"], default="reject", help="Opt-in request-scoped aliases for Responses function namespaces"
+        "--namespace-tools",
+        choices=["reject", "flatten"],
+        default="reject",
+        help="Opt-in request-scoped aliases for Responses function namespaces",
     )
     parser.add_argument(
-        "--client-tool-search", choices=["reject", "function"], default="reject", help="Opt-in JSON/SSE client search via a function; no hosted search"
+        "--client-tool-search",
+        choices=["reject", "function"],
+        default="reject",
+        help="Opt-in JSON/SSE client search via a function; no hosted search",
     )
     parser.add_argument(
         "--tool-names",
@@ -55,15 +72,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="Reversible function aliases; defaults to reject in strict profile, alias in codex/claude profiles; native routes unchanged",
     )
     parser.add_argument(
-        "--messages-system-model", action="append", default=[], help="Exact upstream model ID verified to support mid-conversation system messages; repeatable"
+        "--messages-system-model",
+        action="append",
+        default=[],
+        help="Exact upstream model ID verified to support mid-conversation system messages; repeatable",
     )
-    parser.add_argument("--capabilities-file", help="JSON registry of recorded capabilities for exact API prefix/protocol/model IDs")
-    parser.add_argument("--provider-profiles-file", help="Evidence-scoped provider wire options; no semantic downgrades")
+    parser.add_argument(
+        "--capabilities-file", help="JSON registry of recorded capabilities for exact API prefix/protocol/model IDs"
+    )
+    parser.add_argument(
+        "--provider-profiles-file", help="Evidence-scoped provider wire options; no semantic downgrades"
+    )
     parser.add_argument("--shared-admission-db", help="Opt-in dedicated SQLite budget shared by gateway processes")
     parser.add_argument("--shared-requests", type=int, default=40)
     parser.add_argument("--shared-window", type=float, default=60)
     parser.add_argument("--shared-concurrency", type=int, default=5)
-    parser.add_argument("--retry-attempts", type=int, default=1, help="1 disables retries; at most 4 explicit HTTP-rejection attempts")
+    parser.add_argument(
+        "--retry-attempts", type=int, default=1, help="1 disables retries; at most 4 explicit HTTP-rejection attempts"
+    )
     parser.add_argument("--retry-max-wait", type=float, default=5)
     parser.add_argument(
         "--retry-policy",
@@ -75,7 +101,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Reject requested features missing from the configured registry as well as unsupported features",
     )
     parser.add_argument(
-        "--require-verified-routes", action="store_true", help="Require exact schema-3 route/policy evidence, separately from upstream model support"
+        "--require-verified-routes",
+        action="store_true",
+        help="Require exact schema-3 route/policy evidence, separately from upstream model support",
     )
     parser.add_argument(
         "--context-preflight",
@@ -98,7 +126,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--prompt-caching", choices=["off", "ephemeral"], default="off")
     parser.add_argument("--require-current-evidence", action="store_true")
     parser.add_argument("--evidence-max-age-days", type=int)
-    parser.add_argument("--openrouter-provider", help="Opt-in single Chat provider/endpoint slug, no fallback, random per-gateway session affinity")
+    parser.add_argument(
+        "--openrouter-provider",
+        help="Opt-in single Chat provider/endpoint slug, no fallback, random per-gateway session affinity",
+    )
     return parser
 
 

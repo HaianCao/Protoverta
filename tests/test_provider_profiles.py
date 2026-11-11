@@ -27,7 +27,14 @@ def profile(**options):
 
 def test_exact_scoped_field_mapping_keeps_options_history_and_input_unchanged():
     profiles = ProviderProfiles((profile(),))
-    body = {"model": "m", "messages": [{"role": "user", "content": "hi"}], "max_completion_tokens": 10, "reasoning_effort": "high", "tools": [], "top_p": 0.7}
+    body = {
+        "model": "m",
+        "messages": [{"role": "user", "content": "hi"}],
+        "max_completion_tokens": 10,
+        "reasoning_effort": "high",
+        "tools": [],
+        "top_p": 0.7,
+    }
     before = copy.deepcopy(body)
     output = profiles.apply("https://EXAMPLE.test/v1/", "chat", body)
     assert output == {**{key: value for key, value in body.items() if key != "max_completion_tokens"}, "max_tokens": 10}
@@ -39,7 +46,14 @@ def test_exact_scoped_field_mapping_keeps_options_history_and_input_unchanged():
 
 
 @pytest.mark.parametrize(
-    "options", [{"protocol": "messages"}, {"evidence": ""}, {"chat_token_field": "other"}, {"token_budget_semantics": "unknown"}, {"checked_at": "invalid"}]
+    "options",
+    [
+        {"protocol": "messages"},
+        {"evidence": ""},
+        {"chat_token_field": "other"},
+        {"token_budget_semantics": "unknown"},
+        {"checked_at": "invalid"},
+    ],
 )
 def test_profiles_require_narrow_evidence_and_known_semantics(options):
     with pytest.raises(ValueError):
@@ -55,9 +69,14 @@ def test_profile_file_and_gateway_use_final_wire_field(tmp_path):
 
     def upstream(request, *, timeout):
         captured.append(json.loads(request.data))
-        return io.BytesIO(b'{"model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}')
+        return io.BytesIO(
+            b'{"model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}'
+        )
 
     config = GatewayConfig("chat", "https://example.test/v1", "key", "local", provider_profiles=profiles)
-    with listener(config, upstream) as url, post(url, {"model": "m", "input": "Hi", "max_output_tokens": 9}) as response:
+    with (
+        listener(config, upstream) as url,
+        post(url, {"model": "m", "input": "Hi", "max_output_tokens": 9}) as response,
+    ):
         assert response.status == 200
     assert captured[0]["max_tokens"] == 9 and "max_completion_tokens" not in captured[0]

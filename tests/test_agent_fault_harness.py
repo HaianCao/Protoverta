@@ -29,7 +29,12 @@ def test_fault_prefix_has_real_partial_payload_and_no_success_terminal(harness, 
 
 
 @pytest.mark.parametrize(
-    "fault,category,operation", [("timeout", "upstream_timeout", "read"), ("truncated", "invalid_stream", "finish"), ("invalid", "invalid_stream", "feed")]
+    "fault,category,operation",
+    [
+        ("timeout", "upstream_timeout", "read"),
+        ("truncated", "invalid_stream", "finish"),
+        ("invalid", "invalid_stream", "feed"),
+    ],
 )
 def test_trace_gate_requires_failure_at_the_injected_stage(harness, fault, category, operation):
     record = {"stream_error": category, "operation": operation}
@@ -44,7 +49,11 @@ def test_trace_gate_requires_failure_at_the_injected_stage(harness, fault, categ
 def test_fault_retries_keep_original_endpoint_and_model_gate(harness, protocol):
     state = harness.Scenario("claude", protocol, "truncated")
     state.stages["a"] = 1
-    path = {Protocol.CHAT: "/v1/chat/completions", Protocol.MESSAGES: "/v1/messages", Protocol.RESPONSES: "/v1/responses"}[protocol]
+    path = {
+        Protocol.CHAT: "/v1/chat/completions",
+        Protocol.MESSAGES: "/v1/messages",
+        Protocol.RESPONSES: "/v1/responses",
+    }[protocol]
     body = {"model": "different-model", "messages": []}
     with pytest.raises(ValueError, match="endpoint/model"):
         state.open(Request("http://127.0.0.1" + path, data=json.dumps(body).encode()), timeout=2)
@@ -67,9 +76,12 @@ def test_fault_retry_budget_cannot_dispatch_unbounded_child_requests(harness):
 def test_fault_reply_never_supplies_a_successful_terminal_and_timeout_needs_eof(harness, streaming, fault):
     state = harness.Scenario("claude", Protocol.CHAT, fault)
     request = SimpleNamespace(
-        data=json.dumps({"stream": streaming}).encode(), fixture_connection=SimpleNamespace(settimeout=lambda _: None, recv=lambda _: b"")
+        data=json.dumps({"stream": streaming}).encode(),
+        fixture_connection=SimpleNamespace(settimeout=lambda _: None, recv=lambda _: b""),
     )
-    handler = SimpleNamespace(wfile=io.BytesIO(), send_response=lambda _: None, send_header=lambda *_: None, end_headers=lambda: None)
+    handler = SimpleNamespace(
+        wfile=io.BytesIO(), send_response=lambda _: None, send_header=lambda *_: None, end_headers=lambda: None
+    )
     harness.FaultReply(state, request).write_to(handler)
     assert state.fault_sent.is_set()
     assert state.timeout_disconnected.is_set() is (fault == "timeout")
@@ -90,7 +102,9 @@ def test_unknown_fixture_timeout_is_rejected(harness):
         harness.single.run("claude", Protocol.CHAT, gateway_limits={"typo": 1})
 
 
-@pytest.mark.parametrize("fault", [None, "missing_warning", "missing_partial", "false_success", "boolean_counter", "denied", "wrong_child"])
+@pytest.mark.parametrize(
+    "fault", [None, "missing_warning", "missing_partial", "false_success", "boolean_counter", "denied", "wrong_child"]
+)
 def test_native_partial_handback_needs_explicit_warning_and_correlated_parent_result(harness, fault):
     text = "Agent terminated early due to an API error: agent did NOT finish its task P05_PARTIAL_NOT_SUCCESS"
     if fault == "missing_warning":
@@ -100,7 +114,9 @@ def test_native_partial_handback_needs_explicit_warning_and_correlated_parent_re
     elif fault == "false_success":
         text += " " + harness.parallel.FINALS[0]
     state = SimpleNamespace(
-        native_partial_handback=harness.native_partial_failure(text), parent_failure_correlated=fault != "wrong_child", expected_failure=lambda _: False
+        native_partial_handback=harness.native_partial_failure(text),
+        parent_failure_correlated=fault != "wrong_child",
+        expected_failure=lambda _: False,
     )
     result = {
         "is_error": False,
@@ -112,8 +128,12 @@ def test_native_partial_handback_needs_explicit_warning_and_correlated_parent_re
 
 def test_timeout_does_not_claim_upstream_disconnect_when_socket_has_extra_data(harness):
     state = harness.Scenario("claude", Protocol.CHAT, "timeout")
-    request = SimpleNamespace(data=b'{"stream":true}', fixture_connection=SimpleNamespace(settimeout=lambda _: None, recv=lambda _: b"x"))
-    handler = SimpleNamespace(wfile=io.BytesIO(), send_response=lambda _: None, send_header=lambda *_: None, end_headers=lambda: None)
+    request = SimpleNamespace(
+        data=b'{"stream":true}', fixture_connection=SimpleNamespace(settimeout=lambda _: None, recv=lambda _: b"x")
+    )
+    handler = SimpleNamespace(
+        wfile=io.BytesIO(), send_response=lambda _: None, send_header=lambda *_: None, end_headers=lambda: None
+    )
     with pytest.raises(ValueError, match="Unexpected data"):
         harness.FaultReply(state, request).write_to(handler)
     assert not state.timeout_disconnected.is_set()

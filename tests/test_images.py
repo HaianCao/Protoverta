@@ -30,7 +30,12 @@ def image(protocol, value=URL, detail=None):
 
 def content(protocol, value=URL, detail=None):
     kind = "input_text" if protocol == "responses" else "text"
-    return [{"type": kind, "text": "before"}, image(protocol, value, detail), {"type": kind, "text": "after"}, image(protocol, value, detail)]
+    return [
+        {"type": kind, "text": "before"},
+        image(protocol, value, detail),
+        {"type": kind, "text": "after"},
+        image(protocol, value, detail),
+    ]
 
 
 def request(protocol, value=URL, detail=None, role="user"):
@@ -68,7 +73,9 @@ def test_openai_image_detail_is_preserved(source, target, detail):
 def test_messages_rejects_explicit_detail_instead_of_dropping_it(source, detail):
     with pytest.raises(ConversionError, match="detail"):
         convert_request(request(source, detail=detail), source, "messages")
-    assert convert_request(request(source, detail="auto"), source, "messages")["messages"][0]["content"] == content("messages")
+    assert convert_request(request(source, detail="auto"), source, "messages")["messages"][0]["content"] == content(
+        "messages"
+    )
 
 
 @pytest.mark.parametrize("source,target", PAIRS)
@@ -135,11 +142,18 @@ def test_image_tool_results_are_rejected_not_joined_as_empty_text(source):
 @pytest.mark.parametrize("source", PROTOCOLS)
 def test_generated_image_responses_are_rejected(source):
     if source == "chat":
-        body = {"model": "m", "choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": [image(source)]}}]}
+        body = {
+            "model": "m",
+            "choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": [image(source)]}}],
+        }
     elif source == "messages":
         body = {"model": "m", "content": [image(source)], "stop_reason": "end_turn"}
     else:
-        body = {"model": "m", "status": "completed", "output": [{"type": "message", "role": "assistant", "content": [image(source)]}]}
+        body = {
+            "model": "m",
+            "status": "completed",
+            "output": [{"type": "message", "role": "assistant", "content": [image(source)]}],
+        }
     with pytest.raises(ConversionError, match="image output"):
         convert_response(body, source, "chat" if source != "chat" else "responses")
 

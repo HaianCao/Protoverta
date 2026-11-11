@@ -38,6 +38,8 @@ class DisconnectWatch:
         self.thread.start()
         return self
 
-    def __exit__(self, exc_type: type[BaseException] | None, exc_value: BaseException | None, traceback: TracebackType | None) -> None:
+    def __exit__(
+        self, exc_type: type[BaseException] | None, exc_value: BaseException | None, traceback: TracebackType | None
+    ) -> None:
         self.stop.set()
         self.thread.join(timeout=1)
