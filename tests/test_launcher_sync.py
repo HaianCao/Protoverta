@@ -34,7 +34,9 @@ def test_any_other_difference_or_missing_copy_is_reported(sync, tmp_path):
 
 def test_each_launchers_own_error_class_is_normalized(sync, tmp_path):
     _write(tmp_path / "codex", "codexapter", "m.py", "from .errors import ConfigError\nraise ConfigError('x')\n")
-    _write(tmp_path / "claude", "claudapter", "m.py", "from .errors import ClaudapterError\nraise ClaudapterError('x')\n")
+    _write(
+        tmp_path / "claude", "claudapter", "m.py", "from .errors import ClaudapterError\nraise ClaudapterError('x')\n"
+    )
     assert sync.drift(tmp_path / "codex", tmp_path / "claude", ("m.py",)) == []
 
 
