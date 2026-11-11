@@ -10,13 +10,14 @@ import secrets
 import socket
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from http.client import HTTPException
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any, cast
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit
+from urllib.parse import SplitResult, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from . import __version__
@@ -27,7 +28,7 @@ from .admission import (
     SharedAdmission,
 )
 from .capabilities import CapabilityRegistry, _prefix, request_features, route_policies
-from .context import assess_context
+from .context import TokenCount, assess_context
 from .core import (
     ConversionError,
     Protocol,
@@ -42,7 +43,7 @@ from .json_wire import decode_json, encode_json
 from .lifetime import DisconnectWatch
 from .model_snapshot import ModelMetadataUnavailable, ModelSnapshot
 from .namespaces import NamespaceMap
-from .observability import Observer, RequestTrace
+from .observability import Observer, Outcome, RequestTrace
 from .profiles import prepare_claude_request, prepare_codex_request
 from .provider_profiles import ProviderProfiles
 from .resources import (
@@ -52,13 +53,16 @@ from .resources import (
     RequestBudget,
     StreamLimitError,
     StreamLimits,
+    attach_budget,
     positive_number,
 )
 from .retry import RetryState, open_with_policy, open_with_retry, retry_after
-from .sse import encode_sse
+from .sse import SSEEvent, encode_sse
 from .stream_pipe import StreamTranscoder, StreamValidator
 from .stream_writer import StreamHeartbeatWriter
 from .streaming import (
+    Delta,
+    DeltaTransform,
     StreamError,
     UnsupportedReasoningError,
     UnsupportedStreamFeatureError,
@@ -135,7 +139,7 @@ class GatewayConfig:
     retry_max_wait: float = 5.0
     require_verified_routes: bool = False
     context_preflight: str = "off"
-    token_counter: object = field(default=None, repr=False, compare=False)
+    token_counter: Callable[[dict[str, Any], Protocol], TokenCount] | None = field(default=None, repr=False, compare=False)
     token_count_mode: str = "off"
     require_current_evidence: bool = False
     evidence_max_age_days: int | None = None
@@ -146,7 +150,7 @@ class GatewayConfig:
     model_snapshot: ModelSnapshot | None = field(default=None, repr=False)
     # Error-class retry (supersedes retry_attempts/retry_max_wait when set).
     retry_policy: RetryPolicy | None = None
-    retry_log: object = field(default=None, repr=False, compare=False)
+    retry_log: Callable[[str], None] | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if self.retry_policy is not None and not isinstance(self.retry_policy, RetryPolicy):
@@ -283,7 +287,7 @@ class GatewayConfig:
         return base + path
 
 
-def apply_upstream_reasoning(payload: dict, protocol: Protocol, policy: str) -> dict:
+def apply_upstream_reasoning(payload: dict[str, Any], protocol: Protocol, policy: str) -> dict[str, Any]:
     """Apply an explicit operator override after conversion, without hiding output.
 
     provider_default leaves the request untouched. Disabled policies override any
@@ -318,11 +322,11 @@ def apply_upstream_reasoning(payload: dict, protocol: Protocol, policy: str) -> 
 
 
 class _RedirectBlocker(HTTPRedirectHandler):
-    def redirect_request(self, request, fp, code, msg, headers, newurl):
+    def redirect_request(self, request: Request, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> None:
         return None
 
 
-def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observer | None = None) -> type[BaseHTTPRequestHandler]:
+def make_handler(config: GatewayConfig, *, upstream_open: Callable[..., Any] | None = None, observer: Observer | None = None) -> type[BaseHTTPRequestHandler]:
     """Build the HTTP request handler class for ``config``.
 
     ``upstream_open`` replaces the HTTPS opener (tests inject scripted
@@ -352,6 +356,12 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
     class Handler(BaseHTTPRequestHandler):
         server_version = f"Protoverta/{__version__}"
         connection_limit = config.max_concurrent_requests
+        _trace: RequestTrace
+        _budget: RequestBudget
+        _deadline_input: DeadlineInput
+        _context_headers: dict[str, str]
+        _request_path: str | None
+        _response_started: bool
 
         @staticmethod
         def release_storage() -> None:
@@ -360,7 +370,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
             if shared_admission is not None:
                 shared_admission.close()
 
-        def setup(self):
+        def setup(self) -> None:
             super().setup()
             self._budget = RequestBudget(config.timeout, config.total_timeout, config.progress_timeout)
             register = getattr(self.server, "register_request_budget", None)
@@ -375,14 +385,14 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
             )
             self.rfile = io.BufferedReader(self._deadline_input)
 
-        def parse_request(self):
+        def parse_request(self) -> bool:
             parsed = super().parse_request()
             if parsed:
                 # Headers are complete; the body follows the request budget.
                 self._deadline_input.header_deadline = None
             return parsed
 
-        def handle(self):
+        def handle(self) -> None:
             try:
                 super().handle()
             except ConnectionError:
@@ -393,7 +403,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
             # Avoid logging paths, request bodies, or credentials by default.
             return
 
-        def send_response(self, code, message=None):
+        def send_response(self, code: int, message: str | None = None) -> None:
             self._response_started = True
             super().send_response(code, message)
 
@@ -420,14 +430,23 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 pass  # The client is gone; there is nobody to answer.
             self._trace.outcome = "internal_error"
 
-        def _json(self, status: int, payload: dict[str, object], headers=None) -> None:
+        def _json(self, status: int, payload: Mapping[str, Any], headers: Any = None) -> None:
             raw = encode_json(payload)
             self._raw_json(status, raw, headers)
 
         def _error(
-            self, status, message, protocol, *, code=None, phase: FailurePhase | None = None, feature: str | None = None, path: str | None = None, headers=None
-        ):
-            self._trace.outcome = {
+            self,
+            status: int,
+            message: str,
+            protocol: Protocol,
+            *,
+            code: str | None = None,
+            phase: FailurePhase | None = None,
+            feature: str | None = None,
+            path: str | None = None,
+            headers: Any = None,
+        ) -> None:
+            outcomes: dict[int, Outcome] = {
                 400: "invalid_request",
                 401: "authentication",
                 404: "not_found",
@@ -438,7 +457,8 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 429: "upstream_http",
                 503: "upstream_http",
                 504: "timeout",
-            }.get(status, "upstream_http")
+            }
+            self._trace.outcome = outcomes.get(status, "upstream_http")
             if feature in {"refusal", "content_filter"} and code in {None, "unsupported_feature", "policy_refusal"}:
                 code = "policy_refusal"
             if code in {
@@ -451,7 +471,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 "stream_limit",
                 "upstream_transport",
             }:
-                self._trace.outcome = code
+                self._trace.outcome = cast(Outcome, code)
             self._trace.phase = phase
             self._trace.feature = feature
             failure = gateway_failure(
@@ -459,7 +479,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
             )
             self._json(failure.status, failure.payload(protocol), headers)
 
-        def _forward_headers(self, headers) -> None:
+        def _forward_headers(self, headers: Any) -> None:
             for name, value in headers.items() if headers else []:
                 lower = name.lower()
                 allowed = lower in {"retry-after", "x-should-retry", "request-id", "x-request-id", "x-accel-buffering"} or lower.startswith(
@@ -468,7 +488,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 if allowed and "\r" not in str(value) and "\n" not in str(value):
                     self.send_header(name, value)
 
-        def _raw_json(self, status: int, raw: bytes, headers=None) -> None:
+        def _raw_json(self, status: int, raw: bytes, headers: Any = None) -> None:
             self.connection.settimeout(self._budget.remaining() if status < 400 else min(config.timeout, 1))
             self._trace.status = status
             if status < 400:
@@ -492,32 +512,28 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
 
         def _stream(
             self,
-            response,
+            response: Any,
             source: Protocol,
             target: Protocol,
-            response_transform=None,
-            tool_name_transform=None,
-            budget=None,
-            delta_transform=None,
-            tool_policy=None,
-            text_logprobs=False,
-            max_top_logprobs=None,
+            response_transform: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+            tool_name_transform: Callable[[str], str] | None = None,
+            budget: RequestBudget | None = None,
+            delta_transform: DeltaTransform | None = None,
+            tool_policy: BoundToolPolicy | None = None,
+            text_logprobs: bool = False,
+            max_top_logprobs: int | None = None,
         ) -> None:
-            native_guard = None
+            native_guard: Callable[[SSEEvent], None] | None = None
             if config.codex_model_safe_resume and source == target == Protocol.RESPONSES:
                 from .harness_controls import guard_codex_closed_resume
 
-                def native_guard(event):
+                def guard_resume(event: SSEEvent) -> None:
                     # The lifecycle validator already accepted any trailing
                     # [DONE] marker; it is not JSON and carries no tool call.
                     if event.data != "[DONE]":
                         guard_codex_closed_resume(json.loads(event.data), streaming=True)
 
-            limits = {
-                "max_stream_bytes": config.max_stream_bytes,
-                "max_stream_items": config.max_stream_items,
-                "max_tool_argument_bytes": config.max_tool_argument_bytes,
-            }
+                native_guard = guard_resume
             pipeline = (
                 StreamTranscoder(
                     source,
@@ -532,16 +548,24 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                     text_logprobs=text_logprobs,
                     max_top_logprobs=max_top_logprobs,
                     omit_reasoning=config.reasoning_output == "omit",
-                    **limits,
+                    max_stream_bytes=config.max_stream_bytes,
+                    max_stream_items=config.max_stream_items,
+                    max_tool_argument_bytes=config.max_tool_argument_bytes,
                 )
                 if source != target
-                else StreamValidator(source, event_guard=native_guard, **limits)
+                else StreamValidator(
+                    source,
+                    event_guard=native_guard,
+                    max_stream_bytes=config.max_stream_bytes,
+                    max_stream_items=config.max_stream_items,
+                    max_tool_argument_bytes=config.max_tool_argument_bytes,
+                )
             )
             budget = budget or RequestBudget(config.timeout, config.total_timeout, config.progress_timeout)
             headers_sent = False
             initial = bytearray()
 
-            def send_bytes(raw, timeout):
+            def send_bytes(raw: bytes, timeout: float) -> None:
                 self.connection.settimeout(timeout)
                 self.wfile.write(raw)
                 self.wfile.flush()
@@ -549,7 +573,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
             keepalive = None if source == target else encode_sse("ping", '{"type":"ping"}') if target == Protocol.MESSAGES else b": protoverta keepalive\n\n"
             writer = StreamHeartbeatWriter(send_bytes, budget, keepalive, interval=STREAM_HEARTBEAT_INTERVAL)
 
-            def write_output(raw, *, final_error=False):
+            def write_output(raw: bytes, *, final_error: bool = False) -> None:
                 writer.write(raw, final_error=final_error)
                 self._trace.mark_first_payload()
                 if not final_error:
@@ -694,7 +718,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 self._trace.feature = feature
                 reported = isinstance(exc, UpstreamReportedError)
                 status = 422 if unsupported else 504 if timeout else 502
-                if reported:
+                if isinstance(exc, UpstreamReportedError):
                     # The provider's own message, bounded and secret-redacted.
                     message, code = str(exc), "upstream_error"
                     status = exc.status if exc.status is not None and exc.status < 500 else 502
@@ -868,7 +892,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
             finally:
                 admission.release()
 
-        def _handle_post(self, protocol, target_url) -> None:
+        def _handle_post(self, protocol: Protocol, target_url: SplitResult) -> None:
             # One unambiguous framing mode; never interpret chunked input as JSON.
             lengths = self.headers.get_all("Content-Length", [])
             if self.headers.get_all("Transfer-Encoding") or len(lengths) > 1:
@@ -916,11 +940,11 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                         "X-Protoverta-Count-Kind": provenance,
                         "X-Protoverta-Count-Category": "exact" if provenance in ("provider-native", "operator-exact") else "estimate",
                     }
-                    result = {"input_tokens": count}
+                    count_body: dict[str, Any] = {"input_tokens": count}
                     if protocol == Protocol.RESPONSES:
-                        result["object"] = "response.input_tokens"
+                        count_body["object"] = "response.input_tokens"
                     self._trace.phase = "response"
-                    self._json(200, result)
+                    self._json(200, count_body)
                     return
                 streaming = payload.get("stream", False)
                 compact = target_url.path == "/v1/responses/compact"
@@ -1084,8 +1108,11 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                     if not isinstance(outbound.get("model"), str) or not outbound["model"]:
                         raise ConversionError("token quota requires an exact model ID")
                     token_amount = input_reserve(config, outbound).tokens + output_reserve(semantic_outbound, config.upstream_protocol)
+                    token_db = config.shared_admission_db
+                    if token_db is None:  # GatewayConfig requires one with a token limit.
+                        raise ConversionError("token quota requires a shared admission database")
                     token_quota = SharedTokenQuota(
-                        config.shared_admission_db,
+                        token_db,
                         _prefix(config.upstream_base_url) + "\0" + config.upstream_api_key,
                         outbound["model"],
                         limit=config.shared_token_limit,
@@ -1134,7 +1161,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
             )
             request = Request(upstream_url, data=data, headers=headers, method="POST")
 
-            def restore_response(result):
+            def restore_response(result: dict[str, Any]) -> dict[str, Any]:
                 if tool_name_map is not None:
                     result = tool_name_map.restore(result, protocol)
                 mapped = namespace_map.restore(result) if namespace_map else copy.deepcopy(result)
@@ -1152,11 +1179,11 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
 
             lease = None
             watch = None
-            token_leases = []
+            token_leases: list[str] = []
             successful_token_lease = None
 
-            def open_accounted(request, *, timeout):
-                identifier = token_quota.reserve(token_amount) if token_quota is not None else None
+            def open_accounted(request: Request, *, timeout: float) -> Any:
+                identifier = token_quota.reserve(token_amount) if token_quota is not None and token_amount is not None else None
                 if identifier is not None:
                     token_leases.append(identifier)
                 response = open_upstream(request, timeout=timeout)
@@ -1168,7 +1195,7 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 budget = self._budget
                 watch = DisconnectWatch(self.connection, budget.cancel)
                 watch.__enter__()
-                request.protoverta_budget = budget
+                attach_budget(request, budget)
                 if retry_policy is not None:
                     response, lease = open_with_policy(
                         open_accounted,
@@ -1196,14 +1223,11 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                             else None
                         )
                         search_delta = search_map.stream_delta if search_map is not None else None
+                        delta_fn: DeltaTransform | None
                         if profile_delta is not None and search_delta is not None:
 
-                            def combined_delta(d):
-                                out_deltas = []
-                                for item in profile_delta(d):
-                                    res = search_delta(item)
-                                    out_deltas.extend([res] if not isinstance(res, list) else res)
-                                return out_deltas
+                            def combined_delta(d: Delta) -> list[Delta]:
+                                return [search_delta(item) for item in profile_delta(d)]
 
                             delta_fn = combined_delta
                         else:
@@ -1249,7 +1273,8 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                             max_top_logprobs=outbound.get("top_logprobs") if text_logprobs else None,
                             omit_reasoning=config.reasoning_output == "omit",
                         )
-                        tool_policy.check_result(result, protocol)
+                        if tool_policy is not None:
+                            tool_policy.check_result(result, protocol)
                         result = restore_response(result)
                     elif config.codex_model_safe_resume and protocol == Protocol.RESPONSES:
                         from .harness_controls import guard_codex_closed_resume
@@ -1360,12 +1385,12 @@ def make_handler(config: GatewayConfig, *, upstream_open=None, observer: Observe
                 if token_quota is not None:
                     for identifier in token_leases:
                         try:
-                            usage = (
+                            measured = (
                                 (self._trace.input_tokens, self._trace.output_tokens)
                                 if identifier == successful_token_lease and self._trace.outcome in ("success", "truncated_output")
                                 else (None, None)
                             )
-                            token_quota.reconcile(identifier, *usage)
+                            token_quota.reconcile(identifier, *measured)
                         except AdmissionStorageError:
                             pass  # Crash/storage failure retains a finite conservative lease.
                 if watch is not None:
@@ -1384,17 +1409,17 @@ class GatewayHTTPServer(ThreadingHTTPServer):
 
     daemon_threads = True
 
-    def __init__(self, address, handler):
+    def __init__(self, address: tuple[str, int], handler: Any) -> None:
         self._connections = threading.BoundedSemaphore(handler.connection_limit)
         # Separate small bound for over-capacity replies; beyond it, close.
         self._rejections = threading.BoundedSemaphore(8)
-        self._active_clients = set()
-        self._request_budgets = {}
+        self._active_clients: set[socket.socket] = set()
+        self._request_budgets: dict[socket.socket, RequestBudget] = {}
         self._clients_changed = threading.Condition()
         self._closing = False
         super().__init__(address, handler)
 
-    def process_request(self, request, client_address):
+    def process_request(self, request: Any, client_address: Any) -> None:
         if not self._connections.acquire(blocking=False):
             # Off the accept loop: wait briefly for a slot (a handler frees it
             # just after its client saw the connection close, so an immediate
@@ -1407,7 +1432,7 @@ class GatewayHTTPServer(ThreadingHTTPServer):
             return
         self._admit(request, client_address)
 
-    def _admit_or_reject(self, request, client_address):
+    def _admit_or_reject(self, request: socket.socket, client_address: Any) -> None:
         if not self._connections.acquire(timeout=REQUEST_SLOT_GRACE_SECONDS):
             self._reject_over_capacity(request)
             return
@@ -1418,7 +1443,7 @@ class GatewayHTTPServer(ThreadingHTTPServer):
             self.handle_error(request, client_address)
             self.shutdown_request(request)
 
-    def _admit(self, request, client_address):
+    def _admit(self, request: socket.socket, client_address: Any) -> None:
         """Serve a request whose connection slot is already held."""
         with self._clients_changed:
             closing = self._closing
@@ -1434,7 +1459,7 @@ class GatewayHTTPServer(ThreadingHTTPServer):
             self._client_finished(request)
             raise
 
-    def _reject_over_capacity(self, request):
+    def _reject_over_capacity(self, request: socket.socket) -> None:
         """Send 503, half-close, then drain briefly so close() does not reset.
 
         Closing a socket with unread request bytes makes Windows send RST,
@@ -1460,21 +1485,21 @@ class GatewayHTTPServer(ThreadingHTTPServer):
             finally:
                 self._rejections.release()
 
-    def handle_error(self, request, client_address):
+    def handle_error(self, request: Any, client_address: Any) -> None:
         """Never print tracebacks: the gateway shares the terminal with the CLI.
 
         Handlers answer their own faults (500 ``internal_error``); anything left
         is a connection-level failure with no client to report to.
         """
 
-    def _client_finished(self, request):
+    def _client_finished(self, request: socket.socket) -> None:
         self._connections.release()
         with self._clients_changed:
             self._active_clients.discard(request)
             self._request_budgets.pop(request, None)
             self._clients_changed.notify_all()
 
-    def register_request_budget(self, request, budget):
+    def register_request_budget(self, request: socket.socket, budget: RequestBudget) -> None:
         with self._clients_changed:
             closing = self._closing
             if not closing:
@@ -1482,13 +1507,13 @@ class GatewayHTTPServer(ThreadingHTTPServer):
         if closing:
             budget.cancel()
 
-    def process_request_thread(self, request, client_address):
+    def process_request_thread(self, request: Any, client_address: Any) -> None:
         try:
             super().process_request_thread(request, client_address)
         finally:
             self._client_finished(request)
 
-    def server_close(self):
+    def server_close(self) -> None:
         with self._clients_changed:
             self._closing = True
             clients = tuple(self._active_clients)

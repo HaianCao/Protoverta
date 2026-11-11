@@ -4,17 +4,25 @@ No provider billing guarantee: missing usage and ambiguous failures retain the
 full reservation. No prompts, raw model IDs or credentials enter the database.
 """
 
+from __future__ import annotations
+
 import math
 import uuid
+from collections.abc import Callable, Mapping
+from os import PathLike
+from typing import TYPE_CHECKING, Any
 
 from .admission import AdmissionDenied, AdmissionPolicyError, SharedAdmission
 from .context import TokenCount
 from .errors import ConversionError
 
+if TYPE_CHECKING:
+    from .server import GatewayConfig
+
 _SQLITE_MAX = 2**63 - 1
 
 
-def output_reserve(body, protocol):
+def output_reserve(body: Mapping[str, Any], protocol: str) -> int:
     fields = ("max_tokens", "max_completion_tokens") if protocol == "chat" else ("max_output_tokens",) if protocol == "responses" else ("max_tokens",)
     values = [body[key] for key in fields if key in body]
     if len(values) != 1 or type(values[0]) is not int or values[0] <= 0:
@@ -22,7 +30,7 @@ def output_reserve(body, protocol):
     return values[0]
 
 
-def input_reserve(config, body):
+def input_reserve(config: GatewayConfig, body: dict[str, Any]) -> TokenCount:
     from .context import assess_context
 
     assessment = assess_context(body, config.upstream_protocol, None, policy="estimate", counter=config.token_counter)
@@ -32,8 +40,18 @@ def input_reserve(config, body):
 
 
 class SharedTokenQuota:
-    def __init__(self, path, scope, model, *, limit, window=60, lease=610, clock=None):
-        options = {"window": window, "lease": lease}
+    def __init__(
+        self,
+        path: str | PathLike[str],
+        scope: str,
+        model: str,
+        *,
+        limit: int,
+        window: float = 60,
+        lease: float = 610,
+        clock: Callable[[], float] | None = None,
+    ) -> None:
+        options: dict[str, Any] = {"window": window, "lease": lease}
         if clock is not None:
             options["clock"] = clock
         self.storage = SharedAdmission(path, scope + "\0token-model\0" + model, **options)
@@ -41,7 +59,7 @@ class SharedTokenQuota:
         if type(limit) is not int or not 0 < limit <= _SQLITE_MAX:
             raise ValueError("token quota limit must be a positive signed-64-bit integer")
 
-    def reserve(self, amount):
+    def reserve(self, amount: int) -> str:
         if type(amount) is not int or amount < 0:
             raise ValueError("token reservation must be nonnegative")
         storage = self.storage
@@ -61,12 +79,11 @@ class SharedTokenQuota:
             db.execute("INSERT INTO token_reservations VALUES (?,?,?,?,?)", (identifier, storage.scope, now, now + storage.lease, amount))
         return identifier
 
-    def reconcile(self, identifier, inputs=None, outputs=None):
+    def reconcile(self, identifier: str, inputs: int | None = None, outputs: int | None = None) -> None:
         # Unknown/partial usage must never be interpreted as zero or refunded.
-        measured = all(type(value) is int and value >= 0 for value in (inputs, outputs))
         storage = self.storage
         with storage._transaction() as db:
-            if measured:
+            if type(inputs) is int and type(outputs) is int and inputs >= 0 and outputs >= 0:
                 # Saturation is internal admission accounting only. It still
                 # exhausts every permitted quota; never changes response usage.
                 db.execute(

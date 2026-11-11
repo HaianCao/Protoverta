@@ -66,27 +66,13 @@ addopts = "-q"
 [tool.mypy]
 python_version = "3.11"
 mypy_path = "$MYPY_CONFIG_FILE_DIR/src"
-files = [
-  "src/protoverta/admission.py",
-  "src/protoverta/automatic_reasoning.py",
-  "src/protoverta/custom_tools.py",
-  "src/protoverta/documents.py",
-  "src/protoverta/error_classes.py",
-  "src/protoverta/errors.py",
-  "src/protoverta/evidence_identity.py",
-  "src/protoverta/failures.py",
-  "src/protoverta/harness_controls.py",
-  "src/protoverta/json_wire.py",
-  "src/protoverta/lifetime.py",
-  "src/protoverta/observability.py",
-  "src/protoverta/reasoning.py",
-  "src/protoverta/response_context.py",
-  "src/protoverta/retry.py",
-  "src/protoverta/routing.py",
-  "src/protoverta/selection_status.py",
-  "src/protoverta/sse.py",
-]
+files = ["src/protoverta"]
 strict = true
 follow_imports = "silent"
 warn_unreachable = true
 show_error_codes = true
+
+[[tool.mypy.overrides]]
+# Modules import ConversionError and Protocol through core.
+module = "protoverta.core"
+implicit_reexport = true

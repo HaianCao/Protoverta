@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import base64
 import binascii
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
+from typing import Any
 from urllib.parse import urlsplit
 
 from .errors import ConversionError
@@ -13,12 +15,13 @@ _MEDIA = frozenset({"image/png", "image/jpeg", "image/webp", "image/gif"})
 _DETAIL = frozenset({"auto", "low", "high", "original"})
 
 
-def _only(value, fields, label):
+def _only(value: Any, fields: AbstractSet[str], label: str) -> dict[str, Any]:
     if not isinstance(value, dict) or set(value) - fields:
         raise ConversionError(f"unsupported {label} fields")
+    return value
 
 
-def _url(value):
+def _url(value: Any) -> str:
     if not isinstance(value, str) or not value or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in value):
         raise ConversionError("image URL must be a nonempty HTTP(S) URL")
     try:
@@ -31,7 +34,7 @@ def _url(value):
     return value
 
 
-def _base64(media, data):
+def _base64(media: Any, data: Any) -> str:
     if not isinstance(media, str) or media not in _MEDIA or not isinstance(data, str) or not data:
         raise ConversionError("image requires PNG, JPEG, WebP or GIF base64 data")
     try:
@@ -49,7 +52,7 @@ class Image:
     data: str = ""
     detail: str | None = None
 
-    def encode(self, target: str) -> dict:
+    def encode(self, target: str) -> dict[str, Any]:
         if target == "messages":
             if self.detail not in (None, "auto"):
                 raise ConversionError("Messages has no portable image detail equivalent")
@@ -62,23 +65,22 @@ class Image:
         return {"type": "input_image", "image_url": value, **detail}
 
 
-def decode_image(block: dict, source: str) -> Image:
+def decode_image(block: dict[str, Any], source: str) -> Image:
     detail = None
     if source == "messages":
         _only(block, {"type", "source"}, "Messages image")
-        value = block.get("source")
-        _only(value, {"type", "url", "media_type", "data"}, "Messages image source")
+        value = _only(block.get("source"), {"type", "url", "media_type", "data"}, "Messages image source")
         if value.get("type") == "url":
             _only(value, {"type", "url"}, "Messages URL image")
             return Image(url=_url(value.get("url")))
         if value.get("type") == "base64":
             _only(value, {"type", "media_type", "data"}, "Messages base64 image")
-            return Image(media_type=value.get("media_type"), data=_base64(value.get("media_type"), value.get("data")))
+            data = _base64(value.get("media_type"), value.get("data"))
+            return Image(media_type=value["media_type"], data=data)
         raise ConversionError("Messages file IDs and unknown image sources are not portable")
     if source == "chat":
         _only(block, {"type", "image_url"}, "Chat image")
-        value = block.get("image_url")
-        _only(value, {"url", "detail"}, "Chat image_url")
+        value = _only(block.get("image_url"), {"url", "detail"}, "Chat image_url")
         url = value.get("url")
         detail = value.get("detail")
     else:

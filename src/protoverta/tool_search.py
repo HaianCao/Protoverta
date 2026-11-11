@@ -6,21 +6,27 @@ placement is not reproduced. Search arguments are buffered per call, not exposed
 as invented function-argument events on the Responses search item.
 """
 
+from __future__ import annotations
+
 import copy
 import json
 from dataclasses import replace
+from typing import TYPE_CHECKING, Any
 
 from .errors import ConversionError
+
+if TYPE_CHECKING:
+    from .streaming import Delta
 
 _NAME = "pv_client_tool_search"
 
 
-def _only(value, allowed, label):
+def _only(value: Any, allowed: set[str], label: str) -> None:
     if not isinstance(value, dict) or set(value) - allowed:
         raise ConversionError(f"invalid {label}")
 
 
-def _call_id(value):
+def _call_id(value: dict[str, Any]) -> str:
     result = value.get("call_id")
     if not isinstance(result, str) or not result:
         raise ConversionError("client tool search requires a nonempty call_id")
@@ -29,7 +35,7 @@ def _call_id(value):
     return result
 
 
-def _definition(tool, *, loaded=False):
+def _definition(tool: Any, *, loaded: bool = False) -> dict[str, Any] | None:
     if not isinstance(tool, dict) or tool.get("type") not in ("function", "custom", "namespace"):
         raise ConversionError("loaded search tools must be function, custom or namespace definitions")
     result = copy.deepcopy(tool)
@@ -44,8 +50,8 @@ def _definition(tool, *, loaded=False):
             raise ConversionError("defer_loading applies to namespace children, not the namespace")
         if not isinstance(result.get("tools"), list):
             raise ConversionError("search namespace requires a tools array")
-        children = []
-        names = set()
+        children: list[dict[str, Any]] = []
+        names: set[Any] = set()
         for child in result["tools"]:
             if not isinstance(child, dict) or child.get("type") not in ("function", "custom"):
                 raise ConversionError("search namespace children must be function or custom tools")
@@ -67,13 +73,13 @@ def _definition(tool, *, loaded=False):
 class ClientToolSearchMap:
     """One-use request map for explicit client-side tool search."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.enabled = False
         self._used = False
         self._available = False
-        self._snapshot_tools = []
+        self._snapshot_tools: list[dict[str, Any]] = []
 
-    def prepare(self, body: dict) -> dict:
+    def prepare(self, body: dict[str, Any]) -> dict[str, Any]:
         if self._used:
             raise ConversionError("client search mappings cannot be reused")
         self._used = True
@@ -91,9 +97,9 @@ class ClientToolSearchMap:
             raise ConversionError("at most one client tool search definition is supported")
         self.enabled = True
         self._available = bool(searches)
-        definitions = {}
+        definitions: dict[str, dict[str, Any]] = {}
 
-        def add(tool, *, loaded=False):
+        def add(tool: Any, *, loaded: bool = False) -> None:
             normalized = _definition(tool, loaded=loaded)
             if normalized is None:
                 return
@@ -119,9 +125,9 @@ class ClientToolSearchMap:
             if tool in searches:
                 continue
             add(tool)
-        pending = set()
-        seen = set()
-        rewritten = []
+        pending: set[str] = set()
+        seen: set[str] = set()
+        rewritten: list[Any] = []
         for item in history:
             if not isinstance(item, dict) or item.get("type") not in ("tool_search_call", "tool_search_output"):
                 if isinstance(item, dict) and item.get("type") in ("function_call", "custom_tool_call") and item.get("name") == _NAME:
@@ -170,18 +176,18 @@ class ClientToolSearchMap:
             result["input"] = rewritten
         return result
 
-    def snapshot_tools(self):
+    def snapshot_tools(self) -> list[dict[str, Any]]:
         """Active logical definitions, before namespace/wire aliasing."""
         return copy.deepcopy(self._snapshot_tools)
 
-    def stream_delta(self, delta):
+    def stream_delta(self, delta: Delta) -> Delta:
         if self.enabled and delta.kind == "tool_start" and delta.name == _NAME:
             if not self._available or delta.tool_type != "function":
                 raise ConversionError("upstream called an unavailable client search tool")
             return replace(delta, tool_type="tool_search")
         return delta
 
-    def restore(self, body: dict) -> dict:
+    def restore(self, body: dict[str, Any]) -> dict[str, Any]:
         result = copy.deepcopy(body)
         if not self.enabled:
             return result

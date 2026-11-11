@@ -7,8 +7,9 @@ encoders and HTTP forwarding are implemented separately.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypedDict
 
 from .core import (
     ConversionError,
@@ -38,10 +39,16 @@ class UnsupportedStreamFeatureError(StreamError):
         super().__init__(str(error))
 
 
+class _UsageDetails(TypedDict, total=False):
+    cached_input_tokens: int | None
+    cache_creation_input_tokens: int | None
+    reasoning_output_tokens: int | None
+
+
 class UnsupportedReasoningError(StreamError):
     """A known reasoning feature has no enabled, lossless target mapping."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         # Fixed text only: upstream field values must not enter client errors.
         super().__init__("unsupported reasoning output (reasoning_content/thinking/opaque state) under the current strict policy")
 
@@ -54,7 +61,7 @@ class UpstreamReportedError(StreamError):
     cause instead of a generic malformed-stream failure.
     """
 
-    def __init__(self, detail: Any, *, status: Any = None, kind: Any = None):
+    def __init__(self, detail: Any, *, status: Any = None, kind: Any = None) -> None:
         text = detail if isinstance(detail, str) else "upstream provider reported an error"
         text = "".join(char if char.isprintable() else " " for char in text).strip()[:500] or "upstream provider reported an error"
         self.detail = text
@@ -63,8 +70,8 @@ class UpstreamReportedError(StreamError):
         super().__init__("upstream provider reported an error: " + text)
 
 
-def _reported_error(body: dict, *, status: Any = None) -> UpstreamReportedError:
-    error = body.get("error") if isinstance(body.get("error"), dict) else body
+def _reported_error(body: dict[str, Any], *, status: Any = None) -> UpstreamReportedError:
+    error: dict[str, Any] = body["error"] if isinstance(body.get("error"), dict) else body
     code = error.get("code")
     return UpstreamReportedError(
         error.get("message"), status=status if status is not None else code if type(code) is int else None, kind=error.get("type") or code
@@ -95,7 +102,32 @@ class Delta:
     reasoning_output_tokens: int | None = None
     tool_type: str = "function"
     service_tier: str | None = None
-    logprobs: list[dict] | None = None
+    logprobs: list[dict[str, Any]] | None = None
+
+    @property
+    def position(self) -> int:
+        """``index``, which block and tool events always carry."""
+        if self.index is None:
+            raise StreamError(f"{self.kind} event without an index")
+        return self.index
+
+    @property
+    def call_name(self) -> str:
+        """``name``, which tool-start events always carry."""
+        if self.name is None:
+            raise StreamError(f"{self.kind} event without a tool name")
+        return self.name
+
+    @property
+    def content(self) -> str:
+        """``text``, which text, reasoning and argument events always carry."""
+        if self.text is None:
+            raise StreamError(f"{self.kind} event without text")
+        return self.text
+
+
+#: Rewrites one decoded delta into one or more deltas (gateway stream hooks).
+DeltaTransform = Callable[[Delta], Delta | list[Delta]]
 
 
 def _obj(value: Any, label: str) -> dict[str, Any]:
@@ -104,12 +136,12 @@ def _obj(value: Any, label: str) -> dict[str, Any]:
     return value
 
 
-def _only(value: dict, allowed: set[str], label: str) -> None:
+def _only(value: dict[str, Any], allowed: set[str], label: str) -> None:
     if set(value) - allowed:
         raise StreamError(f"{label} contains unsupported fields")
 
 
-def _response_item(item: dict) -> None:
+def _response_item(item: dict[str, Any]) -> None:
     try:
         _validate_response_item(item, "Responses output item")
     except ConversionError as exc:
@@ -169,7 +201,13 @@ class StreamDecoder:
     """
 
     def __init__(
-        self, protocol: Protocol | str, *, public_reasoning: bool = False, text_logprobs: bool = False, max_top_logprobs=None, omit_reasoning: bool = False
+        self,
+        protocol: Protocol | str,
+        *,
+        public_reasoning: bool = False,
+        text_logprobs: bool = False,
+        max_top_logprobs: int | None = None,
+        omit_reasoning: bool = False,
     ) -> None:
         self.protocol = Protocol(protocol)
         if not isinstance(public_reasoning, bool):
@@ -204,17 +242,17 @@ class StreamDecoder:
         self.saw_tool = False
         self.saw_trailing_done = False
         self.raw_usage: dict[str, Any] = {}
-        self.usage_details: dict[str, int | None] = {}
+        self.usage_details: _UsageDetails = {}
         self.service_tier: str | None = None
         if type(text_logprobs) is not bool or text_logprobs and self.protocol == Protocol.MESSAGES:
             raise ValueError("text_logprobs requires a Chat/Responses stream")
         self.text_logprobs = text_logprobs
         self.max_top_logprobs = max_top_logprobs
         self.probability_text = ""
-        self.probabilities: list[dict] = []
-        self.item_probabilities: dict[int, list] = {}
+        self.probabilities: list[dict[str, Any]] = []
+        self.item_probabilities: dict[int, list[dict[str, Any]]] = {}
 
-    def _probabilities(self, value, *, chat=False):
+    def _probabilities(self, value: Any, *, chat: bool = False) -> list[dict[str, Any]] | None:
         from .logprobs import chat_records, records
 
         try:
@@ -222,7 +260,7 @@ class StreamDecoder:
         except ConversionError as exc:
             raise StreamError(str(exc)) from exc
 
-    def _text_logprobs(self, container):
+    def _text_logprobs(self, container: dict[str, Any]) -> list[dict[str, Any]]:
         """Responses text logprobs. Some compatible servers omit the field when
         logprobs were not requested; that carries no data, so it reads as an
         empty list. When logprobs were requested, omission is still an error."""
@@ -230,7 +268,8 @@ class StreamDecoder:
             if self.text_logprobs:
                 raise StreamError("Responses text omitted the requested logprobs")
             return []
-        return self._probabilities(container.get("logprobs"))
+        # Non-Chat records are always a list (possibly empty).
+        return self._probabilities(container.get("logprobs")) or []
 
     def _tier(self, value: Any) -> None:
         try:
@@ -248,9 +287,13 @@ class StreamDecoder:
             values = _decode_usage(self.raw_usage, self.protocol)
         except ConversionError as exc:
             raise StreamError(str(exc)) from exc
-        self.input_tokens = values.pop("input_tokens")
-        self.output_tokens = values.pop("output_tokens")
-        self.usage_details = values
+        self.input_tokens = values["input_tokens"]
+        self.output_tokens = values["output_tokens"]
+        self.usage_details = {
+            "cached_input_tokens": values["cached_input_tokens"],
+            "cache_creation_input_tokens": values["cache_creation_input_tokens"],
+            "reasoning_output_tokens": values["reasoning_output_tokens"],
+        }
 
     def feed(self, event: SSEEvent) -> list[Delta]:
         if self.ended:
@@ -511,8 +554,8 @@ class StreamDecoder:
                 call_id = _str(block.get("id"), "tool_use.id")
                 name = _str(block.get("name"), "tool_use.name")
                 self._check_call_id(call_id, index)
-                initial = _obj(block.get("input"), "tool_use.input")
-                if initial:
+                initial_input = _obj(block.get("input"), "tool_use.input")
+                if initial_input:
                     raise StreamError("nonempty initial tool input is unsupported")
                 self.blocks[index] = "tool"
                 self.tools[index] = _Tool(call_id=call_id, name=name, opened=True)
@@ -744,9 +787,10 @@ class StreamDecoder:
             return []
         if kind == "response.output_item.done":
             index = _index(body.get("output_index"), "output_index")
-            item_type, item_id = self.items.pop(index, (None, None))
-            if item_type is None:
+            added = self.items.pop(index, None)
+            if added is None:
                 raise StreamError("Responses output_item.done without added")
+            item_type, item_id = added
             item = _obj(body.get("item"), "completed output item")
             _response_item(item)
             if item.get("id") != item_id or item.get("status") not in ("completed", "incomplete"):
@@ -840,7 +884,7 @@ class StreamDecoder:
             return self._complete(reason)
         raise StreamError(f"unsupported Responses event: {kind}")
 
-    def _public_reasoning_event(self, body: dict, kind: str) -> list[Delta]:
+    def _public_reasoning_event(self, body: dict[str, Any], kind: str) -> list[Delta]:
         index = _index(body.get("output_index"), "output_index")
         if body.get("item_id") != self.items[index][1] or type(body.get("content_index")) is not int or body["content_index"] != 0:
             raise StreamError("public reasoning content has wrong identity")

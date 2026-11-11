@@ -6,6 +6,7 @@ import copy
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from .core import Protocol
 from .errors import ConversionError
@@ -18,7 +19,7 @@ class TokenCount:
     tokens: int
     exact: bool = False
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if type(self.tokens) is not int or self.tokens < 0 or type(self.exact) is not bool:
             raise ValueError("token count must be nonnegative with an explicit exactness flag")
 
@@ -37,7 +38,7 @@ class ContextAssessment:
     verdict: str
     count_kind: str = "utf8-json-byte-estimate"
 
-    def headers(self):
+    def headers(self) -> dict[str, str]:
         kind = "unavailable" if self.input_tokens is None else "operator-exact" if self.exact else self.count_kind
         category = "unavailable" if self.input_tokens is None else "exact" if self.exact else "estimate"
         values = {"X-Protoverta-Context-Verdict": self.verdict, "X-Protoverta-Context-Count-Kind": kind, "X-Protoverta-Context-Count-Category": category}
@@ -47,7 +48,7 @@ class ContextAssessment:
         return values
 
 
-def _has_media(body):
+def _has_media(body: dict[str, Any]) -> bool:
     # Inspect input content, never tool schemas (which may have fields named image).
     pending = [body.get(key) for key in ("input", "messages", "system")]
     while pending:
@@ -64,7 +65,14 @@ def _has_media(body):
     return False
 
 
-def assess_context(body, protocol, limit, *, policy="estimate", counter: Callable | None = None):
+def assess_context(
+    body: dict[str, Any],
+    protocol: Protocol | str,
+    limit: int | None,
+    *,
+    policy: str = "estimate",
+    counter: Callable[[dict[str, Any], Protocol], TokenCount] | None = None,
+) -> ContextAssessment:
     """Byte-count heuristic is a labelled proxy, NOT a guaranteed upper bound.
 
     Exact operator callbacks must cover the complete model-specific input,

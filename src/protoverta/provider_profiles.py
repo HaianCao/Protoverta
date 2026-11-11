@@ -1,18 +1,27 @@
 """Evidence-scoped wire quirks; never strip unsupported request semantics."""
 
+from __future__ import annotations
+
 import copy
 import hashlib
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, fields
 from datetime import date
+from os import PathLike
 from pathlib import Path
 from types import MappingProxyType
+from typing import TYPE_CHECKING, Any
 
 from .capabilities import _prefix
 from .core import Protocol
 from .errors import ConversionError
+
+if TYPE_CHECKING:
+    from .streaming import Delta
+
+_ProfileKey = tuple[str, str, str]
 
 
 @dataclass(frozen=True)
@@ -25,13 +34,13 @@ class ProviderProfile:
     chat_token_field: str
     token_budget_semantics: str
     reasoning_field: str | None = None
-    reasoning_values: Mapping | None = None
+    reasoning_values: Mapping[str, Any] | None = None
     reasoning_semantics: str | None = None
     prompt_cache_semantics: str | None = None
     parameter_aliases: Mapping[str, Mapping[str, str]] | None = None
     sampling_defaults: Mapping[str, float] | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         object.__setattr__(self, "base_url", _prefix(self.base_url))
         object.__setattr__(self, "protocol", Protocol(self.protocol))
         if self.protocol != Protocol.CHAT:
@@ -120,7 +129,7 @@ class GenerationProfile:
     sampling_defaults: Mapping[str, float] | None = None
     responses_penalties: bool = False
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         object.__setattr__(self, "base_url", _prefix(self.base_url))
         object.__setattr__(self, "protocol", Protocol(self.protocol))
         if not isinstance(self.model, str) or not self.model or any(c.isspace() for c in self.model):
@@ -153,8 +162,8 @@ class GenerationProfile:
 
 
 class ProviderProfiles:
-    def __init__(self, records=()):
-        self._records = {}
+    def __init__(self, records: Iterable[ProviderProfile | GenerationProfile] = ()) -> None:
+        self._records: dict[_ProfileKey, ProviderProfile | GenerationProfile] = {}
         for record in records:
             if not isinstance(record, ProviderProfile | GenerationProfile):
                 raise TypeError("provider profiles require typed records")
@@ -163,8 +172,8 @@ class ProviderProfiles:
                 raise ValueError("duplicate provider profile")
             self._records[key] = record
 
-    def fingerprint(self):
-        def _plain(val):
+    def fingerprint(self) -> str:
+        def _plain(val: Any) -> Any:
             if isinstance(val, Mapping):
                 return {k: _plain(v) for k, v in val.items()}
             return val
@@ -178,18 +187,18 @@ class ProviderProfiles:
             values.append(value)
         return hashlib.sha256(json.dumps(values, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
-    def supports_prompt_cache(self, base_url, protocol, model):
+    def supports_prompt_cache(self, base_url: str, protocol: Protocol | str, model: Any) -> bool:
         record = self._records.get((_prefix(base_url), Protocol(protocol), model))
         return record is not None and getattr(record, "prompt_cache_semantics", None) == "anthropic_ephemeral_system_end"
 
-    def supports_responses_penalties(self, base_url, protocol, model):
+    def supports_responses_penalties(self, base_url: str, protocol: Protocol | str, model: Any) -> bool:
         if not isinstance(model, str):
             return False
         record = self._records.get((_prefix(base_url), Protocol(protocol), model))
         return isinstance(record, GenerationProfile) and record.responses_penalties
 
     @classmethod
-    def load(cls, path):
+    def load(cls, path: str | PathLike[str]) -> ProviderProfiles:
         with Path(path).open("rb") as source:
             raw = source.read(2 * 1024 * 1024 + 1)
         if len(raw) > 2 * 1024 * 1024:
@@ -203,7 +212,7 @@ class ProviderProfiles:
             or not isinstance(body["profiles"], list)
         ):
             raise ValueError("invalid provider profile document")
-        records = []
+        records: list[ProviderProfile | GenerationProfile] = []
         for item in body["profiles"]:
             if not isinstance(item, dict):
                 raise TypeError("profile must be an object")
@@ -216,7 +225,7 @@ class ProviderProfiles:
                 records.append(GenerationProfile(**item))
         return cls(tuple(records))
 
-    def apply(self, base_url, protocol, body):
+    def apply(self, base_url: str, protocol: Protocol | str, body: dict[str, Any]) -> dict[str, Any]:
         model = body.get("model")
         if not isinstance(model, str):
             raise ConversionError("provider profile requires an exact model ID")
@@ -239,7 +248,8 @@ class ProviderProfiles:
             result[record.chat_token_field] = value
         if record.reasoning_field is not None and "reasoning_effort" in result:
             effort = result.pop("reasoning_effort")
-            if not isinstance(effort, str) or effort not in record.reasoning_values:
+            values = record.reasoning_values
+            if not isinstance(effort, str) or values is None or effort not in values:
                 raise ConversionError("profile does not certify the requested reasoning effort")
             target = result
             path = record.reasoning_field.split(".")
@@ -249,28 +259,30 @@ class ProviderProfiles:
                 target = target.setdefault(key, {})
             if path[-1] in target:
                 raise ConversionError("conflicting vendor reasoning field")
-            target[path[-1]] = record.reasoning_values[effort]
+            target[path[-1]] = values[effort]
         if record.parameter_aliases is not None:
             _apply_parameter_aliases_request(result, record.parameter_aliases)
         return result
 
-    def restore(self, base_url, protocol, model, body):
+    def _aliases(self, base_url: str, protocol: Protocol | str, model: Any) -> Mapping[str, Mapping[str, str]] | None:
         if not isinstance(model, str):
-            return body
+            return None
         record = self._records.get((_prefix(base_url), Protocol(protocol), model))
-        if record is None or getattr(record, "parameter_aliases", None) is None:
+        return record.parameter_aliases if isinstance(record, ProviderProfile) else None
+
+    def restore(self, base_url: str, protocol: Protocol | str, model: Any, body: dict[str, Any]) -> dict[str, Any]:
+        aliases = self._aliases(base_url, protocol, model)
+        if aliases is None:
             return body
         result = copy.deepcopy(body)
-        _restore_parameter_aliases_response(result, record.parameter_aliases)
+        _restore_parameter_aliases_response(result, aliases)
         return result
 
-    def stream_delta_restorer(self, base_url, protocol, model):
-        if not isinstance(model, str):
+    def stream_delta_restorer(self, base_url: str, protocol: Protocol | str, model: Any) -> Callable[[Delta], list[Delta]] | None:
+        aliases = self._aliases(base_url, protocol, model)
+        if aliases is None:
             return None
-        record = self._records.get((_prefix(base_url), Protocol(protocol), model))
-        if record is None or getattr(record, "parameter_aliases", None) is None:
-            return None
-        reverse_aliases = {tool: {dst: src for src, dst in param_map.items()} for tool, param_map in record.parameter_aliases.items()}
+        reverse_aliases = {tool: {dst: src for src, dst in param_map.items()} for tool, param_map in aliases.items()}
         return _StreamParameterAliasRestorer(reverse_aliases).feed
 
 
@@ -279,19 +291,19 @@ class _StreamParameterAliasRestorer:
         self.reverse_aliases = reverse_aliases
         self._active: dict[int, tuple[str, list[str]]] = {}
 
-    def feed(self, delta):
+    def feed(self, delta: Delta) -> list[Delta]:
         from dataclasses import replace
 
         from .streaming import Delta, StreamError
 
-        if delta.kind == "tool_start" and delta.tool_type == "function" and delta.name in self.reverse_aliases:
-            self._active[delta.index] = (delta.name, [])
+        if delta.kind == "tool_start" and delta.tool_type == "function" and delta.name is not None and delta.name in self.reverse_aliases:
+            self._active[delta.position] = (delta.name, [])
             return [delta]
         if delta.kind == "tool_delta" and delta.index in self._active:
-            self._active[delta.index][1].append(delta.text)
+            self._active[delta.position][1].append(delta.content)
             return []
         if delta.kind == "tool_end" and delta.index in self._active:
-            name, chunks = self._active.pop(delta.index)
+            name, chunks = self._active.pop(delta.position)
             raw_args = "".join(chunks)
             try:
                 remapped = _remap_json_arguments(raw_args, self.reverse_aliases[name], direction="stream")
@@ -301,7 +313,7 @@ class _StreamParameterAliasRestorer:
         return [delta]
 
 
-def _remap_json_arguments(raw_args, mapping: Mapping[str, str], *, direction: str) -> str:
+def _remap_json_arguments(raw_args: Any, mapping: Mapping[str, str], *, direction: str) -> str:
     if not isinstance(raw_args, str):
         raise ConversionError("tool call arguments must be a JSON string")
     try:
@@ -310,7 +322,7 @@ def _remap_json_arguments(raw_args, mapping: Mapping[str, str], *, direction: st
         raise ConversionError(f"invalid JSON in {direction} tool call arguments") from exc
     if not isinstance(parsed, dict):
         raise ConversionError("tool call arguments must decode to a JSON object")
-    out = {}
+    out: dict[str, Any] = {}
     for key, val in parsed.items():
         if key in mapping:
             target_key = mapping[key]
@@ -324,7 +336,7 @@ def _remap_json_arguments(raw_args, mapping: Mapping[str, str], *, direction: st
     return json.dumps(out, ensure_ascii=False, separators=(",", ":"))
 
 
-def _apply_parameter_aliases_request(body: dict, aliases: Mapping[str, Mapping[str, str]]) -> None:
+def _apply_parameter_aliases_request(body: dict[str, Any], aliases: Mapping[str, Mapping[str, str]]) -> None:
     for tool in body.get("tools", []) if isinstance(body.get("tools"), list) else []:
         if not isinstance(tool, dict) or tool.get("type") != "function" or not isinstance(tool.get("function"), dict):
             continue
@@ -374,7 +386,7 @@ def _apply_parameter_aliases_request(body: dict, aliases: Mapping[str, Mapping[s
                 fn["arguments"] = _remap_json_arguments(fn["arguments"], aliases[name], direction="request")
 
 
-def _restore_parameter_aliases_response(body: dict, aliases: Mapping[str, Mapping[str, str]]) -> None:
+def _restore_parameter_aliases_response(body: dict[str, Any], aliases: Mapping[str, Mapping[str, str]]) -> None:
     reverse_aliases = {tool: {dst: src for src, dst in param_map.items()} for tool, param_map in aliases.items()}
     for choice in body.get("choices", []) if isinstance(body.get("choices"), list) else []:
         if not isinstance(choice, dict) or not isinstance(choice.get("message"), dict):

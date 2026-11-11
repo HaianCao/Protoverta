@@ -9,6 +9,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import re
+from typing import Any
 
 from .core import Protocol
 from .errors import ConversionError
@@ -17,12 +18,12 @@ _PORTABLE = re.compile(r"[A-Za-z0-9_-]{1,64}")
 _PREFIX = "pv_tool_"
 
 
-def _objects(value):
+def _objects(value: Any) -> list[dict[str, Any]]:
     return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
 
 
-def _name_locations(body, protocol, *, request):
-    locations = []
+def _name_locations(body: dict[str, Any], protocol: Protocol, *, request: bool) -> list[dict[str, Any]]:
+    locations: list[dict[str, Any]] = []
     if protocol == Protocol.CHAT:
         if request:
             locations.extend(
@@ -71,12 +72,12 @@ class ToolNameMap:
     Create one instance per request. Native forwarding must not use this policy.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.aliases: dict[str, str] = {}
         self.originals: set[str] = set()
         self._used = False
 
-    def prepare(self, body: dict, protocol: Protocol | str) -> dict:
+    def prepare(self, body: dict[str, Any], protocol: Protocol | str) -> dict[str, Any]:
         if self._used:
             raise ConversionError("tool name mappings cannot be reused across requests")
         self._used = True
@@ -87,9 +88,9 @@ class ToolNameMap:
         names = [item.get("name") for item in locations]
         if any(not isinstance(name, str) or not name for name in names):
             raise ConversionError("function names must be nonempty strings")
-        self.originals = set(names)
-        reserved = set(names)
-        encoded = {}
+        self.originals = {name for name in names if isinstance(name, str)}
+        reserved = set(self.originals)
+        encoded: dict[str, str] = {}
         for name in sorted(self.originals):
             if _PORTABLE.fullmatch(name):
                 continue
@@ -117,7 +118,7 @@ class ToolNameMap:
             raise ConversionError("upstream returned an unknown function alias")
         return name
 
-    def restore(self, body: dict, protocol: Protocol | str) -> dict:
+    def restore(self, body: dict[str, Any], protocol: Protocol | str) -> dict[str, Any]:
         result = copy.deepcopy(body)
         for item in _name_locations(result, Protocol(protocol), request=False):
             name = item.get("name")

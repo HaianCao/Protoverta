@@ -42,9 +42,9 @@ class StreamEncoder:
         self,
         protocol: Protocol | str,
         *,
-        response_transform: Callable[[dict], dict] | None = None,
+        response_transform: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
         public_reasoning: bool = False,
-        request_context: dict | None = None,
+        request_context: dict[str, Any] | None = None,
         text_logprobs: bool = False,
     ) -> None:
         self.protocol = Protocol(protocol)
@@ -83,7 +83,7 @@ class StreamEncoder:
         if type(text_logprobs) is not bool or text_logprobs and self.protocol == Protocol.MESSAGES:
             raise ValueError("text_logprobs requires a Chat/Responses stream")
         self.text_logprobs = text_logprobs
-        self.probabilities: list[dict] = []
+        self.probabilities: list[dict[str, Any]] = []
         self.probability_text = ""
 
     def finish(self) -> None:
@@ -114,9 +114,9 @@ class StreamEncoder:
             return []
         if delta.kind in {"text", "tool_start", "finish"}:
             self.reasoning_closed = True
-            prefix = self._close_reasoning(status="incomplete" if delta.kind == "finish" and delta.reason == "length" else "completed")
-            if prefix:
-                return prefix + self.feed(delta)
+            closing = self._close_reasoning(status="incomplete" if delta.kind == "finish" and delta.reason == "length" else "completed")
+            if closing:
+                return closing + self.feed(delta)
         if delta.kind == "finish":
             if delta.reason not in {"stop", "tool_calls", "length"}:
                 raise StreamError("unsupported finish reason")
@@ -148,7 +148,7 @@ class StreamEncoder:
                 raise StreamError("invalid or duplicate tool start")
             if any(tool["call_id"] == delta.call_id for tool in self.tools.values()):
                 raise StreamError("duplicate stream tool call ID")
-            self.tools[delta.index] = {
+            self.tools[delta.position] = {
                 "call_id": delta.call_id,
                 "name": delta.name,
                 "arguments": "",
@@ -161,7 +161,7 @@ class StreamEncoder:
         if delta.kind == "tool_delta":
             if delta.index not in self.open_blocks or delta.text is None:
                 raise StreamError("tool delta without an open call")
-            self.tools[delta.index]["arguments"] += delta.text
+            self.tools[delta.position]["arguments"] += delta.text
             return self._tool_delta(delta)
         if delta.kind == "tool_end":
             if delta.index not in self.open_blocks:
@@ -293,7 +293,7 @@ class StreamEncoder:
         except ConversionError as exc:
             raise StreamError(str(exc)) from exc
         if self.text_logprobs:
-            self.probability_text += delta.text
+            self.probability_text += delta.content
             self.probabilities.extend(probabilities)
         if self.protocol == Protocol.CHAT:
             choice = {"index": 0, "delta": {"content": delta.text}, "finish_reason": None}
@@ -333,11 +333,14 @@ class StreamEncoder:
                     ),
                 ]
             )
-        self.text += delta.text
+        self.text += delta.content
+        message_index = self.message_output_index
+        if message_index is None:
+            raise StreamError("Responses text without a message item")
         events.append(
             self._response_event(
                 "response.output_text.delta",
-                item_id=self.output[self.message_output_index]["id"],
+                item_id=self.output[message_index]["id"],
                 output_index=self.text_index,
                 content_index=0,
                 delta=delta.text,
@@ -390,7 +393,7 @@ class StreamEncoder:
             events = self._close_text()
             index = self.next_index
             self.next_index += 1
-            self.tools[delta.index]["target_index"] = index
+            self.tools[delta.position]["target_index"] = index
             events.append(
                 _event(
                     "content_block_start",
@@ -405,7 +408,7 @@ class StreamEncoder:
         events = self._close_text()
         index = self.next_index
         self.next_index += 1
-        tool = self.tools[delta.index]
+        tool = self.tools[delta.position]
         tool["target_index"] = index
         item = {
             "id": tool["item_id"],
@@ -433,7 +436,7 @@ class StreamEncoder:
         return events
 
     def _tool_delta(self, delta: Delta) -> list[SSEEvent]:
-        tool = self.tools[delta.index]
+        tool = self.tools[delta.position]
         custom = tool["tool_type"] == "custom"
         if tool["tool_type"] == "tool_search":
             return []
@@ -468,7 +471,7 @@ class StreamEncoder:
         ]
 
     def _tool_end(self, delta: Delta) -> list[SSEEvent]:
-        tool = self.tools[delta.index]
+        tool = self.tools[delta.position]
         if tool["tool_type"] != "custom":
             try:
                 _arguments(tool["arguments"], "tool arguments")
@@ -522,7 +525,7 @@ class StreamEncoder:
             if delta.input_tokens is None or delta.output_tokens is None:
                 raise StreamError("Messages final event requires real input_tokens and output_tokens")
             events = self._close_text()
-            reason = {"stop": "end_turn", "tool_calls": "tool_use", "length": "max_tokens"}[delta.reason]
+            reason = {"stop": "end_turn", "tool_calls": "tool_use", "length": "max_tokens"}[delta.reason or ""]
             events.extend(
                 [
                     _event(

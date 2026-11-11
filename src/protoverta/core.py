@@ -10,9 +10,10 @@ import json
 import re
 import secrets
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import Any, TypedDict
 
 from .custom_tools import custom_definition, encode_custom
 from .documents import PDF, decode_pdf
@@ -50,7 +51,21 @@ class Part:
     result_parts: list[Part] | None = None
     tool_type: str = "function"
     document: PDF | None = None
-    logprobs: list[dict] | None = None
+    logprobs: list[dict[str, Any]] | None = None
+
+    @property
+    def image_value(self) -> Image:
+        """``image``, which image parts always carry."""
+        if self.image is None:
+            raise ConversionError(f"{self.kind} part without an image")
+        return self.image
+
+    @property
+    def document_value(self) -> PDF:
+        """``document``, which document parts always carry."""
+        if self.document is None:
+            raise ConversionError(f"{self.kind} part without a document")
+        return self.document
 
 
 @dataclass(slots=True)
@@ -111,7 +126,17 @@ def _reported_service_tier(value: Any) -> str | None:
     return value
 
 
-def _decode_usage(usage: dict[str, Any], source: Protocol) -> dict[str, int | None]:
+class Usage(TypedDict):
+    """Token counts exactly as the provider reported them (``None`` when absent)."""
+
+    input_tokens: int | None
+    output_tokens: int | None
+    cached_input_tokens: int | None
+    cache_creation_input_tokens: int | None
+    reasoning_output_tokens: int | None
+
+
+def _decode_usage(usage: dict[str, Any], source: Protocol) -> Usage:
     """Normalize total input tokens, not only Anthropic's uncached input."""
     if source == Protocol.CHAT:
         input_key, output_key = "prompt_tokens", "completion_tokens"
@@ -231,7 +256,7 @@ def _optional_penalty(value: Any, label: str) -> float | None:
     return float(value)
 
 
-def _disabled_logprobs(body: dict, source: Protocol, *, allow_enabled: bool = False) -> int | None:
+def _disabled_logprobs(body: dict[str, Any], source: Protocol, *, allow_enabled: bool = False) -> int | None:
     enabled = body.get("logprobs") if source == Protocol.CHAT else None
     if enabled is not None and type(enabled) is not bool:
         raise ConversionError("logprobs must be a boolean or null")
@@ -259,7 +284,7 @@ def _optional_top_p(value: Any) -> float | None:
     return float(value)
 
 
-def _stops(value):
+def _stops(value: Any) -> list[str] | None:
     if value is None:
         return None
     values = [value] if isinstance(value, str) else value
@@ -268,7 +293,7 @@ def _stops(value):
     return list(values)
 
 
-def _strict_tool(tool):
+def _strict_tool(tool: dict[str, Any]) -> dict[str, Any]:
     if "strict" in tool and tool["strict"] is not None and not isinstance(tool["strict"], bool):
         raise ConversionError("tool strict must be a boolean")
     return {"strict": tool["strict"]} if tool.get("strict") is not None else {}
@@ -283,7 +308,8 @@ def _parallel_flag(value: Any) -> bool | None:
 def _effort(value: Any) -> str | None:
     if value is not None and value not in ("low", "medium", "high"):
         raise ConversionError("only low, medium, and high effort are portable")
-    return value
+    effort: str | None = value
+    return effort
 
 
 def _only(obj: dict[str, Any], allowed: set[str], label: str) -> None:
@@ -334,7 +360,7 @@ def _chat_content(value: Any, label: str) -> list[Part]:
     return result
 
 
-def _tool_choice(value: Any, source: Protocol) -> str | dict | None:
+def _tool_choice(value: Any, source: Protocol) -> str | dict[str, Any] | None:
     """Normalize forced function selection without accepting hosted tools."""
     if value is None:
         return None
@@ -362,7 +388,7 @@ def _tool_choice(value: Any, source: Protocol) -> str | dict | None:
     raise ConversionError("tool_choice is not portable")
 
 
-def _validate_chat_call(call: dict, index: int) -> None:
+def _validate_chat_call(call: dict[str, Any], index: int) -> None:
     kind = call.get("type")
     if kind not in ("function", "custom"):
         raise ConversionError("only client-side function/custom calls are supported")
@@ -373,7 +399,7 @@ def _validate_chat_call(call: dict, index: int) -> None:
         raise ConversionError("Chat tool_call index must match its array position")
 
 
-def _chat_call(call: dict, index: int) -> Part:
+def _chat_call(call: dict[str, Any], index: int) -> Part:
     _validate_chat_call(call, index)
     kind = call["type"]
     fn = _object(call.get(kind), "tool_call body")
@@ -383,7 +409,7 @@ def _chat_call(call: dict, index: int) -> Part:
     return Part("tool_call", call_id=_string(call.get("id"), "call.id"), name=_string(fn.get("name"), "call.name"), arguments=raw, tool_type=kind)
 
 
-def _encode_chat_call(part: Part) -> dict:
+def _encode_chat_call(part: Part) -> dict[str, Any]:
     return {
         "id": part.call_id,
         "type": part.tool_type,
@@ -391,7 +417,7 @@ def _encode_chat_call(part: Part) -> dict:
     }
 
 
-def _encode_response_call(part: Part) -> dict:
+def _encode_response_call(part: Part) -> dict[str, Any]:
     return {
         "type": "custom_tool_call" if part.tool_type == "custom" else "function_call",
         "call_id": part.call_id,
@@ -786,7 +812,7 @@ def _decode_responses(body: dict[str, Any], *, public_reasoning: bool = False) -
 _DECODERS = {Protocol.CHAT: _decode_chat, Protocol.MESSAGES: _decode_messages, Protocol.RESPONSES: _decode_responses}
 
 
-def _check_function_names(names, target: Protocol) -> None:
+def _check_function_names(names: Iterable[str], target: Protocol) -> None:
     if target in {Protocol.CHAT, Protocol.RESPONSES} and any(not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", name) for name in names):
         raise ConversionError(
             "target function names require 1-64 ASCII letters, digits, underscores or dashes; enable tool_names='alias' on the gateway to preserve other names"
@@ -899,7 +925,11 @@ def _flush_chat_user_parts(messages: list[dict[str, Any]], role: str, parts: lis
     if parts:
         if any(p.kind in {"image", "document"} for p in parts):
             content: Any = [
-                p.image.encode("chat") if p.kind == "image" else p.document.encode("chat") if p.kind == "document" else {"type": "text", "text": p.text}
+                p.image_value.encode("chat")
+                if p.kind == "image"
+                else p.document_value.encode("chat")
+                if p.kind == "document"
+                else {"type": "text", "text": p.text}
                 for p in parts
             ]
         else:
@@ -929,7 +959,11 @@ def _encode_chat(req: Request) -> dict[str, Any]:
             msg: dict[str, Any] = {"role": turn.role, "content": text if text or not calls else None}
             if any(p.kind in {"image", "document"} for p in turn.parts):
                 msg["content"] = [
-                    p.image.encode("chat") if p.kind == "image" else p.document.encode("chat") if p.kind == "document" else {"type": "text", "text": p.text}
+                    p.image_value.encode("chat")
+                    if p.kind == "image"
+                    else p.document_value.encode("chat")
+                    if p.kind == "document"
+                    else {"type": "text", "text": p.text}
                     for p in turn.parts
                 ]
             if calls:
@@ -990,14 +1024,14 @@ def _encode_messages(req: Request) -> dict[str, Any]:
             if p.kind == "text":
                 blocks.append({"type": "text", "text": p.text})
             elif p.kind == "image":
-                blocks.append(p.image.encode("messages"))
+                blocks.append(p.image_value.encode("messages"))
             elif p.kind == "document":
-                blocks.append(p.document.encode("messages"))
+                blocks.append(p.document_value.encode("messages"))
             elif p.kind == "tool_call":
                 blocks.append({"type": "tool_use", "id": p.call_id, "name": p.name, "input": json.loads(p.arguments)})
             elif p.kind == "tool_result":
                 content = (
-                    [part.image.encode("messages") if part.kind == "image" else {"type": "text", "text": part.text} for part in p.result_parts]
+                    [part.image_value.encode("messages") if part.kind == "image" else {"type": "text", "text": part.text} for part in p.result_parts]
                     if p.result_parts is not None
                     else p.text
                 )
@@ -1042,9 +1076,9 @@ def _flush_response_text(inputs: list[dict[str, Any]], role: str, parts: list[Pa
         item: dict[str, Any] = {
             "role": role,
             "content": [
-                p.image.encode("responses")
+                p.image_value.encode("responses")
                 if p.kind == "image"
-                else p.document.encode("responses")
+                else p.document_value.encode("responses")
                 if p.kind == "document"
                 else {"type": "output_text" if role == "assistant" else "input_text", "text": p.text}
                 for p in parts
@@ -1071,7 +1105,7 @@ def _encode_responses(req: Request) -> dict[str, Any]:
             elif p.kind == "tool_result":
                 _flush_response_text(inputs, turn.role, text_parts)
                 content = (
-                    [part.image.encode("responses") if part.kind == "image" else {"type": "input_text", "text": part.text} for part in p.result_parts]
+                    [part.image_value.encode("responses") if part.kind == "image" else {"type": "input_text", "text": part.text} for part in p.result_parts]
                     if p.result_parts is not None
                     else p.text
                 )
@@ -1192,7 +1226,7 @@ def convert_request(
     return output
 
 
-def _validate_response_item(item: dict, label: str) -> None:
+def _validate_response_item(item: dict[str, Any], label: str) -> None:
     if item.get("type") == "message":
         _only(item, {"type", "id", "status", "role", "content"}, label)
     elif item.get("type") == "function_call":
@@ -1490,7 +1524,7 @@ def convert_response(
     target: Protocol | str,
     *,
     public_reasoning: bool = False,
-    request_context: dict | None = None,
+    request_context: dict[str, Any] | None = None,
     text_logprobs: bool = False,
     max_top_logprobs: int | None = None,
     omit_reasoning: bool = False,

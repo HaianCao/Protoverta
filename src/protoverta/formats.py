@@ -19,13 +19,13 @@ class OutputFormat:
     description: str | None = None
 
 
-def _object(value, allowed, label):
+def _object(value: Any, allowed: set[str], label: str) -> dict[str, Any]:
     if not isinstance(value, dict) or set(value) - allowed:
         raise ConversionError(f"invalid or unsupported {label} fields")
     return value
 
 
-def _portable_schema(schema, *, root=True, depth=0):
+def _portable_schema(schema: Any, *, root: bool = True, depth: int = 0) -> None:
     """Small shared strict subset; never rewrite constraints to fit a provider."""
     if depth > 32:
         raise ConversionError("structured output schema nesting exceeds 32")
@@ -74,12 +74,12 @@ def _portable_schema(schema, *, root=True, depth=0):
             _portable_schema(child, root=False, depth=depth + 1)
 
 
-def validate_strict_tool_schema(schema: dict) -> None:
+def validate_strict_tool_schema(schema: dict[str, Any]) -> None:
     """Validate the conservative shared strict-tool subset without rewriting."""
     _portable_schema(schema)
 
 
-def decode_output_format(body: dict, protocol: str) -> OutputFormat | None:
+def decode_output_format(body: dict[str, Any], protocol: str) -> OutputFormat | None:
     if protocol == "chat":
         value = body.get("response_format")
     elif protocol == "responses":
@@ -116,13 +116,13 @@ def decode_output_format(body: dict, protocol: str) -> OutputFormat | None:
     return OutputFormat(kind, copy.deepcopy(schema), name, strict, description)
 
 
-def encode_output_format(value: OutputFormat | None, protocol: str) -> dict:
+def encode_output_format(value: OutputFormat | None, protocol: str) -> dict[str, Any]:
     if value is None:
         return {}
     if value.kind == "json_object":
         if protocol == "messages":
             raise ConversionError("Messages has no equivalent of unconstrained JSON object mode")
-        wire = {"type": "json_object"}
+        wire: dict[str, Any] = {"type": "json_object"}
     else:
         if protocol == "messages":
             if value.strict is not True:
@@ -131,7 +131,7 @@ def encode_output_format(value: OutputFormat | None, protocol: str) -> dict:
                 raise ConversionError("Messages cannot preserve output-format description; put descriptions inside the schema")
             _portable_schema(value.schema)
             return {"output_config": {"format": {"type": "json_schema", "schema": copy.deepcopy(value.schema)}}}
-        details = {"name": value.name, "schema": copy.deepcopy(value.schema)}
+        details: dict[str, Any] = {"name": value.name, "schema": copy.deepcopy(value.schema)}
         if value.strict is not None:
             details["strict"] = value.strict
         if value.description is not None:

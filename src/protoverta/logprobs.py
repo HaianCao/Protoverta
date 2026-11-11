@@ -1,19 +1,22 @@
 """Lossless common token probability records; no tokenizer or inferred bytes."""
 
+from __future__ import annotations
+
 import copy
 import math
+from typing import Any
 
 from .errors import ConversionError
 
 
-def requested(body, protocol):
+def requested(body: dict[str, Any], protocol: str) -> bool:
     if protocol == "chat":
         return body.get("logprobs") is True
     include = body.get("include")
     return protocol == "responses" and isinstance(include, list) and "message.output_text.logprobs" in include
 
 
-def records(value, limit=None):
+def records(value: Any, limit: int | None = None) -> list[dict[str, Any]]:
     if limit is not None and (type(limit) is not int or not 0 <= limit <= 20):
         raise ConversionError("invalid requested logprob limit")
     if not isinstance(value, list):
@@ -25,7 +28,7 @@ def records(value, limit=None):
     return copy.deepcopy(value)
 
 
-def _token(item, *, selected=False):
+def _token(item: Any, *, selected: bool = False) -> None:
     keys = {"token", "bytes", "logprob"} | ({"top_logprobs"} if selected else set())
     if not isinstance(item, dict) or set(item) != keys or not isinstance(item["token"], str):
         raise ConversionError("unsupported token logprob record")
@@ -49,7 +52,7 @@ def _token(item, *, selected=False):
             _token(candidate)
 
 
-def align(value, text, *, required=False):
+def align(value: list[dict[str, Any]] | None, text: str, *, required: bool = False) -> None:
     try:
         encoded = text.encode("utf-8")
     except UnicodeError as exc:
@@ -60,7 +63,7 @@ def align(value, text, *, required=False):
         raise ConversionError("token logprob bytes do not match output text")
 
 
-def chat_records(value, limit=None):
+def chat_records(value: Any, limit: int | None = None) -> list[dict[str, Any]] | None:
     if value is None:
         return None
     if not isinstance(value, dict) or set(value) - {"content", "refusal"}:

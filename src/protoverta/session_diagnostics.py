@@ -1,14 +1,19 @@
 """Bounded opt-in session journals containing fixed observations only."""
 
+from __future__ import annotations
+
 import json
 import os
 import queue
 import re
 import secrets
 import threading
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict
+from os import PathLike
 from pathlib import Path
+from typing import Any, TextIO
 
 from .observability import RequestObservation
 
@@ -31,10 +36,10 @@ _FEATURES = {
 }
 
 
-def _journals(root):
+def _journals(root: Path) -> tuple[list[Path], bool]:
     # Inspect at most 512 directory entries, including unrelated filenames.
     # A crowded directory yields a bounded sample, never a global newest claim.
-    paths = []
+    paths: list[tuple[float, Path]] = []
     limited = False
     with os.scandir(root) as entries:
         for index, entry in enumerate(entries):
@@ -52,16 +57,16 @@ def _journals(root):
 class _JournalSink:
     """Nonblocking producer; the daemon writer exclusively owns its stream."""
 
-    def __init__(self, stream):
+    def __init__(self, stream: TextIO) -> None:
         self.stream = stream
-        self.pending = queue.Queue(maxsize=128)
+        self.pending: queue.Queue[str] = queue.Queue(maxsize=128)
         self.lock = threading.Lock()
         self.stopping = threading.Event()
         self.accepted = self.dropped = self.byte_count = 0
         self.thread = threading.Thread(target=self._write, name="protoverta-journal", daemon=True)
         self.thread.start()
 
-    def __call__(self, record):
+    def __call__(self, record: object) -> None:
         if type(record) is not RequestObservation:
             return
         line = json.dumps(asdict(record), separators=(",", ":")) + "\n"
@@ -78,7 +83,7 @@ class _JournalSink:
             self.accepted += 1
             self.byte_count += size
 
-    def _write(self):
+    def _write(self) -> None:
         try:
             while not self.stopping.is_set() or not self.pending.empty():
                 try:
@@ -96,7 +101,7 @@ class _JournalSink:
         finally:
             self.stream.close()
 
-    def close(self):
+    def close(self) -> None:
         with self.lock:
             self.stopping.set()
         # Never close a stream from under a blocked writer. It remains daemon-
@@ -105,7 +110,7 @@ class _JournalSink:
 
 
 @contextmanager
-def diagnostic_journal(directory):
+def diagnostic_journal(directory: str | PathLike[str]) -> Iterator[_JournalSink]:
     root = Path(directory).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
     # Only our fixed-name, non-symlink journals with the ownership header qualify.
@@ -133,7 +138,7 @@ def diagnostic_journal(directory):
         observe.close()
 
 
-def latest_diagnostics(directory):
+def latest_diagnostics(directory: str | PathLike[str]) -> dict[str, Any]:
     root = Path(directory).expanduser().resolve()
     if not root.is_dir():
         return {"records": [], "limited": False}
@@ -152,7 +157,7 @@ def latest_diagnostics(directory):
                 ):
                     continue
                 schema_version = header["schema_version"]
-                records = []
+                records: list[dict[str, Any]] = []
                 dropped = 0
                 for index, line in enumerate(stream):
                     if index >= 1025 or len(line) > 4096:

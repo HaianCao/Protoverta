@@ -16,6 +16,12 @@ as a GitHub release with a wheel, an sdist and `SHA256SUMS`. Versions before
   `skipped` and `dropped_fields` counts.
 
 ### Changed
+- The whole package is fully typed and checked with strict mypy (all 46
+  modules; previously 17). `fetch_catalog`, the token counters, the gateway
+  config and stream types now carry precise annotations; `GatewayConfig`
+  `token_counter` and `retry_log` are typed callables.
+- Stream events and content parts that lack a field their kind requires now
+  fail with a `StreamError`/`ConversionError` instead of a `TypeError`.
 - The HTTPS transport keeps the TLS context it was given instead of reading
   CPython's private `HTTPSHandler._context`.
 - Response headers and chunked framing are read a buffered run at a time

@@ -1,17 +1,20 @@
 """Effective request permissions, checked before a translated tool is exposed."""
 
+from __future__ import annotations
+
 import copy
+from typing import Any
 
 from .core import Protocol, _optional_list, _parallel_flag, _tool_choice
 from .errors import ConversionError
-from .streaming import StreamError
+from .streaming import Delta, StreamError
 
 
 class ToolPolicyViolation(StreamError):
     """The upstream result violates this request's declared tool permissions."""
 
 
-def normalize_tool_policy(body, protocol):
+def normalize_tool_policy(body: dict[str, Any], protocol: Protocol | str) -> tuple[dict[str, Any], str | dict[str, Any], bool]:
     """Apply gateway defaults to a copy; native forwarding never calls this."""
     protocol = Protocol(protocol)
     result = copy.deepcopy(body)
@@ -29,9 +32,8 @@ def normalize_tool_policy(body, protocol):
         if choice != "none":
             raw.setdefault("disable_parallel_tool_use", not parallel)
     else:
-        parallel = _parallel_flag(result.get("parallel_tool_calls"))
-        if parallel is None:
-            parallel = bool(tools)
+        flag = _parallel_flag(result.get("parallel_tool_calls"))
+        parallel = bool(tools) if flag is None else flag
         result["parallel_tool_calls"] = parallel
     result["tools"] = tools
     return result, choice, parallel
@@ -40,9 +42,9 @@ def normalize_tool_policy(body, protocol):
 class BoundToolPolicy:
     """One response only; names refer to the actual aliased upstream catalog."""
 
-    def __init__(self, body, protocol):
+    def __init__(self, body: dict[str, Any], protocol: Protocol | str) -> None:
         protocol = Protocol(protocol)
-        self.allowed = set()
+        self.allowed: set[tuple[str, str]] = set()
         for tool in body.get("tools", []):
             kind = tool.get("type", "function") if protocol != Protocol.MESSAGES else "function"
             definition = tool.get(kind, {}) if protocol == Protocol.CHAT else tool
@@ -54,15 +56,15 @@ class BoundToolPolicy:
             raw = body.get("tool_choice", {})
             self.parallel = not raw.get("disable_parallel_tool_use", False) if self.allowed and self.choice != "none" else False
         else:
-            value = body.get("parallel_tool_calls")
-            self.parallel = bool(self.allowed) if value is None else _parallel_flag(value)
+            flag = _parallel_flag(body.get("parallel_tool_calls"))
+            self.parallel = bool(self.allowed) if flag is None else flag
         if self.choice == "required" and not self.allowed:
             raise ConversionError("required tool choice needs an available tool")
         if isinstance(self.choice, dict) and (self.choice["type"], self.choice["name"]) not in self.allowed:
             raise ConversionError("forced tool choice must name an available tool")
         self.count = 0
 
-    def call(self, kind, name):
+    def call(self, kind: str, name: str | None) -> None:
         if self.choice == "none":
             raise ToolPolicyViolation("upstream emitted a tool call while tool choice is none")
         if (kind, name) not in self.allowed:
@@ -73,17 +75,17 @@ class BoundToolPolicy:
             raise ToolPolicyViolation("upstream emitted multiple calls while parallel tool calls are disabled")
         self.count += 1
 
-    def finish(self, *, truncated=False):
+    def finish(self, *, truncated: bool = False) -> None:
         if not truncated and self.count == 0 and (self.choice == "required" or isinstance(self.choice, dict)):
             raise ToolPolicyViolation("upstream completed without the required tool call")
 
-    def observe_delta(self, delta):
+    def observe_delta(self, delta: Delta) -> None:
         if delta.kind == "tool_start":
             self.call(delta.tool_type, delta.name)
         elif delta.kind == "finish":
             self.finish(truncated=delta.reason == "length")
 
-    def check_result(self, body, protocol):
+    def check_result(self, body: dict[str, Any], protocol: Protocol | str) -> None:
         protocol = Protocol(protocol)
         if protocol == Protocol.RESPONSES:
             for item in body["output"]:
