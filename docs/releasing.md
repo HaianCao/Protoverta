@@ -86,10 +86,16 @@ it exactly and verify its wheel by SHA-256.
    separate from local fixtures; it requires approved keys/models and quota.
    See [the certification checklist](compatibility/certification.md).
 
-PyPI setup (once per project, by the account owner): on pypi.org add a
-"pending publisher" for `protoverta`, `claudapter` and `codexapter` with owner
-`HaianCao`, the repository, workflow `release.yml` and environment `pypi`;
-create the `pypi` environment in each repository and set `PYPI_PUBLISH=true`.
+PyPI (Protoverta only; the launchers are installed with their one-line
+installer and keep `PYPI_PUBLISH` unset): on pypi.org add a trusted publisher
+for `protoverta` with owner `HaianCao`, repository `Protoverta`, workflow
+`release.yml` and environment `pypi`; create the `pypi` environment in the
+repository and set `PYPI_PUBLISH=true`. A tag push then publishes to PyPI.
+
+To publish an existing release that predates the PyPI setup, run the Release
+workflow manually with its tag (`gh workflow run release.yml -f tag=vX.Y.Z`).
+It downloads that release's wheel and sdist, checks them against
+`SHA256SUMS` and their build attestations, and uploads them unchanged.
 
 Keep signed/hidden reasoning and unsupported protocol features strict. No
 automatic fallback, production state mutation or release is authorized by this
