@@ -5,7 +5,10 @@ as a GitHub release with a wheel, an sdist and `SHA256SUMS`. Versions before
 0.3.0 were previews (`0.3.0aN`). The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.4.0] - 2026-11-11
+
+Internal restructuring with one user-visible addition (catalog skip mode).
+The public API and wire behaviour are unchanged; the gateway is now fully typed.
 
 ### Added
 - `CatalogPolicy(invalid_entries="skip")`: one invalid entry no longer fails
@@ -123,7 +126,7 @@ fixed in 0.3.0a10); the tag was removed.
 Earlier previews (0.3.0a5 and 0.3.0a6) are described in their
 [GitHub releases](https://github.com/HaianCao/Protoverta/releases).
 
-[Unreleased]: https://github.com/HaianCao/Protoverta/compare/v0.3.0...HEAD
+[0.4.0]: https://github.com/HaianCao/Protoverta/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/HaianCao/Protoverta/compare/v0.3.0a11...v0.3.0
 [0.3.0a11]: https://github.com/HaianCao/Protoverta/releases/tag/v0.3.0a11
 [0.3.0a10]: https://github.com/HaianCao/Protoverta/releases/tag/v0.3.0a10
