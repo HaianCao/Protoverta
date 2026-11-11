@@ -33,9 +33,8 @@ body[data-theme="dark"] {
 
 /* ---- Sidebar brand ---- */
 .sidebar-logo {
-  max-width: 72px;
-  border-radius: 18px;
-  box-shadow: var(--pv-card-shadow);
+  max-width: 76px;
+  filter: drop-shadow(0 4px 10px rgba(79, 70, 229, 0.22));
 }
 .sidebar-brand-text {
   font-weight: 700;
@@ -117,10 +116,9 @@ article:has(.pv-hero) > section > h1:first-child {
 }
 .pv-hero img.pv-hero-logo,
 .pv-hero-logo img {
-  width: 104px;
-  height: 104px;
-  border-radius: 26px;
-  box-shadow: 0 10px 30px rgba(79, 70, 229, 0.25);
+  width: 112px;
+  height: 112px;
+  filter: drop-shadow(0 10px 22px rgba(79, 70, 229, 0.3));
 }
 .pv-hero h1,
 .pv-hero .pv-title {

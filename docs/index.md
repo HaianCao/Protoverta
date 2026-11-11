@@ -2,16 +2,10 @@
 
 ::::{container} pv-hero
 
-```{image} _static/protoverta_logo_white.png
+```{image} _static/protoverta_logo.png
 :alt: Protoverta logo
-:class: pv-hero-logo only-light
-:width: 104px
-```
-
-```{image} _static/protoverta_logo_black.png
-:alt: Protoverta logo
-:class: pv-hero-logo only-dark
-:width: 104px
+:class: pv-hero-logo
+:width: 112px
 ```
 
 ```{container} pv-title
