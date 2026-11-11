@@ -33,10 +33,16 @@ def _name_locations(body: dict[str, Any], protocol: Protocol, *, request: bool) 
             )
             messages = _objects(body.get("messages"))
             choice = body.get("tool_choice")
-            if isinstance(choice, dict) and choice.get("type") in ("function", "custom") and isinstance(choice.get(choice["type"]), dict):
+            if (
+                isinstance(choice, dict)
+                and choice.get("type") in ("function", "custom")
+                and isinstance(choice.get(choice["type"]), dict)
+            ):
                 locations.append(choice[choice["type"]])
         else:
-            messages = [choice["message"] for choice in _objects(body.get("choices")) if isinstance(choice.get("message"), dict)]
+            messages = [
+                choice["message"] for choice in _objects(body.get("choices")) if isinstance(choice.get("message"), dict)
+            ]
         for message in messages:
             if message.get("role", "assistant") == "assistant":
                 locations.extend(
@@ -62,7 +68,11 @@ def _name_locations(body: dict[str, Any], protocol: Protocol, *, request: bool) 
             choice = body.get("tool_choice")
             if isinstance(choice, dict) and choice.get("type") in ("function", "custom"):
                 locations.append(choice)
-        locations.extend(item for item in _objects(body.get("input" if request else "output")) if item.get("type") in ("function_call", "custom_tool_call"))
+        locations.extend(
+            item
+            for item in _objects(body.get("input" if request else "output"))
+            if item.get("type") in ("function_call", "custom_tool_call")
+        )
     return locations
 
 

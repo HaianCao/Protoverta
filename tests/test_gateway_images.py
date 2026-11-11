@@ -25,7 +25,13 @@ def test_user_image_reaches_upstream_and_text_answer_completes(source, target, s
         assert len(blocks) == 3
         assert blocks[0]["text"] == "before" and blocks[2]["text"] == "after"
         image = blocks[1]
-        assert (image["source"]["url"] if target == "messages" else image["image_url"]["url"] if target == "chat" else image["image_url"]) == url
+        assert (
+            image["source"]["url"]
+            if target == "messages"
+            else image["image_url"]["url"]
+            if target == "chat"
+            else image["image_url"]
+        ) == url
         if stream:
             encoder = StreamEncoder(target)
             deltas = [
@@ -33,7 +39,9 @@ def test_user_image_reaches_upstream_and_text_answer_completes(source, target, s
                 Delta("text", text="image accepted"),
                 Delta("finish", reason="stop", input_tokens=8, output_tokens=2),
             ]
-            return io.BytesIO(b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta)))
+            return io.BytesIO(
+                b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta))
+            )
         result = {
             "model": "m",
             "choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": "image accepted"}}],
@@ -41,13 +49,23 @@ def test_user_image_reaches_upstream_and_text_answer_completes(source, target, s
         }
         return io.BytesIO(json.dumps(convert_response(result, "chat", target)).encode())
 
-    config = GatewayConfig(target, "https://example.test/v1", "key", "local", messages_usage_policy="deferred" if source == "messages" else "strict")
+    config = GatewayConfig(
+        target,
+        "https://example.test/v1",
+        "key",
+        "local",
+        messages_usage_policy="deferred" if source == "messages" else "strict",
+    )
     template = {
         "model": "m",
         "messages": [
             {
                 "role": "user",
-                "content": [{"type": "text", "text": "before"}, {"type": "image_url", "image_url": {"url": url}}, {"type": "text", "text": "after"}],
+                "content": [
+                    {"type": "text", "text": "before"},
+                    {"type": "image_url", "image_url": {"url": url}},
+                    {"type": "text", "text": "after"},
+                ],
             }
         ],
         "max_tokens": 32,

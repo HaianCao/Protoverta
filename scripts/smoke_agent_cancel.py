@@ -25,7 +25,11 @@ def result_text(value):
         return value
     if isinstance(value, list):
         return "\n".join(
-            item["text"] for item in value if isinstance(item, dict) and item.get("type") in {"text", "input_text"} and isinstance(item.get("text"), str)
+            item["text"]
+            for item in value
+            if isinstance(item, dict)
+            and item.get("type") in {"text", "input_text"}
+            and isinstance(item.get("text"), str)
         )
     return json.dumps(value)
 
@@ -54,7 +58,12 @@ def notification_evidence(body, task_id, marker):
         if key in body:
             candidates.append((key, result_text(body[key])))
     shapes = [
-        {"role": role, "has_task_id": task_id in text, "has_result_marker": marker in text, "is_task_notification": "<task-notification>" in text}
+        {
+            "role": role,
+            "has_task_id": task_id in text,
+            "has_result_marker": marker in text,
+            "is_task_notification": "<task-notification>" in text,
+        }
         for role, text in candidates
         if marker in text
     ]
@@ -79,7 +88,11 @@ class Scenario(parallel.Scenario):
         self.background_artifacts_owned = False
 
     def open(self, request, *, timeout):
-        expected_path = {Protocol.CHAT: "/v1/chat/completions", Protocol.MESSAGES: "/v1/messages", Protocol.RESPONSES: "/v1/responses"}[self.protocol]
+        expected_path = {
+            Protocol.CHAT: "/v1/chat/completions",
+            Protocol.MESSAGES: "/v1/messages",
+            Protocol.RESPONSES: "/v1/responses",
+        }[self.protocol]
         if urlsplit(request.full_url).path != expected_path:
             raise ValueError("Unexpected upstream endpoint")
         body = json.loads(request.data)
@@ -113,7 +126,9 @@ class Scenario(parallel.Scenario):
                         pass
                     if not self.cancel_requested.is_set():
                         raise ValueError("Child disconnected before the requested stop")
-                    self.sibling_alive_when_cancelled = self.sibling_waiting.is_set() and not self.sibling_final.is_set()
+                    self.sibling_alive_when_cancelled = (
+                        self.sibling_waiting.is_set() and not self.sibling_final.is_set()
+                    )
                     self.cancelled.set()
                     return io.BytesIO(b"")  # No invented successful terminal for a cancelled generation.
                 if not self.cancelled.wait(8):
@@ -135,7 +150,12 @@ class Scenario(parallel.Scenario):
                 [
                     (
                         spawn,
-                        {"prompt": task + " Read fixture.txt", "description": "Read local fixture", "subagent_type": "p04-worker", "run_in_background": True},
+                        {
+                            "prompt": task + " Read fixture.txt",
+                            "description": "Read local fixture",
+                            "subagent_type": "p04-worker",
+                            "run_in_background": True,
+                        },
                         f"spawn_{index}",
                     )
                     for index, task in enumerate(parallel.TASKS)
@@ -143,7 +163,9 @@ class Scenario(parallel.Scenario):
             )
         if self.client == "codex" and stage <= 2:
             return parallel.calls_wire(
-                self.protocol, body["model"], [(spawn, {"message": parallel.TASKS[stage - 1] + " Read fixture.txt"}, f"spawn_{stage - 1}")]
+                self.protocol,
+                body["model"],
+                [(spawn, {"message": parallel.TASKS[stage - 1] + " Read fixture.txt"}, f"spawn_{stage - 1}")],
             )
         stop_stage = 2 if self.client == "claude" else 3
         if stage == stop_stage:
@@ -152,8 +174,14 @@ class Scenario(parallel.Scenario):
             self.cancel_target = task_identifier(records.get("spawn_0"))
             self.sibling_target = task_identifier(records.get("spawn_1"))
             if self.client == "claude":
-                paths = [re.search(r"output_file:\s*([^\r\n]+)", result_text(records.get(f"spawn_{index}"))) for index in range(2)]
-                self.background_artifacts_owned = all(match is not None and Path(match[1]).resolve().is_relative_to(self.root.resolve()) for match in paths)
+                paths = [
+                    re.search(r"output_file:\s*([^\r\n]+)", result_text(records.get(f"spawn_{index}")))
+                    for index in range(2)
+                ]
+                self.background_artifacts_owned = all(
+                    match is not None and Path(match[1]).resolve().is_relative_to(self.root.resolve())
+                    for match in paths
+                )
                 if not self.background_artifacts_owned:
                     raise ValueError("Background artifact path escaped the disposable probe root")
             stop = single.find_tool(tools, "taskstop" if self.client == "claude" else "close_agent")
@@ -164,19 +192,31 @@ class Scenario(parallel.Scenario):
             raise ValueError("Stop tool did not disconnect the requested upstream")
         if parallel.FINALS[1] in json.dumps(body):
             if self.client == "claude":
-                self.notification_seen, self.notification_shape = notification_evidence(body, self.sibling_target, parallel.FINALS[1])
+                self.notification_seen, self.notification_shape = notification_evidence(
+                    body, self.sibling_target, parallel.FINALS[1]
+                )
             return single.encode(self.protocol, body["model"], text=DONE)
         if self.client == "codex":
             target = single.agent_id([records.get("spawn_1")])
             return parallel.calls_wire(
-                self.protocol, body["model"], [(single.find_tool(tools, "wait_agent"), {"targets": [target], "timeout_ms": 10000}, f"wait_b_{stage}")]
+                self.protocol,
+                body["model"],
+                [
+                    (
+                        single.find_tool(tools, "wait_agent"),
+                        {"targets": [target], "timeout_ms": 10000},
+                        f"wait_b_{stage}",
+                    )
+                ],
             )
         if not self.sibling_final.wait(6):
             raise ValueError("Sibling did not finish its inference after cancellation")
         # A local read gives the harness a tool boundary at which to deliver its
         # background completion notification. TaskOutput is not advertised here.
         return parallel.calls_wire(
-            self.protocol, body["model"], [(single.find_tool(tools, "read"), {"file_path": str(self.root / "fixture.txt")}, f"parent_read_{stage}")]
+            self.protocol,
+            body["model"],
+            [(single.find_tool(tools, "read"), {"file_path": str(self.root / "fixture.txt")}, f"parent_read_{stage}")],
         )
 
 
@@ -217,7 +257,12 @@ def verified_lifecycle(client, stdout, scenario):
         if not isinstance(event, dict):
             continue
         item = event.get("item")
-        if not isinstance(item, dict) or event.get("type") != "item.completed" or item.get("type") != "collab_tool_call" or item.get("status") != "completed":
+        if (
+            not isinstance(item, dict)
+            or event.get("type") != "item.completed"
+            or item.get("type") != "collab_tool_call"
+            or item.get("status") != "completed"
+        ):
             continue
         receivers = item.get("receiver_thread_ids", [])
         if not isinstance(receivers, list) or not all(isinstance(value, str) for value in receivers):
@@ -293,7 +338,12 @@ def main():
     result = run(args.client, args.upstream, args.adapter_source)
     if args.report:
         args.report.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps({key: value for key, value in result.items() if not result["passed"] or key not in {"stdout", "stderr"}}, indent=2))
+    print(
+        json.dumps(
+            {key: value for key, value in result.items() if not result["passed"] or key not in {"stdout", "stderr"}},
+            indent=2,
+        )
+    )
     return 0 if result["passed"] else 1
 
 

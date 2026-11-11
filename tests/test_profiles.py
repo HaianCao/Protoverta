@@ -69,9 +69,17 @@ def test_codex_profile_does_not_relocate_later_instructions():
 def test_multiple_response_tool_calls_stay_in_one_assistant_turn():
     body = {
         "model": "m",
-        "input": [{"type": "function_call", "call_id": f"call_{index}", "name": "lookup", "arguments": "{}"} for index in range(2)]
+        "input": [
+            {"type": "function_call", "call_id": f"call_{index}", "name": "lookup", "arguments": "{}"}
+            for index in range(2)
+        ]
         + [
-            {"type": "function_call_output", "id": f"output_{index}", "call_id": f"call_{index}", "output": [{"type": "input_text", "text": f"result_{index}"}]}
+            {
+                "type": "function_call_output",
+                "id": f"output_{index}",
+                "call_id": f"call_{index}",
+                "output": [{"type": "input_text", "text": f"result_{index}"}],
+            }
             for index in range(2)
         ],
     }

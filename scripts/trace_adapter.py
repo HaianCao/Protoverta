@@ -29,13 +29,20 @@ def summarize(body: dict) -> dict:
         text = (
             content
             if isinstance(content, str)
-            else "".join(block["text"] for block in _array(content) if isinstance(block, dict) and isinstance(block.get("text"), str))
+            else "".join(
+                block["text"]
+                for block in _array(content)
+                if isinstance(block, dict) and isinstance(block.get("text"), str)
+            )
         )
         messages.append({"index": index, "tags": sorted(set(re.findall(r"</?([a-zA-Z_][a-zA-Z0-9_]*)", text)))})
     public_reasoning_items = sum(
         isinstance(item, dict)
         and item.get("type") == "reasoning"
-        and any(isinstance(part, dict) and part.get("type") == "reasoning_text" and isinstance(part.get("text"), str) for part in _array(item.get("content")))
+        and any(
+            isinstance(part, dict) and part.get("type") == "reasoning_text" and isinstance(part.get("text"), str)
+            for part in _array(item.get("content"))
+        )
         for item in inputs
     )
     reasoning_shapes = [
@@ -45,7 +52,9 @@ def summarize(body: dict) -> dict:
             "opaque_present": item.get("encrypted_content") is not None,
             "summary_is_empty": item.get("summary") == [],
             "content_types": [
-                "reasoning_text" if part.get("type") == "reasoning_text" else "other" for part in _array(item.get("content")) if isinstance(part, dict)
+                "reasoning_text" if part.get("type") == "reasoning_text" else "other"
+                for part in _array(item.get("content"))
+                if isinstance(part, dict)
             ],
         }
         for item in inputs
@@ -60,7 +69,9 @@ def summarize(body: dict) -> dict:
             {
                 "type": tool.get("type"),
                 "name": tool.get("name"),
-                "child_types": sorted({str(child.get("type")) for child in _array(tool.get("tools")) if isinstance(child, dict)}),
+                "child_types": sorted(
+                    {str(child.get("type")) for child in _array(tool.get("tools")) if isinstance(child, dict)}
+                ),
             }
             for tool in _array(body.get("tools"))
             if isinstance(tool, dict)
@@ -84,7 +95,9 @@ def main() -> int:
 
     def feed(decoder, event):
         deltas = original_feed(decoder, event)
-        if any(delta.kind == "reasoning_text" and delta.text for delta in deltas) and not any(item.get("public_reasoning_received") for item in observations):
+        if any(delta.kind == "reasoning_text" and delta.text for delta in deltas) and not any(
+            item.get("public_reasoning_received") for item in observations
+        ):
             observations.append({"public_reasoning_received": True})
         return deltas
 
@@ -97,7 +110,8 @@ def main() -> int:
         server.prepare_codex_request = original
         StreamDecoder.feed = original_feed
         observations.extend(
-            {"stream_error": failure["category"], "stage": failure["stage"], "operation": failure["operation"]} for failure in diagnostics.failures
+            {"stream_error": failure["category"], "stage": failure["stage"], "operation": failure["operation"]}
+            for failure in diagnostics.failures
         )
         observations.append({"stream_diagnostics": diagnostics.snapshot()})
         Path(output).write_text(json.dumps(observations), encoding="utf-8")

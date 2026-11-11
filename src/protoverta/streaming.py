@@ -50,7 +50,9 @@ class UnsupportedReasoningError(StreamError):
 
     def __init__(self) -> None:
         # Fixed text only: upstream field values must not enter client errors.
-        super().__init__("unsupported reasoning output (reasoning_content/thinking/opaque state) under the current strict policy")
+        super().__init__(
+            "unsupported reasoning output (reasoning_content/thinking/opaque state) under the current strict policy"
+        )
 
 
 class UpstreamReportedError(StreamError):
@@ -63,7 +65,10 @@ class UpstreamReportedError(StreamError):
 
     def __init__(self, detail: Any, *, status: Any = None, kind: Any = None) -> None:
         text = detail if isinstance(detail, str) else "upstream provider reported an error"
-        text = "".join(char if char.isprintable() else " " for char in text).strip()[:500] or "upstream provider reported an error"
+        text = (
+            "".join(char if char.isprintable() else " " for char in text).strip()[:500]
+            or "upstream provider reported an error"
+        )
         self.detail = text
         self.kind = kind if isinstance(kind, str) and kind.isascii() and len(kind) <= 64 else None
         self.status = status if type(status) is int and 400 <= status <= 599 else None
@@ -74,7 +79,9 @@ def _reported_error(body: dict[str, Any], *, status: Any = None) -> UpstreamRepo
     error: dict[str, Any] = body["error"] if isinstance(body.get("error"), dict) else body
     code = error.get("code")
     return UpstreamReportedError(
-        error.get("message"), status=status if status is not None else code if type(code) is int else None, kind=error.get("type") or code
+        error.get("message"),
+        status=status if status is not None else code if type(code) is int else None,
+        kind=error.get("type") or code,
     )
 
 
@@ -297,7 +304,12 @@ class StreamDecoder:
 
     def feed(self, event: SSEEvent) -> list[Delta]:
         if self.ended:
-            if self.protocol == Protocol.RESPONSES and event.event == "message" and event.data == "[DONE]" and not self.saw_trailing_done:
+            if (
+                self.protocol == Protocol.RESPONSES
+                and event.event == "message"
+                and event.data == "[DONE]"
+                and not self.saw_trailing_done
+            ):
                 self.saw_trailing_done = True
                 return []
             raise StreamError("event after stream completion")
@@ -318,7 +330,15 @@ class StreamDecoder:
         self.input_tokens = _tokens(input_tokens, "input_tokens")
         self.output_tokens = _tokens(output_tokens, "output_tokens")
         self.started = True
-        return [Delta("start", model=self.model, input_tokens=self.input_tokens, output_tokens=self.output_tokens, **self.usage_details)]
+        return [
+            Delta(
+                "start",
+                model=self.model,
+                input_tokens=self.input_tokens,
+                output_tokens=self.output_tokens,
+                **self.usage_details,
+            )
+        ]
 
     def _check_call_id(self, call_id: str, index: int) -> None:
         if not call_id or any(other != index and tool.call_id == call_id for other, tool in self.tools.items()):
@@ -345,7 +365,12 @@ class StreamDecoder:
         self.ended = True
         return [
             Delta(
-                "finish", reason=reason, input_tokens=self.input_tokens, output_tokens=self.output_tokens, service_tier=self.service_tier, **self.usage_details
+                "finish",
+                reason=reason,
+                input_tokens=self.input_tokens,
+                output_tokens=self.output_tokens,
+                service_tier=self.service_tier,
+                **self.usage_details,
             )
         ]
 
@@ -358,7 +383,9 @@ class StreamDecoder:
                 if not tool.opened:
                     raise StreamError("tool call ended before ID and name were known")
                 tool.closed = True
-            deltas = [Delta("tool_end", index=i, call_id=t.call_id, item_id=t.item_id) for i, t in sorted(self.tools.items())]
+            deltas = [
+                Delta("tool_end", index=i, call_id=t.call_id, item_id=t.item_id) for i, t in sorted(self.tools.items())
+            ]
             return deltas + self._complete(self.reason)
         if event.event not in {"message", "chat.completion.chunk"}:
             raise StreamError(f"unsupported Chat SSE event: {event.event}")
@@ -431,7 +458,8 @@ class StreamDecoder:
                     raise UnsupportedStreamFeatureError("refusal")
                 continue
             if field not in {"role", "content", "tool_calls"} and (
-                field not in {"refusal", "annotations", "reasoning", "reasoning_content", "reasoning_details"} or value not in (None, "", [])
+                field not in {"refusal", "annotations", "reasoning", "reasoning_content", "reasoning_details"}
+                or value not in (None, "", [])
             ):
                 raise StreamError(f"unsupported Chat delta field: {field}")
         if delta.get("role") not in (None, "assistant"):
@@ -620,7 +648,11 @@ class StreamDecoder:
             raise StreamError("Responses event/data type mismatch")
         if kind == "error":
             raise _reported_error(body)
-        if kind == "response.failed" and isinstance(body.get("response"), dict) and isinstance(body["response"].get("error"), dict):
+        if (
+            kind == "response.failed"
+            and isinstance(body.get("response"), dict)
+            and isinstance(body["response"].get("error"), dict)
+        ):
             raise _reported_error(body["response"]["error"])
         sequence = _index(body.get("sequence_number"), "Responses sequence_number")
         if self.sequence is not None and sequence <= self.sequence:
@@ -679,9 +711,24 @@ class StreamDecoder:
                 name = _str(item.get("name"), "function_call.name")
                 self._check_call_id(call_id, index)
                 self.items[index] = ("tool", item_id)
-                self.tools[index] = _Tool(call_id=call_id, name=name, item_id=item_id, opened=True, tool_type="custom" if custom else "function")
+                self.tools[index] = _Tool(
+                    call_id=call_id,
+                    name=name,
+                    item_id=item_id,
+                    opened=True,
+                    tool_type="custom" if custom else "function",
+                )
                 self.saw_tool = True
-                return [Delta("tool_start", index=index, item_id=item_id, call_id=call_id, name=name, tool_type="custom" if custom else "function")]
+                return [
+                    Delta(
+                        "tool_start",
+                        index=index,
+                        item_id=item_id,
+                        call_id=call_id,
+                        name=name,
+                        tool_type="custom" if custom else "function",
+                    )
+                ]
             raise StreamError(f"unsupported Responses output item: {item_type}")
         if (
             kind != "response.output_item.done"
@@ -693,7 +740,13 @@ class StreamDecoder:
                 raise StreamError("omitted reasoning event has wrong item identity")
             return []
         if (
-            kind in {"response.content_part.added", "response.reasoning_text.delta", "response.reasoning_text.done", "response.content_part.done"}
+            kind
+            in {
+                "response.content_part.added",
+                "response.reasoning_text.delta",
+                "response.reasoning_text.done",
+                "response.content_part.done",
+            }
             and type(body.get("output_index")) is int
             and self.items.get(body["output_index"], (None,))[0] == "reasoning"
         ):
@@ -709,7 +762,12 @@ class StreamDecoder:
                 _only(part, {"type", "refusal"}, "Responses refusal part")
                 _str(part.get("refusal"), "refusal")
                 raise UnsupportedStreamFeatureError("refusal")
-            if part.get("type") != "output_text" or part.get("text") != "" or part.get("annotations") != [] or part.get("logprobs", []) != []:
+            if (
+                part.get("type") != "output_text"
+                or part.get("text") != ""
+                or part.get("annotations") != []
+                or part.get("logprobs", []) != []
+            ):
                 raise StreamError("unsupported Responses content part metadata")
             self.text_parts[index] = "open"
             self.item_probabilities[index] = []
@@ -718,7 +776,12 @@ class StreamDecoder:
             index = _index(body.get("output_index"), "output_index")
             if self.items.get(index, (None,))[0] != "text" or self.text_parts.get(index) != "open":
                 raise StreamError("Responses text delta without a message item")
-            if body.get("item_id") != self.items[index][1] or body.get("content_index") != 0 or not self.text_logprobs and self._text_logprobs(body) != []:
+            if (
+                body.get("item_id") != self.items[index][1]
+                or body.get("content_index") != 0
+                or not self.text_logprobs
+                and self._text_logprobs(body) != []
+            ):
                 raise StreamError("unsupported Responses text delta metadata")
             value = _str(body.get("delta"), "text delta")
             probabilities = self._text_logprobs(body) if self.text_logprobs else []
@@ -727,7 +790,9 @@ class StreamDecoder:
             if self.text_logprobs:
                 self.probabilities.extend(probabilities)
                 self.probability_text += value
-            return [Delta("text", index=index, item_id=self.items[index][1], text=value, logprobs=probabilities or None)]
+            return [
+                Delta("text", index=index, item_id=self.items[index][1], text=value, logprobs=probabilities or None)
+            ]
         if kind in ("response.function_call_arguments.delta", "response.custom_tool_call_input.delta"):
             index = _index(body.get("output_index"), "output_index")
             if self.items.get(index, (None,))[0] != "tool":
@@ -744,9 +809,17 @@ class StreamDecoder:
             return [Delta("tool_delta", index=index, item_id=tool.item_id, call_id=tool.call_id, text=delta)]
         if kind == "response.output_text.done":
             index = _index(body.get("output_index"), "output_index")
-            if self.items.get(index, (None,))[0] != "text" or self.text_parts.get(index) != "open" or body.get("text") != self.text_items[index]:
+            if (
+                self.items.get(index, (None,))[0] != "text"
+                or self.text_parts.get(index) != "open"
+                or body.get("text") != self.text_items[index]
+            ):
                 raise StreamError("Responses completed text differs from deltas")
-            if body.get("item_id") != self.items[index][1] or body.get("content_index") != 0 or self._text_logprobs(body) != self.item_probabilities[index]:
+            if (
+                body.get("item_id") != self.items[index][1]
+                or body.get("content_index") != 0
+                or self._text_logprobs(body) != self.item_probabilities[index]
+            ):
                 raise StreamError("unsupported Responses completed text metadata")
             from .logprobs import align
 
@@ -759,7 +832,10 @@ class StreamDecoder:
         if kind in ("response.function_call_arguments.done", "response.custom_tool_call_input.done"):
             index = _index(body.get("output_index"), "output_index")
             custom = kind == "response.custom_tool_call_input.done"
-            if self.items.get(index, (None,))[0] != "tool" or body.get("input" if custom else "arguments") != self.tools[index].arguments:
+            if (
+                self.items.get(index, (None,))[0] != "tool"
+                or body.get("input" if custom else "arguments") != self.tools[index].arguments
+            ):
                 raise StreamError("Responses completed tool arguments differ from deltas")
             if custom != (self.tools[index].tool_type == "custom"):
                 raise StreamError("Responses completed input type differs from item")
@@ -886,7 +962,11 @@ class StreamDecoder:
 
     def _public_reasoning_event(self, body: dict[str, Any], kind: str) -> list[Delta]:
         index = _index(body.get("output_index"), "output_index")
-        if body.get("item_id") != self.items[index][1] or type(body.get("content_index")) is not int or body["content_index"] != 0:
+        if (
+            body.get("item_id") != self.items[index][1]
+            or type(body.get("content_index")) is not int
+            or body["content_index"] != 0
+        ):
             raise StreamError("public reasoning content has wrong identity")
         state = self.reasoning_parts.get(index)
         if kind == "response.content_part.added":

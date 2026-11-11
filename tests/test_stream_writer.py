@@ -114,7 +114,9 @@ def test_failed_heartbeat_cancels_upstream_without_echoing_error(failure):
 def test_monitor_observing_deadline_does_not_turn_it_into_client_disconnect():
     now = [0.0]
     budget = RequestBudget(1, 0.1, 1, clock=lambda: now[0])
-    writer = StreamHeartbeatWriter(lambda *_: pytest.fail("deadline must not send bytes"), budget, b": ping\n\n", interval=0.01)
+    writer = StreamHeartbeatWriter(
+        lambda *_: pytest.fail("deadline must not send bytes"), budget, b": ping\n\n", interval=0.01
+    )
     now[0] = 0.2
     writer.start()
     writer.thread.join(1)

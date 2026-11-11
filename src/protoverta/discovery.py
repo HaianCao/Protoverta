@@ -54,7 +54,11 @@ class CatalogPolicy:
     invalid_entries: str = "reject"
 
     def __post_init__(self) -> None:
-        if self.pagination not in ("none", "after_id", "numbered") or not positive_number(self.timeout) or self.timeout > 120:
+        if (
+            self.pagination not in ("none", "after_id", "numbered")
+            or not positive_number(self.timeout)
+            or self.timeout > 120
+        ):
             raise ValueError("invalid catalog pagination/deadline")
         if self.invalid_entries not in ("reject", "skip"):
             raise ValueError("invalid_entries must be 'reject' or 'skip'")
@@ -65,7 +69,10 @@ class CatalogPolicy:
             raise ValueError("catalog resource limits exceed supported bounds")
         if not isinstance(self.path, str) or not re.fullmatch(r"/(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+", self.path):
             raise ValueError("catalog path must be a simple relative endpoint, without query or host")
-        if any(not isinstance(value, str) or not value for value in (self.name_field, self.id_field, self.page_param, self.total_pages_field)):
+        if any(
+            not isinstance(value, str) or not value
+            for value in (self.name_field, self.id_field, self.page_param, self.total_pages_field)
+        ):
             raise ValueError("required catalog field paths must be nonempty strings")
         for field in (
             self.name_field,
@@ -78,7 +85,10 @@ class CatalogPolicy:
             self.page_param,
             self.current_page_field,
         ):
-            if field is not None and (not isinstance(field, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*){0,7}", field)):
+            if field is not None and (
+                not isinstance(field, str)
+                or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*){0,7}", field)
+            ):
                 raise ValueError("invalid explicit catalog metadata field path")
         if type(self.first_page) is not int or not 0 <= self.first_page <= 1:
             raise ValueError("first catalog page must be zero or one")
@@ -89,7 +99,9 @@ class CatalogPolicy:
             if (
                 not isinstance(pair, (list, tuple))
                 or len(pair) != 2
-                or any(not isinstance(v, str) or len(v) > 256 or any(ord(c) < 32 or ord(c) == 127 for c in v) for v in pair)
+                or any(
+                    not isinstance(v, str) or len(v) > 256 or any(ord(c) < 32 or ord(c) == 127 for c in v) for v in pair
+                )
             ):
                 raise ValueError("invalid catalog query parameter")
             if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", pair[0]) or pair[0] in {"after_id", self.page_param}:
@@ -118,7 +130,11 @@ class CatalogPolicy:
         from datetime import date
 
         date.fromisoformat(body["checked_at"])
-        if not isinstance(body["evidence"], str) or not body["evidence"].strip() or not isinstance(body["policy"], dict):
+        if (
+            not isinstance(body["evidence"], str)
+            or not body["evidence"].strip()
+            or not isinstance(body["policy"], dict)
+        ):
             raise CatalogError("catalog mapping requires explicit evidence and policy")
         try:
             return cls(**body["policy"])
@@ -183,7 +199,12 @@ def _valid_id(identifier: object) -> TypeGuard[str]:
 
 
 def _valid_name(name: object) -> TypeGuard[str]:
-    return isinstance(name, str) and bool(name) and len(name) <= 512 and not any(ord(c) < 32 or _surrogate(c) for c in name)
+    return (
+        isinstance(name, str)
+        and bool(name)
+        and len(name) <= 512
+        and not any(ord(c) < 32 or _surrogate(c) for c in name)
+    )
 
 
 def _valid_limit(value: object) -> bool:
@@ -191,10 +212,16 @@ def _valid_limit(value: object) -> bool:
 
 
 def _valid_modalities(values: object) -> bool:
-    return isinstance(values, list) and len(values) <= 16 and all(isinstance(value, str) and re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", value) for value in values)
+    return (
+        isinstance(values, list)
+        and len(values) <= 16
+        and all(isinstance(value, str) and re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", value) for value in values)
+    )
 
 
-def parse_page(body: Any, policy: CatalogPolicy, counts: dict[str, int] | None = None) -> tuple[list[ModelInfo], str | None]:
+def parse_page(
+    body: Any, policy: CatalogPolicy, counts: dict[str, int] | None = None
+) -> tuple[list[ModelInfo], str | None]:
     """Validate one catalog page against ``policy``; return its models and the next-page cursor (or ``None``).
 
     With ``policy.invalid_entries == "skip"``, ``counts`` (a dict, if given)
@@ -218,7 +245,11 @@ def parse_page(body: Any, policy: CatalogPolicy, counts: dict[str, int] | None =
         identifier = _field(item, policy.id_field) if isinstance(item, dict) else None
         if not isinstance(item, dict) or not _valid_id(identifier):
             if not skip:
-                raise CatalogError("model catalog entries must be objects" if not isinstance(item, dict) else "model catalog contains an invalid model ID")
+                raise CatalogError(
+                    "model catalog entries must be objects"
+                    if not isinstance(item, dict)
+                    else "model catalog contains an invalid model ID"
+                )
             counts["skipped"] += 1
             continue
         name = _field(item, policy.name_field)
@@ -248,21 +279,32 @@ def parse_page(body: Any, policy: CatalogPolicy, counts: dict[str, int] | None =
     if (
         has_more
         and policy.pagination == "after_id"
-        and (not isinstance(cursor, str) or not cursor or len(cursor) > 512 or any(c.isspace() or _surrogate(c) for c in cursor))
+        and (
+            not isinstance(cursor, str)
+            or not cursor
+            or len(cursor) > 512
+            or any(c.isspace() or _surrogate(c) for c in cursor)
+        )
     ):
         raise CatalogError("invalid catalog pagination cursor")
     return result, cursor
 
 
 class _NoRedirect(HTTPRedirectHandler):
-    def redirect_request(self, request: Request, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> Request | None:
+    def redirect_request(
+        self, request: Request, fp: Any, code: int, msg: str, headers: Any, newurl: str
+    ) -> Request | None:
         if fp is not None:
             fp.close()
         raise CatalogError("catalog redirects are not permitted")
 
 
 def fetch_catalog(
-    base_url: str, headers: Mapping[str, str], policy: CatalogPolicy | None = None, *, upstream_open: Callable[..., Any] | None = None
+    base_url: str,
+    headers: Mapping[str, str],
+    policy: CatalogPolicy | None = None,
+    *,
+    upstream_open: Callable[..., Any] | None = None,
 ) -> Catalog:
     """Fetch and validate a provider's complete model catalog.
 
@@ -308,7 +350,12 @@ def fetch_catalog(
             entries, cursor = parse_page(body, policy, counts)
             if policy.pagination == "numbered":
                 total = _field(body, policy.total_pages_field)
-                if type(total) is not int or not 1 <= total <= policy.max_pages or expected_total is not None and total != expected_total:
+                if (
+                    type(total) is not int
+                    or not 1 <= total <= policy.max_pages
+                    or expected_total is not None
+                    and total != expected_total
+                ):
                     raise CatalogError("invalid or changing catalog page count")
                 if policy.current_page_field:
                     current = _field(body, policy.current_page_field)

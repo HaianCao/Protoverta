@@ -29,14 +29,27 @@ def _portable_schema(schema: Any, *, root: bool = True, depth: int = 0) -> None:
     """Small shared strict subset; never rewrite constraints to fit a provider."""
     if depth > 32:
         raise ConversionError("structured output schema nesting exceeds 32")
-    allowed = {"type", "properties", "required", "additionalProperties", "items", "enum", "anyOf", "title", "description"}
+    allowed = {
+        "type",
+        "properties",
+        "required",
+        "additionalProperties",
+        "items",
+        "enum",
+        "anyOf",
+        "title",
+        "description",
+    }
     node = _object(schema, allowed, "portable structured output schema")
     for key in ("title", "description"):
         if key in node and not isinstance(node[key], str):
             raise ConversionError(f"schema {key} must be text")
     kind = node.get("type")
     types = kind if isinstance(kind, list) else [kind] if kind else []
-    if any(not isinstance(item, str) or item not in {"object", "array", "string", "integer", "number", "boolean", "null"} for item in types):
+    if any(
+        not isinstance(item, str) or item not in {"object", "array", "string", "integer", "number", "boolean", "null"}
+        for item in types
+    ):
         raise ConversionError("unsupported structured output schema type")
     if root and kind != "object":
         raise ConversionError("portable structured output schema requires an object root")
@@ -89,14 +102,22 @@ def decode_output_format(body: dict[str, Any], protocol: str) -> OutputFormat | 
         value = body.get("output_config", {}).get("format")
     if value is None:
         return None
-    value = _object(value, {"type", "json_schema"} if protocol == "chat" else {"type", "schema", "name", "strict", "description"}, "output format")
+    value = _object(
+        value,
+        {"type", "json_schema"} if protocol == "chat" else {"type", "schema", "name", "strict", "description"},
+        "output format",
+    )
     kind = value.get("type")
     if isinstance(kind, str) and kind in {"text", "json_object"} and protocol != "messages":
         _object(value, {"type"}, "output format")
         return OutputFormat(kind) if kind == "json_object" else None
     if kind != "json_schema":
         raise ConversionError("unsupported output format type")
-    details = _object(value.get("json_schema"), {"name", "schema", "strict", "description"}, "Chat json_schema") if protocol == "chat" else value
+    details = (
+        _object(value.get("json_schema"), {"name", "schema", "strict", "description"}, "Chat json_schema")
+        if protocol == "chat"
+        else value
+    )
     if protocol == "messages":
         _object(value, {"type", "schema"}, "Messages output format")
     schema = details.get("schema")
@@ -128,7 +149,9 @@ def encode_output_format(value: OutputFormat | None, protocol: str) -> dict[str,
             if value.strict is not True:
                 raise ConversionError("Messages structured output requires explicit strict=true")
             if value.description:
-                raise ConversionError("Messages cannot preserve output-format description; put descriptions inside the schema")
+                raise ConversionError(
+                    "Messages cannot preserve output-format description; put descriptions inside the schema"
+                )
             _portable_schema(value.schema)
             return {"output_config": {"format": {"type": "json_schema", "schema": copy.deepcopy(value.schema)}}}
         details: dict[str, Any] = {"name": value.name, "schema": copy.deepcopy(value.schema)}
@@ -136,5 +159,9 @@ def encode_output_format(value: OutputFormat | None, protocol: str) -> dict[str,
             details["strict"] = value.strict
         if value.description is not None:
             details["description"] = value.description
-        wire = {"type": "json_schema", "json_schema": details} if protocol == "chat" else {"type": "json_schema", **details}
+        wire = (
+            {"type": "json_schema", "json_schema": details}
+            if protocol == "chat"
+            else {"type": "json_schema", **details}
+        )
     return {"response_format": wire} if protocol == "chat" else {"text": {"format": wire}}

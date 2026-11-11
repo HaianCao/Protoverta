@@ -77,7 +77,12 @@ def test_session_exit_cancels_open_upstream_and_unauthenticated_partial_client(i
             ):
                 location = urlsplit(origin)
                 connection = HTTPConnection(location.hostname, location.port, timeout=2)
-                connection.request("POST", "/v1/responses", json.dumps({"model": "fixture", "input": "hi", "stream": True}), {"Authorization": "Bearer local"})
+                connection.request(
+                    "POST",
+                    "/v1/responses",
+                    json.dumps({"model": "fixture", "input": "hi", "stream": True}),
+                    {"Authorization": "Bearer local"},
+                )
                 response = connection.getresponse()
                 through_seed(response)
                 assert entered.wait(1)
@@ -97,9 +102,15 @@ def test_session_exit_cancels_open_upstream_and_unauthenticated_partial_client(i
             with pytest.raises(OSError):
                 socket.create_connection((location.hostname, location.port), timeout=0.3)
             until = time.monotonic() + 1
-            while time.monotonic() < until and any(thread.name in monitors and (thread.name, thread.ident) not in baseline for thread in threading.enumerate()):
+            while time.monotonic() < until and any(
+                thread.name in monitors and (thread.name, thread.ident) not in baseline
+                for thread in threading.enumerate()
+            ):
                 threading.Event().wait(0.01)
-            assert not any(thread.name in monitors and (thread.name, thread.ident) not in baseline for thread in threading.enumerate())
+            assert not any(
+                thread.name in monitors and (thread.name, thread.ident) not in baseline
+                for thread in threading.enumerate()
+            )
             assert not servers[0]._active_clients and not servers[0]._request_budgets
         finally:
             if response:

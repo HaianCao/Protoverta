@@ -27,7 +27,10 @@ def main():
         if not config.upstream_api_key.startswith("p05-synthetic-key-"):
             raise ValueError("Only synthetic credentials are permitted")
         with original(config, **kwargs) as origin:
-            path.write_text(json.dumps({"origin": origin, "token": config.inbound_token, "cwd": str(Path.cwd().resolve())}), encoding="utf-8")
+            path.write_text(
+                json.dumps({"origin": origin, "token": config.inbound_token, "cwd": str(Path.cwd().resolve())}),
+                encoding="utf-8",
+            )
             yield origin
         path.with_suffix(".closed").write_text("closed", encoding="utf-8")
 

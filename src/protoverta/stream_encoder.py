@@ -63,7 +63,9 @@ class StreamEncoder:
             from .response_context import bind_response_context
 
             context_transform = bind_response_context(request_context)
-            self.response_transform = lambda event: context_transform(response_transform(event) if response_transform is not None else event)
+            self.response_transform = lambda event: context_transform(
+                response_transform(event) if response_transform is not None else event
+            )
         self.started = False
         self.ended = False
         self.model = ""
@@ -114,7 +116,9 @@ class StreamEncoder:
             return []
         if delta.kind in {"text", "tool_start", "finish"}:
             self.reasoning_closed = True
-            closing = self._close_reasoning(status="incomplete" if delta.kind == "finish" and delta.reason == "length" else "completed")
+            closing = self._close_reasoning(
+                status="incomplete" if delta.kind == "finish" and delta.reason == "length" else "completed"
+            )
             if closing:
                 return closing + self.feed(delta)
         if delta.kind == "finish":
@@ -174,18 +178,28 @@ class StreamEncoder:
         if self.protocol == Protocol.MESSAGES:
             raise UnsupportedReasoningError()
         if not self.public_reasoning or self.reasoning_closed or not isinstance(delta.text, str):
-            raise StreamError("unsigned public reasoning requires an enabled Chat/Responses prefix; Messages signatures cannot be fabricated")
+            raise StreamError(
+                "unsigned public reasoning requires an enabled Chat/Responses prefix; Messages signatures cannot be fabricated"
+            )
         if self.protocol == Protocol.CHAT:
             return [self._chat_chunk([{"index": 0, "delta": {"reasoning_content": delta.text}, "finish_reason": None}])]
         events = []
         if self.reasoning_index is None:
             self.reasoning_index = self.next_index
             self.next_index += 1
-            item = {"type": "reasoning", "id": "rs_" + uuid.uuid4().hex, "status": "in_progress", "summary": [], "content": []}
+            item = {
+                "type": "reasoning",
+                "id": "rs_" + uuid.uuid4().hex,
+                "status": "in_progress",
+                "summary": [],
+                "content": [],
+            }
             self.output.append(item)
             events.extend(
                 [
-                    self._response_event("response.output_item.added", output_index=self.reasoning_index, item=item.copy()),
+                    self._response_event(
+                        "response.output_item.added", output_index=self.reasoning_index, item=item.copy()
+                    ),
                     self._response_event(
                         "response.content_part.added",
                         output_index=self.reasoning_index,
@@ -216,8 +230,16 @@ class StreamEncoder:
         item.update(reasoning_item(self.reasoning_text, identifier=item["id"], status=status))
         part = item["content"][0]
         return [
-            self._response_event("response.reasoning_text.done", output_index=index, item_id=item["id"], content_index=0, text=part["text"]),
-            self._response_event("response.content_part.done", output_index=index, item_id=item["id"], content_index=0, part=part.copy()),
+            self._response_event(
+                "response.reasoning_text.done",
+                output_index=index,
+                item_id=item["id"],
+                content_index=0,
+                text=part["text"],
+            ),
+            self._response_event(
+                "response.content_part.done", output_index=index, item_id=item["id"], content_index=0, part=part.copy()
+            ),
             self._response_event("response.output_item.done", output_index=index, item=item.copy()),
         ]
 
@@ -232,7 +254,9 @@ class StreamEncoder:
                 raise StreamError(str(exc)) from exc
         return _event(kind, payload)
 
-    def _response_snapshot(self, status: str, *, usage: dict[str, int] | None = None, incomplete_details: dict[str, str] | None = None) -> dict[str, Any]:
+    def _response_snapshot(
+        self, status: str, *, usage: dict[str, int] | None = None, incomplete_details: dict[str, str] | None = None
+    ) -> dict[str, Any]:
         return {
             "id": self.id,
             "object": "response",
@@ -254,7 +278,13 @@ class StreamEncoder:
     def _chat_chunk(self, choices: list[dict[str, Any]], usage: dict[str, int] | None = None) -> SSEEvent:
         for choice in choices:
             choice.setdefault("logprobs", None)
-        body: dict[str, Any] = {"id": self.id, "object": "chat.completion.chunk", "created": self.created, "model": self.model, "choices": choices}
+        body: dict[str, Any] = {
+            "id": self.id,
+            "object": "chat.completion.chunk",
+            "created": self.created,
+            "model": self.model,
+            "choices": choices,
+        }
         if usage is not None:
             body["usage"] = usage
         if self.service_tier is not None:
@@ -263,7 +293,9 @@ class StreamEncoder:
 
     def _start(self, delta: Delta) -> list[SSEEvent]:
         if self.protocol == Protocol.CHAT:
-            return [self._chat_chunk([{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": None}])]
+            return [
+                self._chat_chunk([{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": None}])
+            ]
         if self.protocol == Protocol.MESSAGES:
             return [
                 _event(
@@ -308,10 +340,24 @@ class StreamEncoder:
                 self.text_index = self.next_index
                 self.next_index += 1
                 events.append(
-                    _event("content_block_start", {"type": "content_block_start", "index": self.text_index, "content_block": {"type": "text", "text": ""}})
+                    _event(
+                        "content_block_start",
+                        {
+                            "type": "content_block_start",
+                            "index": self.text_index,
+                            "content_block": {"type": "text", "text": ""},
+                        },
+                    )
                 )
             events.append(
-                _event("content_block_delta", {"type": "content_block_delta", "index": self.text_index, "delta": {"type": "text_delta", "text": delta.text}})
+                _event(
+                    "content_block_delta",
+                    {
+                        "type": "content_block_delta",
+                        "index": self.text_index,
+                        "delta": {"type": "text_delta", "text": delta.text},
+                    },
+                )
             )
             return events
         events = []
@@ -320,10 +366,14 @@ class StreamEncoder:
             self.next_index += 1
             self.message_output_index = self.text_index
             item_id = f"msg_{uuid.uuid4().hex}"
-            self.output.append({"id": item_id, "type": "message", "status": "in_progress", "role": "assistant", "content": []})
+            self.output.append(
+                {"id": item_id, "type": "message", "status": "in_progress", "role": "assistant", "content": []}
+            )
             events.extend(
                 [
-                    self._response_event("response.output_item.added", output_index=self.text_index, item=self.output[-1].copy()),
+                    self._response_event(
+                        "response.output_item.added", output_index=self.text_index, item=self.output[-1].copy()
+                    ),
                     self._response_event(
                         "response.content_part.added",
                         item_id=item_id,
@@ -365,9 +415,16 @@ class StreamEncoder:
             self.text = ""
             return [
                 self._response_event(
-                    "response.output_text.done", item_id=item["id"], output_index=index, content_index=0, text=part["text"], logprobs=part["logprobs"]
+                    "response.output_text.done",
+                    item_id=item["id"],
+                    output_index=index,
+                    content_index=0,
+                    text=part["text"],
+                    logprobs=part["logprobs"],
                 ),
-                self._response_event("response.content_part.done", item_id=item["id"], output_index=index, content_index=0, part=part),
+                self._response_event(
+                    "response.content_part.done", item_id=item["id"], output_index=index, content_index=0, part=part
+                ),
                 self._response_event("response.output_item.done", output_index=index, item=item.copy()),
             ]
         return []
@@ -381,7 +438,16 @@ class StreamEncoder:
                     [
                         {
                             "index": 0,
-                            "delta": {"tool_calls": [{"index": delta.index, "id": delta.call_id, "type": kind, kind: {"name": delta.name, arg: ""}}]},
+                            "delta": {
+                                "tool_calls": [
+                                    {
+                                        "index": delta.index,
+                                        "id": delta.call_id,
+                                        "type": kind,
+                                        kind: {"name": delta.name, arg: ""},
+                                    }
+                                ]
+                            },
                             "finish_reason": None,
                         }
                     ]
@@ -447,7 +513,14 @@ class StreamEncoder:
                         {
                             "index": 0,
                             "delta": {
-                                "tool_calls": [{"index": delta.index, "custom" if custom else "function": {"input" if custom else "arguments": delta.text}}]
+                                "tool_calls": [
+                                    {
+                                        "index": delta.index,
+                                        "custom" if custom else "function": {
+                                            "input" if custom else "arguments": delta.text
+                                        },
+                                    }
+                                ]
                             },
                             "finish_reason": None,
                         }
@@ -458,7 +531,11 @@ class StreamEncoder:
             return [
                 _event(
                     "content_block_delta",
-                    {"type": "content_block_delta", "index": tool["target_index"], "delta": {"type": "input_json_delta", "partial_json": delta.text}},
+                    {
+                        "type": "content_block_delta",
+                        "index": tool["target_index"],
+                        "delta": {"type": "input_json_delta", "partial_json": delta.text},
+                    },
                 )
             ]
         return [
@@ -491,8 +568,12 @@ class StreamEncoder:
                 raise StreamError("client search arguments must be an object")
             item.update(status="completed", arguments=arguments)
             return [
-                self._response_event("response.output_item.added", output_index=tool["target_index"], item=copy.deepcopy(item)),
-                self._response_event("response.output_item.done", output_index=tool["target_index"], item=copy.deepcopy(item)),
+                self._response_event(
+                    "response.output_item.added", output_index=tool["target_index"], item=copy.deepcopy(item)
+                ),
+                self._response_event(
+                    "response.output_item.done", output_index=tool["target_index"], item=copy.deepcopy(item)
+                ),
             ]
         custom = tool["tool_type"] == "custom"
         arg = "input" if custom else "arguments"
@@ -530,7 +611,11 @@ class StreamEncoder:
                 [
                     _event(
                         "message_delta",
-                        {"type": "message_delta", "delta": {"stop_reason": reason, "stop_sequence": None}, "usage": _encode_usage(delta, Protocol.MESSAGES)},
+                        {
+                            "type": "message_delta",
+                            "delta": {"stop_reason": reason, "stop_sequence": None},
+                            "usage": _encode_usage(delta, Protocol.MESSAGES),
+                        },
                     ),
                     _event("message_stop", {"type": "message_stop"}),
                 ]
@@ -545,4 +630,6 @@ class StreamEncoder:
             usage=_encode_usage(delta, Protocol.RESPONSES),
             incomplete_details={"reason": "max_output_tokens"} if incomplete else None,
         )
-        return events + [self._response_event("response.incomplete" if incomplete else "response.completed", response=response)]
+        return events + [
+            self._response_event("response.incomplete" if incomplete else "response.completed", response=response)
+        ]

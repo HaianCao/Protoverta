@@ -216,7 +216,9 @@ def test_agent_and_chain_correlation_is_authenticated_bounded_hashed_and_not_for
 
     def upstream(request, timeout):
         outbound_headers.append({k.lower(): v for k, v in request.header_items()})
-        return io.BytesIO(b'{"model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}')
+        return io.BytesIO(
+            b'{"model":"m","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}'
+        )
 
     with observed_server(upstream, records.append) as origin:
         # 1. Unauthenticated request with correlation headers must NOT record digests or reach upstream.

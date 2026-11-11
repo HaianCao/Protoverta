@@ -11,7 +11,15 @@ import pytest
 def test_isolated_probe_process_returns_success_and_stops_on_timeout(monkeypatch, tmp_path):
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "scripts"))
     module = importlib.import_module("probe_process")
-    options = {"cwd": str(tmp_path), "text": True, "encoding": "utf-8", "errors": "replace", "timeout": 5, "check": False, "capture_output": True}
+    options = {
+        "cwd": str(tmp_path),
+        "text": True,
+        "encoding": "utf-8",
+        "errors": "replace",
+        "timeout": 5,
+        "check": False,
+        "capture_output": True,
+    }
     success = module.run_process([sys.executable, "-c", "print('synthetic-ok')"], **options)
     assert success.returncode == 0 and "synthetic-ok" in success.stdout
     # The descendant inherits the stdout pipe. communicate() cannot finish
@@ -42,7 +50,9 @@ def test_timeout_cleans_descendant_even_after_its_parent_exits(monkeypatch, tmp_
 
     monkeypatch.setattr(module, "_start", exited_parent)
     interpreter = getattr(sys, "_base_executable", sys.executable)
-    result = module.run_process([interpreter, "-c", code], cwd=str(tmp_path), text=True, encoding="utf-8", errors="replace", timeout=0.5)
+    result = module.run_process(
+        [interpreter, "-c", code], cwd=str(tmp_path), text=True, encoding="utf-8", errors="replace", timeout=0.5
+    )
     assert result.returncode == 124 and "parent-exited" in result.stdout
     assert "root exited 0; descendant pipes remained open" in result.stderr
     assert time.monotonic() - ready[0] < 10
@@ -78,5 +88,8 @@ def test_windows_containment_failure_never_runs_the_suspended_child(monkeypatch,
 def test_windows_probe_never_requests_job_breakaway(monkeypatch):
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "scripts"))
     module = importlib.import_module("windows_probe_job")
-    with pytest.raises(ValueError, match="cannot break away"), module.windows_probe_process([sys.executable], creationflags=0x01000000):
+    with (
+        pytest.raises(ValueError, match="cannot break away"),
+        module.windows_probe_process([sys.executable], creationflags=0x01000000),
+    ):
         raise AssertionError("breakaway must be rejected before spawning")

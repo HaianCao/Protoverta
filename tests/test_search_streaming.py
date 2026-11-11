@@ -48,7 +48,10 @@ def test_search_stream_uses_only_documented_item_lifecycle(source, chunk_size):
     assert not any("function_call_arguments" in event["type"] for event in events)
     calls = [event["item"] for event in events if event.get("item", {}).get("type") == "tool_search_call"]
     assert len(calls) == 2  # added + done, no invented argument-delta wire
-    assert all(call["arguments"] == {"goal": "lookup"} and call["call_id"] == "search_1" and call["execution"] == "client" for call in calls)
+    assert all(
+        call["arguments"] == {"goal": "lookup"} and call["call_id"] == "search_1" and call["execution"] == "client"
+        for call in calls
+    )
     assert events[-1]["response"]["output"][-1] == calls[-1]
     assert events[-1]["type"] == "response.completed"
 
@@ -73,7 +76,13 @@ def test_search_arguments_remain_resource_bounded():
 def test_native_completed_search_arguments_count_toward_byte_budget():
     limits = StreamLimits(max_argument_bytes=4)
     event = SSEEvent(
-        "response.output_item.added", json.dumps({"type": "response.output_item.added", "item": {"type": "tool_search_call", "arguments": {"goal": "lookup"}}})
+        "response.output_item.added",
+        json.dumps(
+            {
+                "type": "response.output_item.added",
+                "item": {"type": "tool_search_call", "arguments": {"goal": "lookup"}},
+            }
+        ),
     )
     with pytest.raises(StreamLimitError):
         limits.observe(event)

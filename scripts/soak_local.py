@@ -17,7 +17,9 @@ from urllib.request import Request, urlopen
 from test_environment import sanitized_environment
 
 
-def run_soak(*, seconds=60, requests=5000, concurrency=4, interval=0.02, measure_resources=False, sustained=False, progress=None):
+def run_soak(
+    *, seconds=60, requests=5000, concurrency=4, interval=0.02, measure_resources=False, sustained=False, progress=None
+):
     from protoverta.server import GatewayConfig, GatewayHTTPServer, make_handler
     from protoverta.sse import SSEParser, encode_sse
 
@@ -30,7 +32,9 @@ def run_soak(*, seconds=60, requests=5000, concurrency=4, interval=0.02, measure
         or not 1 <= concurrency <= 16
         or not 0.01 <= interval <= 1
     ):
-        raise ValueError(f"soak limits: 1-{max_seconds} seconds, 1-{max_requests} requests, 1-16 workers, 0.01-1 second interval")
+        raise ValueError(
+            f"soak limits: 1-{max_seconds} seconds, 1-{max_requests} requests, 1-16 workers, 0.01-1 second interval"
+        )
     from resource_monitor import ResourceMonitor
 
     warmup = None
@@ -92,7 +96,11 @@ def run_soak(*, seconds=60, requests=5000, concurrency=4, interval=0.02, measure
         if payload.get("stream"):
 
             def chunk(delta, reason=None, usage=None):
-                value = {"object": "chat.completion.chunk", "model": payload["model"], "choices": [{"index": 0, "delta": delta, "finish_reason": reason}]}
+                value = {
+                    "object": "chat.completion.chunk",
+                    "model": payload["model"],
+                    "choices": [{"index": 0, "delta": delta, "finish_reason": reason}],
+                }
                 if usage:
                     value.update(choices=[], usage=usage)
                 return encode_sse("message", json.dumps(value))
@@ -142,7 +150,9 @@ def run_soak(*, seconds=60, requests=5000, concurrency=4, interval=0.02, measure
                     shared_requests=requests * 2,
                     shared_concurrency=32,
                 )
-                server = GatewayHTTPServer(("127.0.0.1", 0), make_handler(config, upstream_open=upstream, observer=observe))
+                server = GatewayHTTPServer(
+                    ("127.0.0.1", 0), make_handler(config, upstream_open=upstream, observer=observe)
+                )
                 server.daemon_threads = True
                 thread = threading.Thread(target=server.serve_forever, daemon=True)
                 thread.start()
@@ -170,7 +180,9 @@ def run_soak(*, seconds=60, requests=5000, concurrency=4, interval=0.02, measure
                     url = f"http://127.0.0.1:{servers[provider].server_port}"
                     try:
                         if index % 11 == 0:
-                            with socket.create_connection(("127.0.0.1", servers[provider].server_port), timeout=5) as sock:
+                            with socket.create_connection(
+                                ("127.0.0.1", servers[provider].server_port), timeout=5
+                            ) as sock:
                                 sock.sendall(
                                     f"POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer local-{provider}\r\nContent-Length: {len(data)}\r\n\r\n".encode()
                                     + data
@@ -178,15 +190,24 @@ def run_soak(*, seconds=60, requests=5000, concurrency=4, interval=0.02, measure
                             with lock:
                                 counts["cancelled_clients"] += 1
                         else:
-                            with urlopen(Request(url + path, data=data, headers={"Authorization": "Bearer local-" + str(provider)}), timeout=10) as response:
+                            with urlopen(
+                                Request(
+                                    url + path, data=data, headers={"Authorization": "Bearer local-" + str(provider)}
+                                ),
+                                timeout=10,
+                            ) as response:
                                 raw = response.read()
                             if body["stream"]:
                                 events = SSEParser().feed(raw)
                                 if index % 7 == 0:
                                     assert events[-1].event == "error"
-                                    assert all(item.event not in ("response.completed", "message_stop") for item in events)
+                                    assert all(
+                                        item.event not in ("response.completed", "message_stop") for item in events
+                                    )
                                 else:
-                                    assert events[-1].event == ("response.completed" if protocol == "responses" else "message_stop")
+                                    assert events[-1].event == (
+                                        "response.completed" if protocol == "responses" else "message_stop"
+                                    )
                                     assert json.dumps("reply_" + str(index)) in raw.decode()
                             else:
                                 assert json.dumps("reply_" + str(index)) in raw.decode()
@@ -223,8 +244,13 @@ def run_soak(*, seconds=60, requests=5000, concurrency=4, interval=0.02, measure
                 )
             ):
                 time.sleep(0.01)
-    leaked = sum(thread.name == "protoverta-client-lifetime" and thread.ident not in baseline for thread in threading.enumerate())
-    heartbeat_leaked = sum(thread.name == "protoverta-sse-heartbeat" and thread.ident not in heartbeat_baseline for thread in threading.enumerate())
+    leaked = sum(
+        thread.name == "protoverta-client-lifetime" and thread.ident not in baseline for thread in threading.enumerate()
+    )
+    heartbeat_leaked = sum(
+        thread.name == "protoverta-sse-heartbeat" and thread.ident not in heartbeat_baseline
+        for thread in threading.enumerate()
+    )
     resources = monitor.finish() if monitor is not None else None
     if resources is not None:
         resources["cold_baseline"] = cold_resources
@@ -267,9 +293,15 @@ def main():
     parser.add_argument("--interval", type=float, default=0.02)
     parser.add_argument("--installed", action="store_true")
     parser.add_argument(
-        "--measure-resources", action="store_true", help="Requires soak-test extra; fail if process metrics are unavailable or bounded resource policy fails"
+        "--measure-resources",
+        action="store_true",
+        help="Requires soak-test extra; fail if process metrics are unavailable or bounded resource policy fails",
     )
-    parser.add_argument("--sustained", action="store_true", help="Allow up to four hours; FAIL if request budget ends before requested duration")
+    parser.add_argument(
+        "--sustained",
+        action="store_true",
+        help="Allow up to four hours; FAIL if request budget ends before requested duration",
+    )
     parser.add_argument("--report", type=Path, help="Write final JSON report (nonzero exit still means failure)")
     args = parser.parse_args()
     import os

@@ -21,11 +21,25 @@ def synthetic_png() -> str:
         return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
 
     rows = (b"\x00" + b"\xff\x00\x00" * 16 + b"\x00\x00\xff" * 16) * 32
-    data = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 32, 32, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
+    data = (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", 32, 32, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(rows))
+        + chunk(b"IEND", b"")
+    )
     return "data:image/png;base64," + base64.b64encode(data).decode("ascii")
 
 
-def probe(source: Protocol, upstream: Protocol, base_url: str, model: str, key: str, *, stream: bool, public_reasoning: bool = False) -> dict:
+def probe(
+    source: Protocol,
+    upstream: Protocol,
+    base_url: str,
+    model: str,
+    key: str,
+    *,
+    stream: bool,
+    public_reasoning: bool = False,
+) -> dict:
     template = {
         "model": model,
         "max_tokens": 1024,
@@ -34,7 +48,10 @@ def probe(source: Protocol, upstream: Protocol, base_url: str, model: str, key: 
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "Name the dominant color on the LEFT, then on the RIGHT of this image. Reply with those two color names only."},
+                    {
+                        "type": "text",
+                        "text": "Name the dominant color on the LEFT, then on the RIGHT of this image. Reply with those two color names only.",
+                    },
                     {"type": "image_url", "image_url": {"url": synthetic_png()}},
                 ],
             }
@@ -49,10 +66,17 @@ def probe(source: Protocol, upstream: Protocol, base_url: str, model: str, key: 
         public_reasoning=public_reasoning,
         messages_usage_policy="deferred" if source == Protocol.MESSAGES else "strict",
     )
-    endpoint = {Protocol.CHAT: "/v1/chat/completions", Protocol.MESSAGES: "/v1/messages", Protocol.RESPONSES: "/v1/responses"}[source]
+    endpoint = {
+        Protocol.CHAT: "/v1/chat/completions",
+        Protocol.MESSAGES: "/v1/messages",
+        Protocol.RESPONSES: "/v1/responses",
+    }[source]
     with gateway_session(config) as origin:
         request = Request(
-            origin + endpoint, json.dumps(body).encode(), {"Authorization": "Bearer synthetic-vision-probe", "Content-Type": "application/json"}, method="POST"
+            origin + endpoint,
+            json.dumps(body).encode(),
+            {"Authorization": "Bearer synthetic-vision-probe", "Content-Type": "application/json"},
+            method="POST",
         )
         try:
             with urlopen(request, timeout=120) as response:
@@ -72,10 +96,22 @@ def probe(source: Protocol, upstream: Protocol, base_url: str, model: str, key: 
             exc.close()
             return {"passed": False, "http_status": exc.code, "source": source.value, "upstream": upstream.value}
         except (URLError, OSError, ValueError):
-            return {"passed": False, "error": "transport_or_conversion_error", "source": source.value, "upstream": upstream.value}
+            return {
+                "passed": False,
+                "error": "transport_or_conversion_error",
+                "source": source.value,
+                "upstream": upstream.value,
+            }
     normalized = answer.lower()
     passed = "red" in normalized and "blue" in normalized and normalized.index("red") < normalized.index("blue")
-    return {"passed": passed, "source": source.value, "upstream": upstream.value, "model": model, "stream": stream, "synthetic_colors_recognized": passed}
+    return {
+        "passed": passed,
+        "source": source.value,
+        "upstream": upstream.value,
+        "model": model,
+        "stream": stream,
+        "synthetic_colors_recognized": passed,
+    }
 
 
 def main() -> int:
@@ -94,7 +130,15 @@ def main() -> int:
     key = os.environ.get(args.key_env)
     if not key:
         parser.error("The configured key environment variable is empty")
-    result = probe(args.source, args.upstream, args.base_url, args.model, key, stream=args.stream, public_reasoning=args.public_reasoning)
+    result = probe(
+        args.source,
+        args.upstream,
+        args.base_url,
+        args.model,
+        key,
+        stream=args.stream,
+        public_reasoning=args.public_reasoning,
+    )
     print(json.dumps(result, indent=2))
     return 0 if result["passed"] else 1
 

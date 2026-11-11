@@ -72,7 +72,12 @@ class _JournalSink:
         line = json.dumps(asdict(record), separators=(",", ":")) + "\n"
         size = len(line.encode())
         with self.lock:
-            if self.stopping.is_set() or self.accepted >= 1024 or size > 4096 or self.byte_count + size > 1024 * 1024 - 512:
+            if (
+                self.stopping.is_set()
+                or self.accepted >= 1024
+                or size > 4096
+                or self.byte_count + size > 1024 * 1024 - 512
+            ):
                 self.dropped += 1
                 return
             try:
@@ -119,7 +124,11 @@ def diagnostic_journal(directory: str | PathLike[str]) -> Iterator[_JournalSink]
         try:
             with path.open("r", encoding="utf-8") as source:
                 header = json.loads(source.readline(512))
-            if isinstance(header, dict) and header.get("kind") == "protoverta-session" and header.get("schema_version") in (1, 2):
+            if (
+                isinstance(header, dict)
+                and header.get("kind") == "protoverta-session"
+                and header.get("schema_version") in (1, 2)
+            ):
                 path.unlink()
         except (OSError, ValueError):
             pass
@@ -172,7 +181,11 @@ def latest_diagnostics(directory: str | PathLike[str]) -> dict[str, Any]:
                     ):
                         dropped = value["dropped_records"]
                         continue
-                    if not isinstance(value, dict) or set(value) - _FIELDS or not (_FIELDS - _OPTIONAL - _DIGESTS - _TRACE_META) <= set(value):
+                    if (
+                        not isinstance(value, dict)
+                        or set(value) - _FIELDS
+                        or not (_FIELDS - _OPTIONAL - _DIGESTS - _TRACE_META) <= set(value)
+                    ):
                         continue
                     for key in _OPTIONAL:
                         value.setdefault(key, None)
@@ -181,16 +194,22 @@ def latest_diagnostics(directory: str | PathLike[str]) -> dict[str, Any]:
                     for key in _TRACE_META:
                         value.setdefault(key, None)
                     if any(
-                        value[key] is not None and (not isinstance(value[key], str) or re.fullmatch(r"[a-f0-9]{64}", value[key]) is None) for key in _DIGESTS
+                        value[key] is not None
+                        and (not isinstance(value[key], str) or re.fullmatch(r"[a-f0-9]{64}", value[key]) is None)
+                        for key in _DIGESTS
                     ):
                         continue
                     if value["phase"] is not None and value["phase"] not in _PHASES:
                         continue
                     if value["feature"] is not None and value["feature"] not in _FEATURES:
                         continue
-                    if not isinstance(value["request_id"], str) or not re.fullmatch(r"[a-f0-9]{32}", value["request_id"]):
+                    if not isinstance(value["request_id"], str) or not re.fullmatch(
+                        r"[a-f0-9]{32}", value["request_id"]
+                    ):
                         continue
-                    if value["protocol"] not in ("chat", "messages", "responses", "models", "unknown") or value["upstream_protocol"] not in (
+                    if value["protocol"] not in ("chat", "messages", "responses", "models", "unknown") or value[
+                        "upstream_protocol"
+                    ] not in (
                         "chat",
                         "messages",
                         "responses",
@@ -208,9 +227,13 @@ def latest_diagnostics(directory: str | PathLike[str]) -> dict[str, Any]:
                         or type(value["streaming"]) is not bool
                     ):
                         continue
-                    if value["status"] is not None and (type(value["status"]) is not int or not 100 <= value["status"] <= 599):
+                    if value["status"] is not None and (
+                        type(value["status"]) is not int or not 100 <= value["status"] <= 599
+                    ):
                         continue
-                    if any(value[key] is not None and (type(value[key]) is not int or value[key] < 0) for key in _OPTIONAL):
+                    if any(
+                        value[key] is not None and (type(value[key]) is not int or value[key] < 0) for key in _OPTIONAL
+                    ):
                         continue
                     records.append(value)
             return {

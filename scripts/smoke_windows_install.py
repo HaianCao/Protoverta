@@ -29,7 +29,9 @@ def run(script: Path, options: list[str], env: dict[str, str]) -> None:
         check=False,
     )
     if result.returncode:
-        raise RuntimeError(f"{script.parent.parent.name} {script.name} failed: {(result.stdout + result.stderr)[-1600:]}")
+        raise RuntimeError(
+            f"{script.parent.parent.name} {script.name} failed: {(result.stdout + result.stderr)[-1600:]}"
+        )
 
 
 def run_remote(repo: str, name: str, options: list[str], env: dict[str, str]) -> None:
@@ -50,7 +52,9 @@ def run_remote(repo: str, name: str, options: list[str], env: dict[str, str]) ->
         raise RuntimeError(f"{repo} remote {name} failed: {(result.stdout + result.stderr)[-1600:]}")
 
 
-def exercise(source: Path, wheel: Path, root: Path, *, command: str, skip: str, install_name: str, remote_repo: str | None = None) -> dict:
+def exercise(
+    source: Path, wheel: Path, root: Path, *, command: str, skip: str, install_name: str, remote_repo: str | None = None
+) -> dict:
     roaming = root / "roaming"
     local = root / "local"
     profile = root / "profile"
@@ -87,7 +91,12 @@ def exercise(source: Path, wheel: Path, root: Path, *, command: str, skip: str, 
     for index in range(2):
         if remote_repo:
             run_remote(
-                remote_repo, "install", options if index == 0 else [skip, "-NonInteractive", "-NoPathChanges", "-SourceBranch", "integration/protoverta"], env
+                remote_repo,
+                "install",
+                options
+                if index == 0
+                else [skip, "-NonInteractive", "-NoPathChanges", "-SourceBranch", "integration/protoverta"],
+                env,
             )
         else:
             run(installer, options, env)
@@ -109,7 +118,12 @@ def exercise(source: Path, wheel: Path, root: Path, *, command: str, skip: str, 
         subprocess.run([*launch, "--help"], env=env, capture_output=True, check=True, timeout=30)
         check_shells(executable, env, outside_cwd)
         subprocess.run(
-            [str(python), "-c", "import importlib.metadata,sys; assert importlib.metadata.version('protoverta') == sys.argv[1]", expected_version],
+            [
+                str(python),
+                "-c",
+                "import importlib.metadata,sys; assert importlib.metadata.version('protoverta') == sys.argv[1]",
+                expected_version,
+            ],
             env=env,
             capture_output=True,
             check=True,
@@ -145,10 +159,26 @@ def check_shells(executable: Path, env: dict[str, str], cwd: Path) -> None:
         raise RuntimeError("shell smoke accepts only the two synthetic wrapper executables")
     commands = {
         "cmd": f'cmd.exe /d /s /c ""{executable}" --help"',
-        "powershell": ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", f"& '{executable}' --help; exit $LASTEXITCODE"],
+        "powershell": [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            f"& '{executable}' --help; exit $LASTEXITCODE",
+        ],
     }
     for shell, command in commands.items():
-        result = subprocess.run(command, env=env, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60, check=False)
+        result = subprocess.run(
+            command,
+            env=env,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60,
+            check=False,
+        )
         if result.returncode or "usage" not in (result.stdout + result.stderr).lower():
             raise RuntimeError(f"{shell} launch of {executable.name} failed: {(result.stdout + result.stderr)[-800:]}")
     # Prove bare-command resolution too, without changing User/Machine PATH.
@@ -164,15 +194,29 @@ def check_shells(executable: Path, env: dict[str, str], cwd: Path) -> None:
         ],
     }
     for shell, command in bare.items():
-        result = subprocess.run(command, env=child_env, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60, check=False)
+        result = subprocess.run(
+            command,
+            env=child_env,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60,
+            check=False,
+        )
         if result.returncode or "usage" not in (result.stdout + result.stderr).lower():
-            raise RuntimeError(f"{shell} bare command lookup failed in isolated child PATH: {(result.stdout + result.stderr)[-1000:]}")
+            raise RuntimeError(
+                f"{shell} bare command lookup failed in isolated child PATH: {(result.stdout + result.stderr)[-1000:]}"
+            )
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--wheel", type=Path, required=True)
-    parser.add_argument("--remote", action="store_true", help="Use the published one-line preview installer and release wheel")
+    parser.add_argument(
+        "--remote", action="store_true", help="Use the published one-line preview installer and release wheel"
+    )
     args = parser.parse_args()
     wheel = args.wheel.resolve(strict=True)
     root = Path(__file__).resolve().parents[2]

@@ -11,11 +11,31 @@ from protoverta.streaming import Delta, StreamDecoder, StreamError
 def test_native_messages_preserves_thinking_and_signature_blocks():
     bodies = [
         ("message_start", {"type": "message_start", "message": {"model": "m"}}),
-        ("content_block_start", {"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": ""}}),
-        ("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "private fixture"}}),
-        ("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "signature_delta", "signature": "opaque-fixture"}}),
+        (
+            "content_block_start",
+            {"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": ""}},
+        ),
+        (
+            "content_block_delta",
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "thinking_delta", "thinking": "private fixture"},
+            },
+        ),
+        (
+            "content_block_delta",
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "signature_delta", "signature": "opaque-fixture"},
+            },
+        ),
         ("content_block_stop", {"type": "content_block_stop", "index": 0}),
-        ("message_delta", {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 1}}),
+        (
+            "message_delta",
+            {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 1}},
+        ),
         ("message_stop", {"type": "message_stop"}),
     ]
     wire = b"".join(encode_sse(kind, json.dumps(body)) for kind, body in bodies)
@@ -30,10 +50,19 @@ def test_native_responses_preserves_reasoning_item():
     bodies = [
         ("response.created", {"response": {"status": "in_progress"}}),
         ("response.output_item.added", {"output_index": 0, "item": {"type": "reasoning", "id": "rs_fixture"}}),
-        ("response.output_item.done", {"output_index": 0, "item": {"type": "reasoning", "id": "rs_fixture", "encrypted_content": "opaque-fixture"}}),
+        (
+            "response.output_item.done",
+            {
+                "output_index": 0,
+                "item": {"type": "reasoning", "id": "rs_fixture", "encrypted_content": "opaque-fixture"},
+            },
+        ),
         ("response.completed", {"response": {"status": "completed"}}),
     ]
-    wire = b"".join(encode_sse(kind, json.dumps({"type": kind, "sequence_number": seq, **body})) for seq, (kind, body) in enumerate(bodies))
+    wire = b"".join(
+        encode_sse(kind, json.dumps({"type": kind, "sequence_number": seq, **body}))
+        for seq, (kind, body) in enumerate(bodies)
+    )
     validator = StreamValidator("responses")
     forwarded = validator.feed(wire)
     assert b"opaque-fixture" in forwarded
@@ -75,8 +104,18 @@ def test_chat_interleaved_tools_and_usage():
                     "index": 0,
                     "delta": {
                         "tool_calls": [
-                            {"index": 0, "id": "call_a", "type": "function", "function": {"name": "one", "arguments": '{"a":'}},
-                            {"index": 1, "id": "call_b", "type": "function", "function": {"name": "two", "arguments": '{"b":'}},
+                            {
+                                "index": 0,
+                                "id": "call_a",
+                                "type": "function",
+                                "function": {"name": "one", "arguments": '{"a":'},
+                            },
+                            {
+                                "index": 1,
+                                "id": "call_b",
+                                "type": "function",
+                                "function": {"name": "two", "arguments": '{"b":'},
+                            },
                         ]
                     },
                     "finish_reason": None,
@@ -131,7 +170,11 @@ def test_messages_text_and_tool_blocks():
         messages("content_block_start", index=0, content_block={"type": "text", "text": ""}),
         messages("content_block_delta", index=0, delta={"type": "text_delta", "text": "hello"}),
         messages("content_block_stop", index=0),
-        messages("content_block_start", index=1, content_block={"type": "tool_use", "id": "call_a", "name": "one", "input": {}}),
+        messages(
+            "content_block_start",
+            index=1,
+            content_block={"type": "tool_use", "id": "call_a", "name": "one", "input": {}},
+        ),
         messages("content_block_delta", index=1, delta={"type": "input_json_delta", "partial_json": '{"a":1}'}),
         messages("content_block_stop", index=1),
         messages("message_delta", delta={"stop_reason": "tool_use"}, usage={"output_tokens": 7}),
@@ -153,10 +196,22 @@ def test_responses_text_and_tool():
         "status": "completed",
         "content": [{"type": "output_text", "text": "hi", "annotations": [], "logprobs": []}],
     }
-    final_tool = {"id": "fc_1", "type": "function_call", "status": "completed", "call_id": "call_1", "name": "lookup", "arguments": '{"x":1}'}
+    final_tool = {
+        "id": "fc_1",
+        "type": "function_call",
+        "status": "completed",
+        "call_id": "call_1",
+        "name": "lookup",
+        "arguments": '{"x":1}',
+    }
     events = [
         responses("response.created", 0, response={"model": "example-model"}),
-        responses("response.output_item.added", 1, output_index=0, item={"id": "msg_1", "type": "message", "role": "assistant", "content": []}),
+        responses(
+            "response.output_item.added",
+            1,
+            output_index=0,
+            item={"id": "msg_1", "type": "message", "role": "assistant", "content": []},
+        ),
         responses(
             "response.content_part.added",
             2,
@@ -165,8 +220,12 @@ def test_responses_text_and_tool():
             content_index=0,
             part={"type": "output_text", "text": "", "annotations": [], "logprobs": []},
         ),
-        responses("response.output_text.delta", 3, item_id="msg_1", output_index=0, content_index=0, delta="hi", logprobs=[]),
-        responses("response.output_text.done", 4, item_id="msg_1", output_index=0, content_index=0, text="hi", logprobs=[]),
+        responses(
+            "response.output_text.delta", 3, item_id="msg_1", output_index=0, content_index=0, delta="hi", logprobs=[]
+        ),
+        responses(
+            "response.output_text.done", 4, item_id="msg_1", output_index=0, content_index=0, text="hi", logprobs=[]
+        ),
         responses(
             "response.content_part.done",
             5,
@@ -176,14 +235,24 @@ def test_responses_text_and_tool():
             part={"type": "output_text", "text": "hi", "annotations": [], "logprobs": []},
         ),
         responses("response.output_item.done", 6, output_index=0, item=final_text),
-        responses("response.output_item.added", 7, output_index=1, item={"id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "lookup"}),
+        responses(
+            "response.output_item.added",
+            7,
+            output_index=1,
+            item={"id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "lookup"},
+        ),
         responses("response.function_call_arguments.delta", 8, item_id="fc_1", output_index=1, delta='{"x":1}'),
         responses("response.function_call_arguments.done", 9, item_id="fc_1", output_index=1, arguments='{"x":1}'),
         responses("response.output_item.done", 10, output_index=1, item=final_tool),
         responses(
             "response.completed",
             11,
-            response={"model": "example-model", "status": "completed", "output": [final_text, final_tool], "usage": {"input_tokens": 4, "output_tokens": 9}},
+            response={
+                "model": "example-model",
+                "status": "completed",
+                "output": [final_text, final_tool],
+                "usage": {"input_tokens": 4, "output_tokens": 9},
+            },
         ),
     ]
     deltas = feed_all(decoder, events)
@@ -231,14 +300,24 @@ def test_messages_cannot_reopen_block_index():
 def test_messages_stream_accepts_direct_tool_caller_only():
     decoder = StreamDecoder("messages")
     decoder.feed(messages("message_start", message={"model": "m", "usage": {"input_tokens": 1}}))
-    event = messages("content_block_start", index=0, content_block={"type": "tool_use", "id": "c1", "name": "add", "input": {}, "caller": {"type": "direct"}})
+    event = messages(
+        "content_block_start",
+        index=0,
+        content_block={"type": "tool_use", "id": "c1", "name": "add", "input": {}, "caller": {"type": "direct"}},
+    )
     assert decoder.feed(event)[0].kind == "tool_start"
     other = StreamDecoder("messages")
     other.feed(messages("message_start", message={"model": "m", "usage": {"input_tokens": 1}}))
     event = messages(
         "content_block_start",
         index=0,
-        content_block={"type": "tool_use", "id": "c1", "name": "add", "input": {}, "caller": {"type": "server_tool", "tool_id": "hosted"}},
+        content_block={
+            "type": "tool_use",
+            "id": "c1",
+            "name": "add",
+            "input": {},
+            "caller": {"type": "server_tool", "tool_id": "hosted"},
+        },
     )
     with pytest.raises(StreamError, match="non-direct"):
         other.feed(event)
@@ -349,11 +428,24 @@ def test_responses_encoder_envelope_has_item_identity_and_only_known_metadata():
         "output_tokens": 3,
         "total_tokens": 5,
     }
-    text_id = next(body["item"]["id"] for body in bodies if body["type"] == "response.output_item.added" and body["item"]["type"] == "message")
-    tool_id = next(body["item"]["id"] for body in bodies if body["type"] == "response.output_item.added" and body["item"]["type"] == "function_call")
+    text_id = next(
+        body["item"]["id"]
+        for body in bodies
+        if body["type"] == "response.output_item.added" and body["item"]["type"] == "message"
+    )
+    tool_id = next(
+        body["item"]["id"]
+        for body in bodies
+        if body["type"] == "response.output_item.added" and body["item"]["type"] == "function_call"
+    )
     for body in bodies:
         kind = body["type"]
-        if kind in {"response.content_part.added", "response.content_part.done", "response.output_text.delta", "response.output_text.done"}:
+        if kind in {
+            "response.content_part.added",
+            "response.content_part.done",
+            "response.output_text.delta",
+            "response.output_text.done",
+        }:
             assert body["item_id"] == text_id
             assert body["content_index"] == 0
         if kind in {"response.output_text.delta", "response.output_text.done"}:
@@ -366,15 +458,33 @@ def test_responses_encoder_envelope_has_item_identity_and_only_known_metadata():
     "kind,part",
     [
         ("response.content_part.added", {"type": "refusal", "refusal": "no"}),
-        ("response.content_part.added", {"type": "output_text", "text": "", "annotations": [{"type": "url_citation"}], "logprobs": []}),
-        ("response.content_part.added", {"type": "output_text", "text": "", "annotations": [], "logprobs": [{"token": "x"}]}),
+        (
+            "response.content_part.added",
+            {"type": "output_text", "text": "", "annotations": [{"type": "url_citation"}], "logprobs": []},
+        ),
+        (
+            "response.content_part.added",
+            {"type": "output_text", "text": "", "annotations": [], "logprobs": [{"token": "x"}]},
+        ),
     ],
 )
 def test_responses_rejects_unsupported_content_metadata(kind, part):
     decoder = StreamDecoder("responses")
     decoder.feed(responses("response.created", 0, response={"model": "m"}))
-    decoder.feed(responses("response.output_item.added", 1, output_index=0, item={"id": "msg_1", "type": "message", "role": "assistant", "content": []}))
-    with pytest.raises(StreamError, match="refusal cannot be preserved" if part.get("type") == "refusal" else "unsupported Responses content part metadata"):
+    decoder.feed(
+        responses(
+            "response.output_item.added",
+            1,
+            output_index=0,
+            item={"id": "msg_1", "type": "message", "role": "assistant", "content": []},
+        )
+    )
+    with pytest.raises(
+        StreamError,
+        match="refusal cannot be preserved"
+        if part.get("type") == "refusal"
+        else "unsupported Responses content part metadata",
+    ):
         decoder.feed(responses(kind, 2, output_index=0, content_index=0, item_id="msg_1", part=part))
 
 
@@ -448,7 +558,10 @@ def test_chat_two_interleaved_tools_transcode_to_responses():
     decoded = feed_all(StreamDecoder("responses"), events)
     assert [delta.kind for delta in decoded].count("tool_start") == 2
     assert [delta.kind for delta in decoded].count("tool_end") == 2
-    assert {(delta.call_id, delta.name) for delta in decoded if delta.kind == "tool_start"} == {("call_a", "a"), ("call_b", "b")}
+    assert {(delta.call_id, delta.name) for delta in decoded if delta.kind == "tool_start"} == {
+        ("call_a", "a"),
+        ("call_b", "b"),
+    }
     assert decoded[-1].reason == "tool_calls"
 
 

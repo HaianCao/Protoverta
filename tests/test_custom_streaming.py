@@ -47,10 +47,16 @@ def decode(data):
 def test_responses_native_custom_streams_preserve_raw_inputs_and_identity(chunk_size):
     data = wire(events())
     validator = StreamValidator("responses")
-    out = b"".join(validator.feed(data[offset : offset + chunk_size]) for offset in range(0, len(data), chunk_size)) + validator.finish()
+    out = (
+        b"".join(validator.feed(data[offset : offset + chunk_size]) for offset in range(0, len(data), chunk_size))
+        + validator.finish()
+    )
     assert out == data
     deltas = decode(out)
-    assert [(d.call_id, d.tool_type) for d in deltas if d.kind == "tool_start"] == [("c1", "custom"), ("c2", "function")]
+    assert [(d.call_id, d.tool_type) for d in deltas if d.kind == "tool_start"] == [
+        ("c1", "custom"),
+        ("c2", "function"),
+    ]
     assert "".join(d.text for d in deltas if d.kind == "tool_delta" and d.call_id == "c1") == "not JSON: xin chào\n"
     assert deltas[-1].kind == "finish"
 
@@ -71,9 +77,17 @@ def test_responses_custom_done_snapshot_and_event_type_are_checked(change):
             body["input"] += "changed"
         elif change == "event" and body["type"] == "response.custom_tool_call_input.delta":
             body["type"] = "response.function_call_arguments.delta"
-        elif change == "item" and body["type"] == "response.output_item.done" and body["item"]["type"] == "custom_tool_call":
+        elif (
+            change == "item"
+            and body["type"] == "response.output_item.done"
+            and body["item"]["type"] == "custom_tool_call"
+        ):
             body["item"]["type"] = "function_call"
-        elif change == "initial" and body["type"] == "response.output_item.added" and body["item"]["type"] == "custom_tool_call":
+        elif (
+            change == "initial"
+            and body["type"] == "response.output_item.added"
+            and body["item"]["type"] == "custom_tool_call"
+        ):
             body["item"]["input"] = "not emitted as a delta"
         else:
             continue
@@ -85,7 +99,10 @@ def test_responses_custom_done_snapshot_and_event_type_are_checked(change):
 
 def test_custom_input_is_counted_in_argument_budget_even_without_type_on_delta():
     limits = StreamLimits(max_argument_bytes=4)
-    event = SSEEvent("message", json.dumps({"choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "custom": {"input": "12345"}}]}}]}))
+    event = SSEEvent(
+        "message",
+        json.dumps({"choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "custom": {"input": "12345"}}]}}]}),
+    )
     with pytest.raises(StreamLimitError):
         limits.observe(event)
 

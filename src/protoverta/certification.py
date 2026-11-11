@@ -73,7 +73,14 @@ def check_route(
         raise ValueError("probe transport/permission must be explicit")
     if upstream_open is None and not allow_live:
         raise ValueError("route probes require explicit allow_live (requests may incur cost)")
-    if not isinstance(model, str) or not model or any(c.isspace() for c in model) or not cases or len(cases) != len(set(cases)) or set(cases) - set(CASES):
+    if (
+        not isinstance(model, str)
+        or not model
+        or any(c.isspace() for c in model)
+        or not cases
+        or len(cases) != len(set(cases))
+        or set(cases) - set(CASES)
+    ):
         raise ValueError("invalid exact model or probe case selection")
     results: list[CheckResult] = []
     with _listener(config, upstream_open) as base:
@@ -82,7 +89,11 @@ def check_route(
             started = time.monotonic()
             used = 0
             nonce = "nonce_" + secrets.token_hex(8)
-            body: dict[str, Any] = {"model": model, "messages": [{"role": "user", "content": "Reply with exactly " + nonce}], "max_tokens": 96}
+            body: dict[str, Any] = {
+                "model": model,
+                "messages": [{"role": "user", "content": "Reply with exactly " + nonce}],
+                "max_tokens": 96,
+            }
 
             # Streaming probes return the decoded deltas, JSON probes the decoded result.
             def send(value: dict[str, Any], expected_nonce: str | None = nonce) -> Any:
@@ -91,7 +102,11 @@ def check_route(
                 if used > 2:
                     raise ValueError("probe request budget exceeded")
                 value = convert_request(value, Protocol.CHAT, source)
-                suffix = {Protocol.CHAT: "/chat/completions", Protocol.MESSAGES: "/messages", Protocol.RESPONSES: "/responses"}[source]
+                suffix = {
+                    Protocol.CHAT: "/chat/completions",
+                    Protocol.MESSAGES: "/messages",
+                    Protocol.RESPONSES: "/responses",
+                }[source]
                 request = Request(
                     base + "/v1" + suffix,
                     data=json.dumps(value).encode(),
@@ -115,7 +130,9 @@ def check_route(
                     decoder.finish()
                     if any(delta.kind == "finish" and delta.reason == "length" for delta in deltas):
                         raise _IncompleteCheck()
-                    if expected_nonce is not None and expected_nonce not in "".join(delta.text or "" for delta in deltas if delta.kind == "text"):
+                    if expected_nonce is not None and expected_nonce not in "".join(
+                        delta.text or "" for delta in deltas if delta.kind == "text"
+                    ):
                         raise ValueError("stream did not preserve synthetic nonce")
                     return deltas
                 result = _decode_result(json.loads(raw), source, public_reasoning=config.public_reasoning)
@@ -143,12 +160,22 @@ def check_route(
                         deltas = send(body | {"stream": True}, expected_nonce=None)
                         calls = [part for part in deltas if part.kind == "tool_start"]
                         arguments = "".join(part.text or "" for part in deltas if part.kind == "tool_delta")
-                        if len(calls) != 1 or calls[0].name != "fixture_nonce" or not calls[0].call_id or json.loads(arguments) != {}:
+                        if (
+                            len(calls) != 1
+                            or calls[0].name != "fixture_nonce"
+                            or not calls[0].call_id
+                            or json.loads(arguments) != {}
+                        ):
                             raise ValueError("streaming tool contract not satisfied")
                     else:
                         result = send(body)
                         calls = [part for part in result.parts if part.kind == "tool_call"]
-                        if len(calls) != 1 or calls[0].name != "fixture_nonce" or not calls[0].call_id or json.loads(calls[0].arguments) != {}:
+                        if (
+                            len(calls) != 1
+                            or calls[0].name != "fixture_nonce"
+                            or not calls[0].call_id
+                            or json.loads(calls[0].arguments) != {}
+                        ):
                             raise ValueError("tool call contract not satisfied")
                     if case == "tool_result":
                         call = calls[0]
@@ -157,7 +184,13 @@ def check_route(
                             {
                                 "role": "assistant",
                                 "content": None,
-                                "tool_calls": [{"id": call.call_id, "type": "function", "function": {"name": call.name, "arguments": call.arguments}}],
+                                "tool_calls": [
+                                    {
+                                        "id": call.call_id,
+                                        "type": "function",
+                                        "function": {"name": call.name, "arguments": call.arguments},
+                                    }
+                                ],
                             },
                             {"role": "tool", "tool_call_id": call.call_id, "content": nonce},
                         ]
@@ -170,7 +203,10 @@ def check_route(
                     if nonce not in text:
                         raise ValueError("text contract not satisfied")
                     if case == "history_replay":
-                        body["messages"] += [{"role": "assistant", "content": text}, {"role": "user", "content": "Repeat the nonce from earlier exactly."}]
+                        body["messages"] += [
+                            {"role": "assistant", "content": text},
+                            {"role": "user", "content": "Repeat the nonce from earlier exactly."},
+                        ]
                         result = send(body)
                         if nonce not in "".join(part.text for part in result.parts if part.kind == "text"):
                             raise ValueError("history replay contract not satisfied")
@@ -180,19 +216,34 @@ def check_route(
             except HTTPError as exc:
                 status = exc.code
                 exc.close()
-                results.append(CheckResult(case, False, "http_" + str(status), used, int((time.monotonic() - started) * 1000)))
+                results.append(
+                    CheckResult(case, False, "http_" + str(status), used, int((time.monotonic() - started) * 1000))
+                )
             except (OSError, ValueError, TypeError, KeyError, RecursionError):
-                results.append(CheckResult(case, False, "contract_or_transport_failure", used, int((time.monotonic() - started) * 1000)))
+                results.append(
+                    CheckResult(
+                        case, False, "contract_or_transport_failure", used, int((time.monotonic() - started) * 1000)
+                    )
+                )
     return [asdict(result) for result in results]
 
 
 def evidence_report(
-    config: GatewayConfig, model: str, source_protocol: Protocol | str, results: Sequence[Mapping[str, Any]], *, verified_with: str
+    config: GatewayConfig,
+    model: str,
+    source_protocol: Protocol | str,
+    results: Sequence[Mapping[str, Any]],
+    *,
+    verified_with: str,
 ) -> dict[str, Any]:
     """Export only tested positive features. Failures never certify unsupported."""
     routes: list[dict[str, Any]] = []
     for streaming in (False, True):
-        relevant = [item for item in results if (item["case"] in ("streaming", "streaming_tools")) == streaming and item["passed"] is True]
+        relevant = [
+            item
+            for item in results
+            if (item["case"] in ("streaming", "streaming_tools")) == streaming and item["passed"] is True
+        ]
         features: dict[str, bool] = {}
         for item in relevant:
             if item["case"] in ("text", "streaming"):

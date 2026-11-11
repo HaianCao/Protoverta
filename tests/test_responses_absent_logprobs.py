@@ -16,7 +16,13 @@ def stream(*, delta_logprobs=True):
     done_part = {"type": "output_text", "text": TEXT, "annotations": []}
     message = {"id": ITEM, "type": "message", "status": "completed", "role": "assistant", "content": [done_part]}
     response = {"id": "resp_fixture", "object": "response", "status": "in_progress", "model": "m", "output": []}
-    delta = {"type": "response.output_text.delta", "item_id": ITEM, "output_index": 0, "content_index": 0, "delta": TEXT}
+    delta = {
+        "type": "response.output_text.delta",
+        "item_id": ITEM,
+        "output_index": 0,
+        "content_index": 0,
+        "delta": TEXT,
+    }
     if delta_logprobs:
         delta["logprobs"] = []
     events = [
@@ -30,7 +36,13 @@ def stream(*, delta_logprobs=True):
         {"type": "response.content_part.added", "item_id": ITEM, "output_index": 0, "content_index": 0, "part": part},
         delta,
         {"type": "response.output_text.done", "item_id": ITEM, "output_index": 0, "content_index": 0, "text": TEXT},
-        {"type": "response.content_part.done", "item_id": ITEM, "output_index": 0, "content_index": 0, "part": done_part},
+        {
+            "type": "response.content_part.done",
+            "item_id": ITEM,
+            "output_index": 0,
+            "content_index": 0,
+            "part": done_part,
+        },
         {"type": "response.output_item.done", "output_index": 0, "item": message},
         {
             "type": "response.completed",

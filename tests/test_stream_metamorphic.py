@@ -74,9 +74,17 @@ def test_empty_tool_identity_never_becomes_completed_history(source, target, mis
         if source == "chat" and body.get("choices") and body["choices"][0]["delta"].get("tool_calls"):
             tool = body["choices"][0]["delta"]["tool_calls"][0]
             (tool["function"] if missing == "name" else tool)[missing] = ""
-        elif source == "messages" and body.get("type") == "content_block_start" and body["content_block"].get("type") == "tool_use":
+        elif (
+            source == "messages"
+            and body.get("type") == "content_block_start"
+            and body["content_block"].get("type") == "tool_use"
+        ):
             body["content_block"][missing] = ""
-        elif source == "responses" and body.get("type") == "response.output_item.added" and body["item"].get("type") == "function_call":
+        elif (
+            source == "responses"
+            and body.get("type") == "response.output_item.added"
+            and body["item"].get("type") == "function_call"
+        ):
             body["item"]["name" if missing == "name" else "call_id"] = ""
         else:
             continue

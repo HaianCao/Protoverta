@@ -29,7 +29,13 @@ def _url(value: Any) -> str:
         _ = parsed.port
     except ValueError as exc:
         raise ConversionError("invalid image URL") from exc
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username is not None or parsed.password is not None or parsed.fragment:
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.fragment
+    ):
         raise ConversionError("image URL requires HTTP(S), without credentials or fragment")
     return value
 
@@ -56,7 +62,11 @@ class Image:
         if target == "messages":
             if self.detail not in (None, "auto"):
                 raise ConversionError("Messages has no portable image detail equivalent")
-            source = {"type": "url", "url": self.url} if self.url else {"type": "base64", "media_type": self.media_type, "data": self.data}
+            source = (
+                {"type": "url", "url": self.url}
+                if self.url
+                else {"type": "base64", "media_type": self.media_type, "data": self.data}
+            )
             return {"type": "image", "source": source}
         value = self.url or f"data:{self.media_type};base64,{self.data}"
         detail = {"detail": self.detail} if self.detail is not None else {}

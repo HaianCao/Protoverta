@@ -24,7 +24,9 @@ class ModelMetadataUnavailable(ValueError):
 def _text(value: object, *, identifier: bool = False) -> bool:
     if not isinstance(value, str) or not 1 <= len(value) <= 512:
         return False
-    return not any(ord(c) < 32 or ord(c) == 127 or 0xD800 <= ord(c) <= 0xDFFF or identifier and c.isspace() for c in value)
+    return not any(
+        ord(c) < 32 or ord(c) == 127 or 0xD800 <= ord(c) <= 0xDFFF or identifier and c.isspace() for c in value
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,7 +50,9 @@ class SnapshotModel:
     def wire(self, format: str = "normalized", *, messages_api_version: str = "2023-06-01") -> dict[str, Any]:
         if format == "openai":
             if self.created is None or self.owned_by is None:
-                raise ModelMetadataUnavailable("OpenAI model listing requires reported creation time and owner; use normalized listing when unknown")
+                raise ModelMetadataUnavailable(
+                    "OpenAI model listing requires reported creation time and owner; use normalized listing when unknown"
+                )
             return {"id": self.id, "object": "model", "created": self.created, "owned_by": self.owned_by}
         if format == "messages":
             from datetime import datetime, timedelta
@@ -56,18 +60,29 @@ class SnapshotModel:
             if messages_api_version not in {"2023-06-01", "2026-10-21"}:
                 raise ValueError("unsupported Messages model-list API version")
             if messages_api_version == "2026-10-21" and self.lifecycle is None:
-                raise ModelMetadataUnavailable("Messages API 2026-10-21 listing requires reported lifecycle; use normalized listing when unknown")
+                raise ModelMetadataUnavailable(
+                    "Messages API 2026-10-21 listing requires reported lifecycle; use normalized listing when unknown"
+                )
             # The Messages contract explicitly permits epoch for unknown release.
             result: dict[str, Any] = {
                 "id": self.id,
                 "type": "model",
                 "display_name": self.display_name,
-                "created_at": (datetime(1970, 1, 1, tzinfo=UTC) + timedelta(seconds=self.created or 0)).isoformat().replace("+00:00", "Z"),
+                "created_at": (datetime(1970, 1, 1, tzinfo=UTC) + timedelta(seconds=self.created or 0))
+                .isoformat()
+                .replace("+00:00", "Z"),
             }
             if self.lifecycle is not None:
                 result["lifecycle"] = self.lifecycle
             if messages_api_version == "2026-10-21":
-                result.update(capabilities=None, line=None, max_input_tokens=None, max_tokens=None, deprecated_at=None, retires_at=None)
+                result.update(
+                    capabilities=None,
+                    line=None,
+                    max_input_tokens=None,
+                    max_tokens=None,
+                    deprecated_at=None,
+                    retires_at=None,
+                )
             return result
         # No invented created/owned_by/context/effort metadata.
         return {"id": self.id, "object": "model", "display_name": self.display_name, "capability_status": "unknown"}
@@ -82,7 +97,11 @@ class ModelSnapshot:
     def __post_init__(self) -> None:
         object.__setattr__(self, "upstream_base_url", _prefix(self.upstream_base_url))
         object.__setattr__(self, "upstream_protocol", Protocol(self.upstream_protocol))
-        if not isinstance(self.models, tuple) or len(self.models) > MAX_MODELS or any(type(m) is not SnapshotModel for m in self.models):
+        if (
+            not isinstance(self.models, tuple)
+            or len(self.models) > MAX_MODELS
+            or any(type(m) is not SnapshotModel for m in self.models)
+        ):
             raise ValueError("snapshot needs at most 10000 immutable model entries")
         if len({m.id for m in self.models}) != len(self.models):
             raise ValueError("snapshot model IDs must be unique")
@@ -107,11 +126,15 @@ class ModelSnapshot:
                 unique.append(entry)
         return cls(base_url, Protocol(protocol), tuple(unique))
 
-    def page(self, query: str, *, default_format: str = "normalized", messages_api_version: str = "2023-06-01") -> dict[str, Any]:
+    def page(
+        self, query: str, *, default_format: str = "normalized", messages_api_version: str = "2023-06-01"
+    ) -> dict[str, Any]:
         if len(query) > 2048 or re.search(r"%(?![0-9a-fA-F]{2})", query):
             raise ValueError("invalid catalog query")
         try:
-            pairs = parse_qsl(query, keep_blank_values=True, strict_parsing=True, encoding="utf-8", errors="strict", max_num_fields=3)
+            pairs = parse_qsl(
+                query, keep_blank_values=True, strict_parsing=True, encoding="utf-8", errors="strict", max_num_fields=3
+            )
         except (ValueError, UnicodeError):
             raise ValueError("invalid catalog query") from None
         args = dict(pairs)

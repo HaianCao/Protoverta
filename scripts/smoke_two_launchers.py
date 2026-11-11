@@ -42,7 +42,11 @@ PAIRS = [
 
 
 def environment(root):
-    env = {key: value for key, value in os.environ.items() if key.upper() in {"PATH", "PATHEXT", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC"}}
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key.upper() in {"PATH", "PATHEXT", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC"}
+    }
     for key in ("HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "TEMP", "TMP"):
         path = root / key
         path.mkdir(parents=True)
@@ -66,7 +70,9 @@ def worker(bundle_path):
     executable = shutil.which(client)
     if executable is None:
         raise RuntimeError("Required CLI missing")
-    version = run_process([executable, "--version"], cwd=str(root), env=env, text=True, encoding="utf-8", errors="replace", timeout=5)
+    version = run_process(
+        [executable, "--version"], cwd=str(root), env=env, text=True, encoding="utf-8", errors="replace", timeout=5
+    )
     expected = "codex-cli 0.166.0" if client == "codex" else "2.1.308 (Claude Code)"
     if version.returncode or version.stdout.strip() != expected:
         raise ValueError("Fixture requires the documented CLI version")
@@ -82,7 +88,11 @@ def worker(bundle_path):
         path.write_text(content.replace(marker, marker + runtime), encoding="utf-8")
         at = args.index("-m")
         module = args[at + 1]
-        args[at : at + 2] = [str(Path(__file__).with_name("probe_gateway_context.py")), module, str(root / "gateway.json")]
+        args[at : at + 2] = [
+            str(Path(__file__).with_name("probe_gateway_context.py")),
+            module,
+            str(root / "gateway.json"),
+        ]
         return original(args, **kwargs)
 
     config = GatewayConfig(protocol, bundle["origin"] + "/v1", bundle["key"], "p05-worker-token")
@@ -112,8 +122,16 @@ def worker(bundle_path):
             codex_config=options,
             prompt="Return the synthetic fixture answer. Do not use tools.",
         )
-    passed = result.returncode == 0 and bundle["answer"] in result.stdout and bundle["other_answer"] not in result.stdout
-    report = {"passed": passed, "returncode": result.returncode, "cli_version": version.stdout.strip(), "stdout": result.stdout, "stderr": result.stderr}
+    passed = (
+        result.returncode == 0 and bundle["answer"] in result.stdout and bundle["other_answer"] not in result.stdout
+    )
+    report = {
+        "passed": passed,
+        "returncode": result.returncode,
+        "cli_version": version.stdout.strip(),
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+    }
     (root / "worker-result.json").write_text(json.dumps(report), encoding="utf-8")
     return 0 if passed else 1
 
@@ -139,9 +157,19 @@ class Upstream:
                     if not 0 <= length <= 4 * 1024 * 1024:
                         raise ValueError("Request size")
                     body = json.loads(self.rfile.read(length))
-                    expected = {Protocol.CHAT: "/v1/chat/completions", Protocol.MESSAGES: "/v1/messages", Protocol.RESPONSES: "/v1/responses"}[state.protocol]
-                    credentials = [value for value in (self.headers.get("Authorization"), self.headers.get("x-api-key")) if value]
-                    if self.path.split("?", 1)[0] != expected or body.get("model") != state.model or credentials not in (["Bearer " + state.key], [state.key]):
+                    expected = {
+                        Protocol.CHAT: "/v1/chat/completions",
+                        Protocol.MESSAGES: "/v1/messages",
+                        Protocol.RESPONSES: "/v1/responses",
+                    }[state.protocol]
+                    credentials = [
+                        value for value in (self.headers.get("Authorization"), self.headers.get("x-api-key")) if value
+                    ]
+                    if (
+                        self.path.split("?", 1)[0] != expected
+                        or body.get("model") != state.model
+                        or credentials not in (["Bearer " + state.key], [state.key])
+                    ):
                         raise ValueError("Endpoint/model/auth isolation mismatch")
                     state.requests += 1
                     if state.requests > (2 if state.read_value else 1):
@@ -156,9 +184,16 @@ class Upstream:
                             args = {"file_path": "fixture.txt"}
                         else:
                             alias = NamespaceMap().alias("mcp__worktree", "read_worktree_fixture")
-                            tool = next(tool for tool in tools if tool.get("name") in {"read_worktree_fixture", "mcp__worktree__read_worktree_fixture", alias})
+                            tool = next(
+                                tool
+                                for tool in tools
+                                if tool.get("name")
+                                in {"read_worktree_fixture", "mcp__worktree__read_worktree_fixture", alias}
+                            )
                             args = {}
-                        wire = single.encode(state.protocol, state.model, tool=tool, arguments=args, call_id="same-worktree-read").read()
+                        wire = single.encode(
+                            state.protocol, state.model, tool=tool, arguments=args, call_id="same-worktree-read"
+                        ).read()
                     else:
                         if state.read_value:
                             records = dict(single.tool_records(body, state.protocol))
@@ -196,7 +231,11 @@ class Upstream:
 
 def auth_status(context, client, token):
     path = "/v1/responses" if client == "codex" else "/v1/messages"
-    request = Request(context["origin"] + path, data=b"{", headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"})
+    request = Request(
+        context["origin"] + path,
+        data=b"{",
+        headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
+    )
     try:
         with build_opener(ProxyHandler({})).open(request, timeout=2) as response:
             return response.status
@@ -262,14 +301,26 @@ def create_worktrees(root):
     main.mkdir()
 
     def git(*args):
-        result = run_process(["git", *args], cwd=str(main), env=env, text=True, encoding="utf-8", errors="replace", timeout=5)
+        result = run_process(
+            ["git", *args], cwd=str(main), env=env, text=True, encoding="utf-8", errors="replace", timeout=5
+        )
         if result.returncode:
             raise RuntimeError("Temporary worktree Git command failed")
 
     git("init", "--initial-branch=main")
     (main / "fixture.txt").write_text("P05_MAIN_CHECKOUT_DO_NOT_USE", encoding="utf-8")
     git("add", "fixture.txt")
-    git("-c", "user.name=Synthetic Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "commit", "-m", "Synthetic fixture")
+    git(
+        "-c",
+        "user.name=Synthetic Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-m",
+        "Synthetic fixture",
+    )
     for provider in ("alpha", "beta"):
         target = (root / provider).resolve()
         if not target.is_relative_to(root.resolve()):
@@ -333,23 +384,36 @@ def run(pair, codex_source, claude_source, *, worktrees=False):
             for upstream in upstreams:
                 if not upstream.started.wait(max(0, deadline - time.monotonic())):
                     raise RuntimeError("Two launcher inference requests did not overlap")
-            contexts = [json.loads((root / spec["provider"] / "gateway.json").read_text(encoding="utf-8")) for spec in specs]
-            results["distinct_gateways"] = contexts[0]["origin"] != contexts[1]["origin"] and contexts[0]["token"] != contexts[1]["token"]
+            contexts = [
+                json.loads((root / spec["provider"] / "gateway.json").read_text(encoding="utf-8")) for spec in specs
+            ]
+            results["distinct_gateways"] = (
+                contexts[0]["origin"] != contexts[1]["origin"] and contexts[0]["token"] != contexts[1]["token"]
+            )
             results["cross_tokens_rejected"] = all(
-                auth_status(contexts[index], spec["client"], contexts[1 - index]["token"]) == 401 for index, spec in enumerate(specs)
+                auth_status(contexts[index], spec["client"], contexts[1 - index]["token"]) == 401
+                for index, spec in enumerate(specs)
             )
             upstreams[0].release.set()
             _stdout, _stderr = processes[0].communicate(timeout=12)
             first = json.loads((root / "alpha" / "worker-result.json").read_text(encoding="utf-8"))
             results["first_completed"] = processes[0].returncode == 0 and first["passed"]
-            results["first_gateway_closed"] = (root / "alpha" / "gateway.closed").exists() and port_closed(contexts[0]["origin"])
+            results["first_gateway_closed"] = (root / "alpha" / "gateway.closed").exists() and port_closed(
+                contexts[0]["origin"]
+            )
             results["second_auth_status"] = auth_status(contexts[1], specs[1]["client"], contexts[1]["token"])
-            results["second_survived"] = processes[1].poll() is None and not upstreams[1].release.is_set() and results["second_auth_status"] == 422
+            results["second_survived"] = (
+                processes[1].poll() is None
+                and not upstreams[1].release.is_set()
+                and results["second_auth_status"] == 422
+            )
             upstreams[1].release.set()
             _stdout, _stderr = processes[1].communicate(timeout=12)
             second = json.loads((root / "beta" / "worker-result.json").read_text(encoding="utf-8"))
             results["second_completed"] = processes[1].returncode == 0 and second["passed"]
-            results["second_gateway_closed"] = (root / "beta" / "gateway.closed").exists() and port_closed(contexts[1]["origin"])
+            results["second_gateway_closed"] = (root / "beta" / "gateway.closed").exists() and port_closed(
+                contexts[1]["origin"]
+            )
             results["diagnostics_isolated"] = diagnostics(root / "diagnostics", specs)
             results["upstream_counts"] = [upstream.requests for upstream in upstreams]
             results["fixture_errors"] = [upstream.errors for upstream in upstreams]
@@ -357,10 +421,13 @@ def run(pair, codex_source, claude_source, *, worktrees=False):
             if worktrees:
                 results["worktree_reads_verified"] = all(upstream.read_verified for upstream in upstreams)
                 results["worktree_cwd_verified"] = all(
-                    Path(context["cwd"]) == (root / spec["provider"]).resolve() and (root / spec["provider"] / ".git").is_file()
+                    Path(context["cwd"]) == (root / spec["provider"]).resolve()
+                    and (root / spec["provider"] / ".git").is_file()
                     for context, spec in zip(contexts, specs, strict=True)
                 )
-                results["main_checkout_unchanged"] = (root / "main" / "fixture.txt").read_text(encoding="utf-8") == "P05_MAIN_CHECKOUT_DO_NOT_USE"
+                results["main_checkout_unchanged"] = (root / "main" / "fixture.txt").read_text(
+                    encoding="utf-8"
+                ) == "P05_MAIN_CHECKOUT_DO_NOT_USE"
             results["passed"] = accepted(results)
         except Exception as exc:  # noqa: BLE001 -- synthetic fixture diagnostics, no credentials/payloads
             results["errors"].append(type(exc).__name__)

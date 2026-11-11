@@ -24,7 +24,15 @@ VALID = {
     "model": "m",
     "max_tokens": 20,
     "messages": [{"role": "user", "content": "valid 🌏"}],
-    "tools": [{"type": "function", "function": {"name": "f", "parameters": {"type": "object", "properties": {"x": {"type": "number", "enum": [17]}}}}}],
+    "tools": [
+        {
+            "type": "function",
+            "function": {
+                "name": "f",
+                "parameters": {"type": "object", "properties": {"x": {"type": "number", "enum": [17]}}},
+            },
+        }
+    ],
 }
 RESULT = {
     "model": "m",
@@ -41,7 +49,10 @@ def listener(protocol, upstream):
         def handle_error(self, request, client_address):
             errors.append("uncaught handler exception")
 
-    server = CheckedServer(("127.0.0.1", 0), make_handler(GatewayConfig(protocol, "https://example.invalid/v1", "fixture", "local"), upstream_open=upstream))
+    server = CheckedServer(
+        ("127.0.0.1", 0),
+        make_handler(GatewayConfig(protocol, "https://example.invalid/v1", "fixture", "local"), upstream_open=upstream),
+    )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -54,7 +65,14 @@ def listener(protocol, upstream):
 
 
 def request(origin, source, raw):
-    return urlopen(Request(origin + PATHS[source], data=raw, headers={"Authorization": "Bearer local", "Content-Type": "application/json"}), timeout=3)
+    return urlopen(
+        Request(
+            origin + PATHS[source],
+            data=raw,
+            headers={"Authorization": "Bearer local", "Content-Type": "application/json"},
+        ),
+        timeout=3,
+    )
 
 
 @pytest.mark.parametrize("source", PROTOCOLS)
@@ -107,7 +125,11 @@ def test_invalid_upstream_json_returns_structured_failure_and_recovers(bad, targ
 def test_library_rejects_invalid_schema_values_in_requests_and_responses(source, target, bad):
     body = convert_request(copy.deepcopy(VALID), "chat", source)
     tool = body["tools"][0]
-    schema = tool["function"]["parameters"] if source == "chat" else tool["input_schema" if source == "messages" else "parameters"]
+    schema = (
+        tool["function"]["parameters"]
+        if source == "chat"
+        else tool["input_schema" if source == "messages" else "parameters"]
+    )
     schema["properties"]["x"]["enum"] = [bad]
     with pytest.raises(ConversionError, match="valid JSON"):
         convert_request(body, source, target)
@@ -137,7 +159,9 @@ def test_doctor_does_not_certify_inconsistent_stream_tool_finish(source):
         for event in parser.feed(raw):
             decoder.feed(event)
     config = GatewayConfig(source, "https://example.invalid/v1", "fixture", "local")
-    report = check_route(config, "m", source, cases=("streaming_tools",), upstream_open=lambda req, timeout: io.BytesIO(raw))
+    report = check_route(
+        config, "m", source, cases=("streaming_tools",), upstream_open=lambda req, timeout: io.BytesIO(raw)
+    )
     assert not report[0]["passed"]
     assert evidence_report(config, "m", source, report, verified_with="synthetic")["routes"] == []
 

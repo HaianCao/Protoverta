@@ -13,7 +13,11 @@ def encoded_events(protocol):
     encoder = StreamEncoder(protocol)
     return [
         event
-        for delta in [Delta("start", model="m"), Delta("text", text="ok"), Delta("finish", reason="stop", input_tokens=3, output_tokens=2)]
+        for delta in [
+            Delta("start", model="m"),
+            Delta("text", text="ok"),
+            Delta("finish", reason="stop", input_tokens=3, output_tokens=2),
+        ]
         for event in encoder.feed(delta)
     ]
 
@@ -32,7 +36,11 @@ def test_chat_usage_postlude_with_repeated_empty_finished_choice(target):
     prefix, postlude, done = chat_postlude()
     events = [*prefix, SSEEvent("message", json.dumps(postlude)), done]
     wire = b"".join(encode_sse(e.event, e.data) for e in events)
-    pipe = StreamValidator("chat") if target == "chat" else StreamTranscoder("chat", target, messages_usage_policy="deferred")
+    pipe = (
+        StreamValidator("chat")
+        if target == "chat"
+        else StreamTranscoder("chat", target, messages_usage_policy="deferred")
+    )
     output = pipe.feed(wire) + pipe.finish()
     decoder = StreamDecoder(target)
     result = [d for e in SSEParser().feed(output) for d in decoder.feed(e)]
@@ -63,7 +71,11 @@ def test_chat_postlude_does_not_allow_content_or_invalid_finish(native, mutation
 def test_data_only_responses_with_optional_done_sentinel(target):
     events = encoded_events("responses")
     wire = b"".join(b"data: " + e.data.encode() + b"\n\n" for e in events) + b"data: [DONE]\n\n"
-    pipe = StreamValidator("responses") if target == "responses" else StreamTranscoder("responses", target, messages_usage_policy="deferred")
+    pipe = (
+        StreamValidator("responses")
+        if target == "responses"
+        else StreamTranscoder("responses", target, messages_usage_policy="deferred")
+    )
     prefix = pipe.feed(wire)
     assert b"message_stop" not in prefix and b"response.completed" not in prefix
     output = prefix + pipe.finish()
@@ -95,7 +107,9 @@ def test_responses_error_without_sequence_is_an_error_not_success():
 def test_json_empty_reasoning_placeholders_do_not_drop_real_reasoning(placeholder):
     body = {
         "model": "m",
-        "choices": [{"message": {"role": "assistant", "content": "ok", "reasoning": placeholder}, "finish_reason": "stop"}],
+        "choices": [
+            {"message": {"role": "assistant", "content": "ok", "reasoning": placeholder}, "finish_reason": "stop"}
+        ],
         "usage": {"prompt_tokens": 3, "completion_tokens": 2},
     }
     assert convert_response(body, "chat", "messages")["content"][0]["text"] == "ok"

@@ -15,5 +15,10 @@ def guard_codex_closed_resume(value: Any, *, streaming: bool = False) -> None:
         if isinstance(container, dict) and isinstance(container.get("output"), list):
             items.extend(container["output"])
     for item in items:
-        if isinstance(item, dict) and item.get("type") == "function_call" and item.get("name") == "resume_agent" and item.get("namespace") == "multi_agent_v1":
+        if (
+            isinstance(item, dict)
+            and item.get("type") == "function_call"
+            and item.get("name") == "resume_agent"
+            and item.get("namespace") == "multi_agent_v1"
+        ):
             raise (UnsupportedStreamFeatureError if streaming else UnsupportedFeatureError)("codex_closed_resume")

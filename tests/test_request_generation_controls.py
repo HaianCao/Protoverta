@@ -70,16 +70,28 @@ def test_explicitly_disabled_logprobs_is_portable_without_enabling_probabilities
         assert "logprobs" not in output and "top_logprobs" not in output
 
 
-@pytest.mark.parametrize("source,target", [("chat", "responses"), ("chat", "messages"), ("responses", "chat"), ("responses", "messages")])
 @pytest.mark.parametrize(
-    "controls", [{"top_logprobs": 1}, {"top_logprobs": 20}, {"top_logprobs": 21}, {"top_logprobs": -1}, {"top_logprobs": True}, {"top_logprobs": 0.5}]
+    "source,target", [("chat", "responses"), ("chat", "messages"), ("responses", "chat"), ("responses", "messages")]
+)
+@pytest.mark.parametrize(
+    "controls",
+    [
+        {"top_logprobs": 1},
+        {"top_logprobs": 20},
+        {"top_logprobs": 21},
+        {"top_logprobs": -1},
+        {"top_logprobs": True},
+        {"top_logprobs": 0.5},
+    ],
 )
 def test_enabled_or_malformed_logprobs_stays_rejected(source, target, controls):
     with pytest.raises(ConversionError):
         convert_request(body(source, **controls), source, target)
 
 
-@pytest.mark.parametrize("controls", [{"logprobs": True}, {"logprobs": True, "top_logprobs": 0}, {"logprobs": "false"}, {"logprobs": 0}])
+@pytest.mark.parametrize(
+    "controls", [{"logprobs": True}, {"logprobs": True, "top_logprobs": 0}, {"logprobs": "false"}, {"logprobs": 0}]
+)
 def test_chat_token_logprobs_cannot_be_hidden_by_zero_top_k(controls):
     with pytest.raises(ConversionError):
         convert_request(body("chat", **controls), "chat", "responses")
@@ -102,7 +114,10 @@ def test_gateway_wire_and_response_snapshot_share_the_explicit_controls(stream):
 
     controls = {"frequency_penalty": 0, "presence_penalty": -0.5, "top_logprobs": 0}
     cfg = GatewayConfig("chat", "https://example.invalid/v1", "synthetic", "local")
-    with listener(cfg, upstream) as url, request(url, "responses", json.dumps(body("responses", stream=stream, **controls)).encode()) as response:
+    with (
+        listener(cfg, upstream) as url,
+        request(url, "responses", json.dumps(body("responses", stream=stream, **controls)).encode()) as response,
+    ):
         raw = response.read()
     assert len(seen) == 1 and seen[0]["logprobs"] is False and "top_logprobs" not in seen[0]
     for key in ("frequency_penalty", "presence_penalty"):
@@ -114,7 +129,13 @@ def test_gateway_wire_and_response_snapshot_share_the_explicit_controls(stream):
 @pytest.mark.parametrize("key", ["frequency_penalty", "presence_penalty"])
 def test_explicitly_unsupported_penalty_blocks_zero_value_before_io(key):
     assert key in request_features({key: 0}, "chat")
-    caps = CapabilityRegistry((CapabilityRecord("https://example.invalid/v1", "chat", "m", {key: False}, "2026-11-04", "synthetic unsupported control"),))
+    caps = CapabilityRegistry(
+        (
+            CapabilityRecord(
+                "https://example.invalid/v1", "chat", "m", {key: False}, "2026-11-04", "synthetic unsupported control"
+            ),
+        )
+    )
     cfg = GatewayConfig("chat", "https://example.invalid/v1", "synthetic", "local", capabilities=caps)
     seen = []
     with listener(cfg, lambda *a, **k: seen.append(1)) as url:

@@ -34,7 +34,9 @@ def connect(origin, target, model, token="local"):
     endpoint = urlsplit(origin)
     connection = HTTPConnection(endpoint.hostname, endpoint.port, timeout=8)
     path = {Protocol.CHAT: "chat/completions", Protocol.MESSAGES: "messages", Protocol.RESPONSES: "responses"}[target]
-    connection.request("POST", "/v1/" + path, json.dumps(request_body(target, model)), {"Authorization": "Bearer " + token})
+    connection.request(
+        "POST", "/v1/" + path, json.dumps(request_body(target, model)), {"Authorization": "Bearer " + token}
+    )
     peer = connection.sock
     response = connection.getresponse()
     return connection, response, peer
@@ -50,7 +52,11 @@ def collect(origin, target, model, token="local"):
 
 
 def assert_complete(raw, target):
-    terminal = {Protocol.CHAT: b"[DONE]", Protocol.MESSAGES: b"message_stop", Protocol.RESPONSES: b"response.completed"}[target]
+    terminal = {
+        Protocol.CHAT: b"[DONE]",
+        Protocol.MESSAGES: b"message_stop",
+        Protocol.RESPONSES: b"response.completed",
+    }[target]
     assert terminal in raw and b"event: error" not in raw
 
 
@@ -95,7 +101,11 @@ def upstream(source, *, failure=None, parties=3):
                 encoder = StreamEncoder(source)
 
                 def emit(deltas):
-                    self.wfile.write(b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta)))
+                    self.wfile.write(
+                        b"".join(
+                            encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta)
+                        )
+                    )
                     self.wfile.flush()
 
                 emit(
@@ -143,7 +153,9 @@ def upstream(source, *, failure=None, parties=3):
         worker.join(2)
 
 
-@pytest.mark.parametrize("source,target", [(source, target) for source in Protocol for target in Protocol if source != target])
+@pytest.mark.parametrize(
+    "source,target", [(source, target) for source in Protocol for target in Protocol if source != target]
+)
 def test_three_overlapping_streams_can_reuse_call_ids_without_sharing_state(source, target):
     with (
         upstream(source) as (base, _, _, records, active, peak),
@@ -201,7 +213,15 @@ def test_cancel_one_lane_releases_its_lease_while_siblings_remain_open(tmp_path)
     with (
         upstream(Protocol.CHAT, failure="cancel") as (base, release, cancelled, records, active, _),
         gateway_session(
-            GatewayConfig("chat", base, "synthetic", "local", shared_admission_db=str(tmp_path / "quota.sqlite"), shared_requests=4, shared_concurrency=3),
+            GatewayConfig(
+                "chat",
+                base,
+                "synthetic",
+                "local",
+                shared_admission_db=str(tmp_path / "quota.sqlite"),
+                shared_requests=4,
+                shared_concurrency=3,
+            ),
             observer=observations.append,
         ) as origin,
         ThreadPoolExecutor(3) as pool,
@@ -218,7 +238,9 @@ def test_cancel_one_lane_releases_its_lease_while_siblings_remain_open(tmp_path)
             until = time.monotonic() + 1
             while not any(item.outcome == "client_disconnected" for item in observations) and time.monotonic() < until:
                 threading.Event().wait(0.01)
-            assert any(item.outcome == "client_disconnected" for item in observations), [item.outcome for item in observations]
+            assert any(item.outcome == "client_disconnected" for item in observations), [
+                item.outcome for item in observations
+            ]
             assert {"b", "parent"} <= active
             assert collect(origin, Protocol.RESPONSES, "probe")[0] == 200
             release.set()
@@ -238,10 +260,14 @@ def test_closing_one_session_does_not_close_another_sessions_upstream_or_mix_cre
     clients = []
     with upstream(Protocol.CHAT, failure="cancel", parties=2) as (base, release, cancelled, records, active, _):
         shared = {"shared_admission_db": str(tmp_path / "quota.sqlite"), "shared_requests": 2, "shared_concurrency": 1}
-        with gateway_session(GatewayConfig("chat", base, "synthetic-B", "local-B", **shared), observer=observations_b.append) as origin_b:
+        with gateway_session(
+            GatewayConfig("chat", base, "synthetic-B", "local-B", **shared), observer=observations_b.append
+        ) as origin_b:
             try:
                 with (
-                    gateway_session(GatewayConfig("chat", base, "synthetic-A", "local-A", **shared), observer=observations_a.append) as origin_a,
+                    gateway_session(
+                        GatewayConfig("chat", base, "synthetic-A", "local-A", **shared), observer=observations_a.append
+                    ) as origin_a,
                     ThreadPoolExecutor(2) as pool,
                 ):
                     tasks = [
@@ -256,7 +282,10 @@ def test_closing_one_session_does_not_close_another_sessions_upstream_or_mix_cre
                 assert "b" in active
                 release.set()
                 assert_complete(clients[1][1].read(), Protocol.RESPONSES)
-                assert {(model, auth) for model, auth, _ in records} == {("a", "Bearer synthetic-A"), ("b", "Bearer synthetic-B")}
+                assert {(model, auth) for model, auth, _ in records} == {
+                    ("a", "Bearer synthetic-A"),
+                    ("b", "Bearer synthetic-B"),
+                }
             finally:
                 release.set()
                 for connection, response, _ in clients:

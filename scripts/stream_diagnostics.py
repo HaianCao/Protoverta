@@ -27,10 +27,27 @@ from protoverta.stream_pipe import (
 )
 from protoverta.streaming import StreamDecoder, StreamError, UnsupportedReasoningError
 
-_DELTA_FIELDS = {"role", "content", "tool_calls", "refusal", "annotations", "reasoning", "reasoning_content", "reasoning_details", "audio", "function_call"}
+_DELTA_FIELDS = {
+    "role",
+    "content",
+    "tool_calls",
+    "refusal",
+    "annotations",
+    "reasoning",
+    "reasoning_content",
+    "reasoning_details",
+    "audio",
+    "function_call",
+}
 _TOOL_FIELDS = {"index", "id", "type", "function"}
 _FUNCTION_FIELDS = {"name", "arguments"}
-_USAGE_FIELDS = {"prompt_tokens", "completion_tokens", "total_tokens", "prompt_tokens_details", "completion_tokens_details"}
+_USAGE_FIELDS = {
+    "prompt_tokens",
+    "completion_tokens",
+    "total_tokens",
+    "prompt_tokens_details",
+    "completion_tokens_details",
+}
 _KINDS = {"start", "text", "reasoning_text", "tool_start", "tool_delta", "tool_end", "finish"}
 _REASONS = {"stop", "tool_calls", "length"}
 
@@ -40,7 +57,9 @@ class ProbeBudgetExceeded(HTTPError):
 
     def __init__(self):
         message = "Isolated probe request budget exhausted; no additional upstream request was sent."
-        body = json.dumps({"error": {"type": "invalid_request_error", "code": "probe_request_budget", "message": message}}).encode()
+        body = json.dumps(
+            {"error": {"type": "invalid_request_error", "code": "probe_request_budget", "message": message}}
+        ).encode()
         super().__init__("http://127.0.0.1", 422, message, {"x-should-retry": "false"}, io.BytesIO(body))
 
 
@@ -81,7 +100,11 @@ def chat_shape(event):
         reason = choice.get("finish_reason")
         delta = choice.get("delta")
         item = {
-            "finish_reason": reason if isinstance(reason, str) and reason in _REASONS else "none" if reason is None else "other",
+            "finish_reason": reason
+            if isinstance(reason, str) and reason in _REASONS
+            else "none"
+            if reason is None
+            else "other",
             "delta": _fields(delta, _DELTA_FIELDS),
         }
         tools = delta.get("tool_calls") if isinstance(delta, dict) else None
@@ -94,7 +117,9 @@ def chat_shape(event):
                     function = tool.get("function")
                     tool_shape.update(id=_string_shape(tool.get("id")), function=_fields(function, _FUNCTION_FIELDS))
                     if isinstance(function, dict):
-                        tool_shape.update(name=_string_shape(function.get("name")), arguments=_string_shape(function.get("arguments")))
+                        tool_shape.update(
+                            name=_string_shape(function.get("name")), arguments=_string_shape(function.get("arguments"))
+                        )
                 item["tools"].append(tool_shape)
         shape["choices"].append(item)
     return shape
@@ -248,7 +273,9 @@ class StreamDiagnostics:
             ):
                 for operation in ("feed", "finish"):
                     if hasattr(owner, operation):
-                        stack.enter_context(patch.object(owner, operation, self._method(stage, operation, getattr(owner, operation))))
+                        stack.enter_context(
+                            patch.object(owner, operation, self._method(stage, operation, getattr(owner, operation)))
+                        )
             if observe_transport:
                 original_handler = server.make_handler
 
@@ -268,7 +295,10 @@ class StreamDiagnostics:
                 "retry_after_seconds": self.retry_after,
                 "bytes_read": self.bytes_read,
                 "eof_count": self.eof_count,
-                "calls": [{"stage": stage, "operation": operation, "count": count} for (stage, operation), count in sorted(self.calls.items())],
+                "calls": [
+                    {"stage": stage, "operation": operation, "count": count}
+                    for (stage, operation), count in sorted(self.calls.items())
+                ],
                 "failures": self.failures,
                 "dropped_failures": self.dropped_failures,
                 "frame_count": self.frame_count,

@@ -11,7 +11,10 @@ def message_result():
         "model": "m",
         "max_tokens": 64,
         "messages": [
-            {"role": "assistant", "content": [{"type": "tool_use", "id": "call_one", "name": "screenshot", "input": {}}]},
+            {
+                "role": "assistant",
+                "content": [{"type": "tool_use", "id": "call_one", "name": "screenshot", "input": {}}],
+            },
             {
                 "role": "user",
                 "content": [
@@ -45,7 +48,11 @@ def test_rich_tool_results_preserve_role_identity_order_and_content():
 
 def test_rich_tool_results_keep_base64_and_do_not_relocate_to_chat_user():
     body = message_result()
-    body["messages"][1]["content"][0]["content"][1]["source"] = {"type": "base64", "media_type": "image/png", "data": "aW1hZ2U="}
+    body["messages"][1]["content"][0]["content"][1]["source"] = {
+        "type": "base64",
+        "media_type": "image/png",
+        "data": "aW1hZ2U=",
+    }
     responses = convert_request(body, "messages", "responses")
     assert convert_request(responses, "responses", "messages")["messages"] == body["messages"]
     with pytest.raises(ConversionError, match="relocating"):
@@ -74,9 +81,18 @@ def test_invalid_stops_are_rejected(value):
 @pytest.mark.parametrize("source,target", [("chat", "responses"), ("responses", "chat")])
 @pytest.mark.parametrize("strict", [True, False])
 def test_explicit_strict_tool_flag_and_schema_are_preserved(source, target, strict):
-    fn = {"name": "fn", "parameters": {"type": "object", "properties": {}, "additionalProperties": False}, "strict": strict}
+    fn = {
+        "name": "fn",
+        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        "strict": strict,
+    }
     body = (
-        {"model": "m", "max_tokens": 64, "messages": [{"role": "user", "content": "hi"}], "tools": [{"type": "function", "function": fn}]}
+        {
+            "model": "m",
+            "max_tokens": 64,
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [{"type": "function", "function": fn}],
+        }
         if source == "chat"
         else {"model": "m", "max_output_tokens": 64, "input": "hi", "tools": [{"type": "function", **fn}]}
     )
@@ -91,7 +107,14 @@ def test_explicit_strict_tool_flag_and_schema_are_preserved(source, target, stri
 def test_matched_stop_sequence_metadata_still_fails_closed():
     with pytest.raises(ConversionError):
         convert_response(
-            {"model": "m", "content": [{"type": "text", "text": "done"}], "stop_reason": "stop_sequence", "stop_sequence": "END"}, "messages", "chat"
+            {
+                "model": "m",
+                "content": [{"type": "text", "text": "done"}],
+                "stop_reason": "stop_sequence",
+                "stop_sequence": "END",
+            },
+            "messages",
+            "chat",
         )
 
 

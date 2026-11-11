@@ -50,7 +50,10 @@ def test_json_preserves_reported_tier_without_mutating_input(source, target, tie
     assert body == before
 
 
-@pytest.mark.parametrize("source,target", [(a, b) for a in ("chat", "responses", "messages") for b in ("chat", "responses", "messages") if a != b])
+@pytest.mark.parametrize(
+    "source,target",
+    [(a, b) for a in ("chat", "responses", "messages") for b in ("chat", "responses", "messages") if a != b],
+)
 def test_missing_tier_is_never_filled_from_request_context_or_protocol(source, target):
     context = {"service_tier": "priority"} if target == "responses" else None
     assert "service_tier" not in convert_response(result(source), source, target, request_context=context)
@@ -69,7 +72,9 @@ def test_invalid_or_nonportable_reported_tiers_fail_with_static_errors(source, t
 @pytest.mark.parametrize("source,target", [("chat", "responses"), ("responses", "chat")])
 @pytest.mark.parametrize("early", [False, True])
 def test_stream_terminal_tier_is_retained_without_claiming_it_at_creation(source, target, tier, early):
-    pipe = StreamTranscoder(source, target, request_context={"service_tier": "priority"} if target == "responses" else None)
+    pipe = StreamTranscoder(
+        source, target, request_context={"service_tier": "priority"} if target == "responses" else None
+    )
     raw = wire(source, tier, early=early)
     converted = b"".join(pipe.feed(raw[i : i + 7]) for i in range(0, len(raw), 7)) + pipe.finish()
     if target == "responses":
@@ -106,7 +111,12 @@ def test_gateway_reports_actual_tier_but_does_not_add_request_tier(stream):
         return io.BytesIO(wire("chat", "flex") if stream else json.dumps(result("chat", "flex")).encode())
 
     cfg = GatewayConfig("chat", "https://example.invalid/v1", "synthetic", "local")
-    with listener(cfg, upstream) as url, request(url, "responses", json.dumps({"model": "m", "input": "synthetic", "stream": stream}).encode()) as response:
+    with (
+        listener(cfg, upstream) as url,
+        request(
+            url, "responses", json.dumps({"model": "m", "input": "synthetic", "stream": stream}).encode()
+        ) as response,
+    ):
         raw = response.read()
     final = snapshots(raw)[-1] if stream else json.loads(raw)
     assert final["service_tier"] == "flex"

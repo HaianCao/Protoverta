@@ -109,7 +109,9 @@ def test_file_schema_preserves_legacy_records_and_fingerprints_new_contract(tmp_
     path = tmp_path / "profiles.json"
     path.write_text(json.dumps({"schema_version": 1, "profiles": [legacy, new]}))
     loaded = ProviderProfiles.load(path)
-    expected = ProviderProfiles((ProviderProfile(**legacy), record("responses", {"temperature": 0.7}, responses_penalties=True)))
+    expected = ProviderProfiles(
+        (ProviderProfile(**legacy), record("responses", {"temperature": 0.7}, responses_penalties=True))
+    )
     # Evidence text participates in identity, so match it before comparing.
     new["evidence"] = "synthetic generation contract"
     path.write_text(json.dumps({"schema_version": 1, "profiles": [legacy, new]}))
@@ -155,7 +157,13 @@ def test_response_penalties_require_an_exact_profile_before_any_io(streaming, de
         seen.append(json.loads(req.data))
         return io.BytesIO(reply("responses", stream=streaming))
 
-    body = {"model": "m", "messages": [{"role": "user", "content": "synthetic"}], "frequency_penalty": 0, "presence_penalty": -0.5, "stream": streaming}
+    body = {
+        "model": "m",
+        "messages": [{"role": "user", "content": "synthetic"}],
+        "frequency_penalty": 0,
+        "presence_penalty": -0.5,
+        "stream": streaming,
+    }
     with listener(cfg, upstream) as url:
         if declared:
             with request(url, "chat", json.dumps(body).encode()) as response:
@@ -171,7 +179,9 @@ def test_response_penalties_require_an_exact_profile_before_any_io(streaming, de
 @pytest.mark.parametrize("protocol", ["messages", "responses"])
 def test_negative_sampling_capability_wins_over_declared_defaults(protocol):
     registry = ProviderProfiles((record(protocol, {"temperature": 0.6}),))
-    caps = CapabilityRegistry((CapabilityRecord(BASE, protocol, "m", {"temperature": False}, "2026-11-04", "synthetic negative"),))
+    caps = CapabilityRegistry(
+        (CapabilityRecord(BASE, protocol, "m", {"temperature": False}, "2026-11-04", "synthetic negative"),)
+    )
     cfg = GatewayConfig(protocol, BASE, "synthetic", "local", provider_profiles=registry, capabilities=caps)
     target = "chat" if protocol == "responses" else "responses"
     body = convert_request({"model": "m", "input": "synthetic", "max_output_tokens": 20}, "responses", target)

@@ -27,7 +27,15 @@ from protoverta.streaming import StreamError
 from protoverta.transport import DeadlineHTTPHandler, DeadlineHTTPSHandler
 
 LIMIT = 1024 * 1024
-CODES = {"unsupported_reasoning", "unsupported_feature", "invalid_stream", "invalid_response", "upstream_timeout", "request_deadline", "progress_timeout"}
+CODES = {
+    "unsupported_reasoning",
+    "unsupported_feature",
+    "invalid_stream",
+    "invalid_response",
+    "upstream_timeout",
+    "request_deadline",
+    "progress_timeout",
+}
 
 
 def shape(raw):
@@ -45,7 +53,9 @@ def shape(raw):
             "has_logprob_records": isinstance(records, list) and bool(records),
             "logprob_records": len(records) if isinstance(records, list) else 0,
             "has_reasoning": any(bool(message.get(k)) for k in ("reasoning", "reasoning_content", "reasoning_details")),
-            "finish_reason": choice.get("finish_reason") if choice.get("finish_reason") in ("stop", "length", "tool_calls") else "other",
+            "finish_reason": choice.get("finish_reason")
+            if choice.get("finish_reason") in ("stop", "length", "tool_calls")
+            else "other",
         }
         if isinstance(records, list):
             result["missing_byte_records"] = sum(not isinstance(r, dict) or r.get("bytes") is None for r in records)
@@ -71,7 +81,17 @@ def session(config, upstream_open):
         worker.join(5)
 
 
-def probe(base_url, model, key, *, streaming=False, upstream_open=None, upstream_reasoning="provider_default", timeout=15, max_output_tokens=64):
+def probe(
+    base_url,
+    model,
+    key,
+    *,
+    streaming=False,
+    upstream_open=None,
+    upstream_reasoning="provider_default",
+    timeout=15,
+    max_output_tokens=64,
+):
     config = GatewayConfig(
         "chat",
         base_url,
@@ -93,7 +113,14 @@ def probe(base_url, model, key, *, streaming=False, upstream_open=None, upstream
         "top_logprobs": 2,
         "stream": streaming,
     }
-    result = {"model": model, "upstream": "chat", "streaming": streaming, "passed": False, "requests": 1, "outcome": "not_tested"}
+    result = {
+        "model": model,
+        "upstream": "chat",
+        "streaming": streaming,
+        "passed": False,
+        "requests": 1,
+        "outcome": "not_tested",
+    }
     opener = build_opener(_RedirectBlocker(), DeadlineHTTPHandler(), DeadlineHTTPSHandler())
     transport = upstream_open or opener.open
     attempts = 0
@@ -112,7 +139,9 @@ def probe(base_url, model, key, *, streaming=False, upstream_open=None, upstream
     try:
         with session(config, counted) as origin:
             req = Request(
-                origin + "/v1/responses", json.dumps(body).encode(), {"Authorization": "Bearer " + config.inbound_token, "Content-Type": "application/json"}
+                origin + "/v1/responses",
+                json.dumps(body).encode(),
+                {"Authorization": "Bearer " + config.inbound_token, "Content-Type": "application/json"},
             )
             with build_opener(ProxyHandler({})).open(req, timeout=max(40, timeout * 3)) as response:
                 result["http_status"] = response.status
@@ -125,7 +154,9 @@ def probe(base_url, model, key, *, streaming=False, upstream_open=None, upstream
                     count = len((chat["choices"][0].get("logprobs") or {}).get("content") or [])
                     incomplete = decoded["status"] != "completed"
                 else:
-                    pipe = StreamTranscoder("responses", "chat", text_logprobs=True, max_top_logprobs=2, max_stream_bytes=LIMIT)
+                    pipe = StreamTranscoder(
+                        "responses", "chat", text_logprobs=True, max_top_logprobs=2, max_stream_bytes=LIMIT
+                    )
                     parser, count, incomplete = SSEParser(), 0, False
 
                     def consume(raw):
@@ -174,8 +205,17 @@ def main():
     parser.add_argument("--model", required=True)
     parser.add_argument("--key-env", required=True)
     parser.add_argument("--stream", action="store_true")
-    parser.add_argument("--upstream-reasoning", choices=("provider_default", "disabled", "openrouter_disabled"), default="provider_default")
-    parser.add_argument("--timeout", type=float, default=15, help="Socket I/O timeout; reasoning models may need longer before the first byte")
+    parser.add_argument(
+        "--upstream-reasoning",
+        choices=("provider_default", "disabled", "openrouter_disabled"),
+        default="provider_default",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=15,
+        help="Socket I/O timeout; reasoning models may need longer before the first byte",
+    )
     parser.add_argument("--max-output-tokens", type=int, default=64)
     parser.add_argument("--allow-live", action="store_true")
     args = parser.parse_args()

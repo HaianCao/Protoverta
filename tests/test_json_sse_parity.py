@@ -12,8 +12,17 @@ from protoverta.streaming import Delta, StreamDecoder, StreamError
 @pytest.mark.parametrize("protocol", ["chat", "messages"])
 def test_unknown_tool_fields_are_rejected_in_json_and_sse(protocol):
     if protocol == "chat":
-        call = {"id": "c1", "type": "function", "function": {"name": "add", "arguments": "{}", "unknown_semantics": True}}
-        response = {"model": "m", "choices": [{"finish_reason": "tool_calls", "message": {"role": "assistant", "content": None, "tool_calls": [call]}}]}
+        call = {
+            "id": "c1",
+            "type": "function",
+            "function": {"name": "add", "arguments": "{}", "unknown_semantics": True},
+        }
+        response = {
+            "model": "m",
+            "choices": [
+                {"finish_reason": "tool_calls", "message": {"role": "assistant", "content": None, "tool_calls": [call]}}
+            ],
+        }
         event = SSEEvent(
             "message",
             json.dumps(
@@ -30,7 +39,9 @@ def test_unknown_tool_fields_are_rejected_in_json_and_sse(protocol):
         response = {"model": "m", "content": [block], "stop_reason": "tool_use"}
         decoder = StreamDecoder("messages")
         decoder.feed(SSEEvent("message_start", json.dumps({"type": "message_start", "message": {"model": "m"}})))
-        event = SSEEvent("content_block_start", json.dumps({"type": "content_block_start", "index": 0, "content_block": block}))
+        event = SSEEvent(
+            "content_block_start", json.dumps({"type": "content_block_start", "index": 0, "content_block": block})
+        )
     with pytest.raises(ConversionError, match="unsupported fields"):
         convert_response(response, protocol, "responses")
     with pytest.raises(StreamError, match="unsupported fields"):
@@ -71,7 +82,12 @@ def test_json_duplicate_tool_call_ids_are_not_forwarded():
     call = {"id": "same", "type": "function", "function": {"name": "add", "arguments": "{}"}}
     response = {
         "model": "m",
-        "choices": [{"finish_reason": "tool_calls", "message": {"role": "assistant", "content": None, "tool_calls": [call, copy.deepcopy(call)]}}],
+        "choices": [
+            {
+                "finish_reason": "tool_calls",
+                "message": {"role": "assistant", "content": None, "tool_calls": [call, copy.deepcopy(call)]},
+            }
+        ],
     }
     with pytest.raises(ConversionError, match="duplicate response tool call ID"):
         convert_response(response, "chat", "responses")
@@ -105,25 +121,49 @@ def test_malformed_format_discriminator_reports_conversion_error():
 def test_chat_unknown_empty_delta_fields_are_not_silently_ignored():
     event = SSEEvent(
         "message",
-        json.dumps({"object": "chat.completion.chunk", "model": "m", "choices": [{"index": 0, "finish_reason": None, "delta": {"unknown_semantics": {}}}]}),
+        json.dumps(
+            {
+                "object": "chat.completion.chunk",
+                "model": "m",
+                "choices": [{"index": 0, "finish_reason": None, "delta": {"unknown_semantics": {}}}],
+            }
+        ),
     )
     with pytest.raises(StreamError, match="unknown_semantics"):
         StreamDecoder("chat").feed(event)
 
 
 def test_upstream_responses_namespace_is_rejected_in_json_and_stream():
-    item = {"type": "function_call", "id": "fc1", "call_id": "c1", "name": "add", "namespace": "math", "arguments": "{}", "status": "completed"}
+    item = {
+        "type": "function_call",
+        "id": "fc1",
+        "call_id": "c1",
+        "name": "add",
+        "namespace": "math",
+        "arguments": "{}",
+        "status": "completed",
+    }
     response = {"model": "m", "status": "completed", "output": [item]}
     with pytest.raises(ConversionError, match="namespace"):
         convert_response(response, "responses", "chat")
     decoder = StreamDecoder("responses")
-    decoder.feed(SSEEvent("response.created", json.dumps({"type": "response.created", "sequence_number": 0, "response": {"model": "m"}})))
+    decoder.feed(
+        SSEEvent(
+            "response.created",
+            json.dumps({"type": "response.created", "sequence_number": 0, "response": {"model": "m"}}),
+        )
+    )
     with pytest.raises(StreamError, match="namespace"):
         decoder.feed(
             SSEEvent(
                 "response.output_item.added",
                 json.dumps(
-                    {"type": "response.output_item.added", "sequence_number": 1, "output_index": 0, "item": dict(item, arguments="", status="in_progress")}
+                    {
+                        "type": "response.output_item.added",
+                        "sequence_number": 1,
+                        "output_index": 0,
+                        "item": dict(item, arguments="", status="in_progress"),
+                    }
                 ),
             )
         )

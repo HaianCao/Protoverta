@@ -25,11 +25,22 @@ def chunk(delta, finish=None, **extra):
 
 
 OPENROUTER = [
-    chunk({"role": "assistant", "content": "", "reasoning": "thinking", "reasoning_details": [{"type": "reasoning.text", "text": "thinking"}]}),
+    chunk(
+        {
+            "role": "assistant",
+            "content": "",
+            "reasoning": "thinking",
+            "reasoning_details": [{"type": "reasoning.text", "text": "thinking"}],
+        }
+    ),
     chunk({"content": "OK", "reasoning": None}),
     chunk({}, "stop", usage=USAGE),
 ]
-NIM = [chunk({"role": "assistant", "reasoning_content": "hmm"}), chunk({"content": "OK"}), chunk({}, "stop", usage=USAGE)]
+NIM = [
+    chunk({"role": "assistant", "reasoning_content": "hmm"}),
+    chunk({"content": "OK"}),
+    chunk({}, "stop", usage=USAGE),
+]
 
 
 def run(target, chunks, **options):
@@ -59,15 +70,43 @@ def test_openrouter_reasoning_field_is_public_reasoning_and_details_are_omitted(
 
 def test_messages_thinking_blocks_are_omitted_only_by_policy():
     events = [
-        ("message_start", {"type": "message_start", "message": {"model": "m", "content": [], "usage": {"input_tokens": 3, "output_tokens": 0}}}),
-        ("content_block_start", {"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": "", "signature": ""}}),
-        ("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "secret plan"}}),
-        ("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "signature_delta", "signature": "sig"}}),
+        (
+            "message_start",
+            {
+                "type": "message_start",
+                "message": {"model": "m", "content": [], "usage": {"input_tokens": 3, "output_tokens": 0}},
+            },
+        ),
+        (
+            "content_block_start",
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "thinking", "thinking": "", "signature": ""},
+            },
+        ),
+        (
+            "content_block_delta",
+            {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "secret plan"}},
+        ),
+        (
+            "content_block_delta",
+            {"type": "content_block_delta", "index": 0, "delta": {"type": "signature_delta", "signature": "sig"}},
+        ),
         ("content_block_stop", {"type": "content_block_stop", "index": 0}),
-        ("content_block_start", {"type": "content_block_start", "index": 1, "content_block": {"type": "text", "text": ""}}),
-        ("content_block_delta", {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "OK"}}),
+        (
+            "content_block_start",
+            {"type": "content_block_start", "index": 1, "content_block": {"type": "text", "text": ""}},
+        ),
+        (
+            "content_block_delta",
+            {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "OK"}},
+        ),
         ("content_block_stop", {"type": "content_block_stop", "index": 1}),
-        ("message_delta", {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 4}}),
+        (
+            "message_delta",
+            {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 4}},
+        ),
         ("message_stop", {"type": "message_stop"}),
     ]
     raw = "".join(f"event: {name}\ndata: {json.dumps(body)}\n\n" for name, body in events).encode()
@@ -99,9 +138,19 @@ def test_responses_reasoning_items_are_omitted_with_their_events():
             "summary_index": 0,
             "part": {"type": "summary_text", "text": ""},
         },
-        {"type": "response.reasoning_summary_text.delta", "output_index": 0, "item_id": "rs_1", "summary_index": 0, "delta": "s"},
+        {
+            "type": "response.reasoning_summary_text.delta",
+            "output_index": 0,
+            "item_id": "rs_1",
+            "summary_index": 0,
+            "delta": "s",
+        },
         {"type": "response.output_item.done", "output_index": 0, "item": {**done_item, "status": "completed"}},
-        {"type": "response.output_item.added", "output_index": 1, "item": {**message, "status": "in_progress", "content": []}},
+        {
+            "type": "response.output_item.added",
+            "output_index": 1,
+            "item": {**message, "status": "in_progress", "content": []},
+        },
         {
             "type": "response.content_part.added",
             "output_index": 1,
@@ -109,9 +158,29 @@ def test_responses_reasoning_items_are_omitted_with_their_events():
             "content_index": 0,
             "part": {"type": "output_text", "text": "", "annotations": [], "logprobs": []},
         },
-        {"type": "response.output_text.delta", "output_index": 1, "item_id": "msg_1", "content_index": 0, "delta": "OK", "logprobs": []},
-        {"type": "response.output_text.done", "output_index": 1, "item_id": "msg_1", "content_index": 0, "text": "OK", "logprobs": []},
-        {"type": "response.content_part.done", "output_index": 1, "item_id": "msg_1", "content_index": 0, "part": message["content"][0]},
+        {
+            "type": "response.output_text.delta",
+            "output_index": 1,
+            "item_id": "msg_1",
+            "content_index": 0,
+            "delta": "OK",
+            "logprobs": [],
+        },
+        {
+            "type": "response.output_text.done",
+            "output_index": 1,
+            "item_id": "msg_1",
+            "content_index": 0,
+            "text": "OK",
+            "logprobs": [],
+        },
+        {
+            "type": "response.content_part.done",
+            "output_index": 1,
+            "item_id": "msg_1",
+            "content_index": 0,
+            "part": message["content"][0],
+        },
         {"type": "response.output_item.done", "output_index": 1, "item": message},
         {
             "type": "response.completed",
@@ -123,7 +192,9 @@ def test_responses_reasoning_items_are_omitted_with_their_events():
             },
         },
     ]
-    raw = "".join(f"event: {e['type']}\ndata: {json.dumps({**e, 'sequence_number': next(seq)})}\n\n" for e in events).encode()
+    raw = "".join(
+        f"event: {e['type']}\ndata: {json.dumps({**e, 'sequence_number': next(seq)})}\n\n" for e in events
+    ).encode()
     with pytest.raises(UnsupportedReasoningError):
         StreamTranscoder("responses", "chat").feed(raw)
     transcoder = StreamTranscoder("responses", "chat", omit_reasoning=True)
@@ -144,7 +215,12 @@ def test_responses_reasoning_items_are_omitted_with_their_events():
                     {
                         "index": 0,
                         "finish_reason": "stop",
-                        "message": {"role": "assistant", "content": "OK", "reasoning": "r", "reasoning_details": [{"type": "reasoning.text"}]},
+                        "message": {
+                            "role": "assistant",
+                            "content": "OK",
+                            "reasoning": "r",
+                            "reasoning_details": [{"type": "reasoning.text"}],
+                        },
                     }
                 ],
                 "usage": USAGE,
@@ -178,7 +254,12 @@ def test_provider_error_event_inside_http_200_stream_is_surfaced():
     from protoverta.sse import SSEEvent
 
     with pytest.raises(UpstreamReportedError, match="Invalid request") as caught:
-        decoder.feed(SSEEvent("message", json.dumps({"error": {"message": "Invalid request", "type": "invalid_request_error", "code": 400}})))
+        decoder.feed(
+            SSEEvent(
+                "message",
+                json.dumps({"error": {"message": "Invalid request", "type": "invalid_request_error", "code": 400}}),
+            )
+        )
     assert caught.value.status == 400 and caught.value.kind == "invalid_request_error"
 
 
@@ -195,6 +276,10 @@ def test_automatic_route_policy_and_route_evidence_compatibility():
         "client_tool_search": "reject",
         "public_reasoning": False,
     }
-    assert _policy_key(legacy) == _policy_key({**legacy, "reasoning_output": "reject"}) != _policy_key({**legacy, "reasoning_output": "omit"})
+    assert (
+        _policy_key(legacy)
+        == _policy_key({**legacy, "reasoning_output": "reject"})
+        != _policy_key({**legacy, "reasoning_output": "omit"})
+    )
     with pytest.raises(ValueError):
         GatewayConfig("chat", "https://p.example/v1", "k", "t", reasoning_output="drop")

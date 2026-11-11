@@ -17,10 +17,16 @@ class PDF:
         if target == "messages":
             if self.filename is not None:
                 raise ConversionError("PDF filename has no equivalent Messages filename field")
-            return {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": self.data}}
+            return {
+                "type": "document",
+                "source": {"type": "base64", "media_type": "application/pdf", "data": self.data},
+            }
         value = "data:application/pdf;base64," + self.data
         if target == "chat":
-            return {"type": "file", "file": {"file_data": value, **({"filename": self.filename} if self.filename else {})}}
+            return {
+                "type": "file",
+                "file": {"file_data": value, **({"filename": self.filename} if self.filename else {})},
+            }
         return {"type": "input_file", "file_data": value, **({"filename": self.filename} if self.filename else {})}
 
 
@@ -32,7 +38,11 @@ def decode_pdf(block: Any, source: str) -> PDF:
         if set(block) != {"type", "source"} or not isinstance(block.get("source"), dict):
             raise ConversionError("PDF titles, citations, context and file IDs are not portable")
         value = block["source"]
-        if set(value) != {"type", "media_type", "data"} or value.get("type") != "base64" or value.get("media_type") != "application/pdf":
+        if (
+            set(value) != {"type", "media_type", "data"}
+            or value.get("type") != "base64"
+            or value.get("media_type") != "application/pdf"
+        ):
             raise ConversionError("portable PDF input requires inline application/pdf base64")
         data = value["data"]
     else:
@@ -51,7 +61,10 @@ def decode_pdf(block: Any, source: str) -> PDF:
         data = data[len(prefix) :]
         filename = value.get("filename")
         if filename is not None and (
-            not isinstance(filename, str) or not filename or len(filename) > 255 or any(ord(c) < 32 or ord(c) == 127 or c in "/\\" for c in filename)
+            not isinstance(filename, str)
+            or not filename
+            or len(filename) > 255
+            or any(ord(c) < 32 or ord(c) == 127 or c in "/\\" for c in filename)
         ):
             raise ConversionError("invalid portable PDF filename")
     if not isinstance(data, str) or len(data) > 8 * 1024 * 1024:

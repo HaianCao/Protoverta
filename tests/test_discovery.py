@@ -129,7 +129,11 @@ def pages(values, captured=None):
     return opener
 
 
-@pytest.mark.parametrize("value", [chr(0xD800), chr(0xDFFF), "private-" + chr(0xD800) + "-name"], ids=["high-surrogate", "low-surrogate", "embedded-surrogate"])
+@pytest.mark.parametrize(
+    "value",
+    [chr(0xD800), chr(0xDFFF), "private-" + chr(0xD800) + "-name"],
+    ids=["high-surrogate", "low-surrogate", "embedded-surrogate"],
+)
 @pytest.mark.parametrize(
     "field,message",
     [
@@ -182,7 +186,11 @@ def test_catalog_preserves_valid_unicode_and_supplementary_characters(escaped):
 
 def test_catalog_reports_explicit_metadata_but_never_certifies_capabilities():
     policy = CatalogPolicy(
-        pagination="after_id", name_field="name", context_field="limits.context", output_field="limits.output", modalities_field="architecture.input_modalities"
+        pagination="after_id",
+        name_field="name",
+        context_field="limits.context",
+        output_field="limits.output",
+        modalities_field="architecture.input_modalities",
     )
     captured = []
     result = fetch_catalog(
@@ -192,7 +200,14 @@ def test_catalog_reports_explicit_metadata_but_never_certifies_capabilities():
         upstream_open=pages(
             [
                 {
-                    "data": [{"id": "b", "name": "Bravo", "limits": {"context": 1000, "output": 100}, "architecture": {"input_modalities": ["text", "image"]}}],
+                    "data": [
+                        {
+                            "id": "b",
+                            "name": "Bravo",
+                            "limits": {"context": 1000, "output": 100},
+                            "architecture": {"input_modalities": ["text", "image"]},
+                        }
+                    ],
                     "has_more": True,
                     "last_id": "b",
                 },
@@ -216,11 +231,18 @@ def test_catalog_reports_explicit_metadata_but_never_certifies_capabilities():
         (CatalogPolicy(), [{"data": [], "has_more": True, "last_id": "a"}]),
         (
             CatalogPolicy(pagination="after_id"),
-            [{"data": [], "has_more": True, "last_id": "a"}, {"data": [], "has_more": True, "last_id": "b"}, {"data": [], "has_more": True, "last_id": "a"}],
+            [
+                {"data": [], "has_more": True, "last_id": "a"},
+                {"data": [], "has_more": True, "last_id": "b"},
+                {"data": [], "has_more": True, "last_id": "a"},
+            ],
         ),
         (
             CatalogPolicy(pagination="after_id"),
-            [{"data": [{"id": "a", "display_name": "First"}], "has_more": True, "last_id": "a"}, {"data": [{"id": "a", "display_name": "Changed"}]}],
+            [
+                {"data": [{"id": "a", "display_name": "First"}], "has_more": True, "last_id": "a"},
+                {"data": [{"id": "a", "display_name": "Changed"}]},
+            ],
         ),
     ],
 )
@@ -230,14 +252,31 @@ def test_catalog_fails_closed_on_limits_cycles_conflicts_and_unconfigured_pagina
 
 
 @pytest.mark.parametrize(
-    "body", [{"data": {}}, {"data": [None]}, {"data": [{"id": "bad\nmodel"}]}, {"data": [], "has_more": "true"}, {"data": [{"id": "m", "display_name": 1}]}]
+    "body",
+    [
+        {"data": {}},
+        {"data": [None]},
+        {"data": [{"id": "bad\nmodel"}]},
+        {"data": [], "has_more": "true"},
+        {"data": [{"id": "m", "display_name": 1}]},
+    ],
 )
 def test_catalog_rejects_malformed_data_without_echoing_values(body):
     with pytest.raises(CatalogError):
         fetch_catalog("https://example.test/v1", {}, upstream_open=pages([body]))
 
 
-@pytest.mark.parametrize("path", ["https://evil.test/models", "//evil.test/models", "/../models", "/models?next=secret", "/models#fragment", "/models\r\nx"])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "https://evil.test/models",
+        "//evil.test/models",
+        "/../models",
+        "/models?next=secret",
+        "/models#fragment",
+        "/models\r\nx",
+    ],
+)
 def test_catalog_never_takes_provider_urls_or_header_injection_as_paths(path):
     with pytest.raises(ValueError):
         CatalogPolicy(path=path)
@@ -285,11 +324,15 @@ def test_redirect_response_is_closed_before_raising():
     assert response.closed
 
 
-@pytest.mark.parametrize("field,value", [("context_length", True), ("context_length", -1), ("context_length", 0), ("modalities", "image")])
+@pytest.mark.parametrize(
+    "field,value", [("context_length", True), ("context_length", -1), ("context_length", 0), ("modalities", "image")]
+)
 def test_malformed_reported_metadata_does_not_turn_into_unknown_or_certified(field, value):
     policy = CatalogPolicy(context_field="context_length", modalities_field="modalities")
     with pytest.raises(CatalogError):
-        fetch_catalog("https://example.test/v1", {}, policy, upstream_open=pages([{"data": [{"id": "m", field: value}]}]))
+        fetch_catalog(
+            "https://example.test/v1", {}, policy, upstream_open=pages([{"data": [{"id": "m", field: value}]}])
+        )
 
 
 SKIP_BODY = {
@@ -312,7 +355,12 @@ def test_catalog_rejects_one_invalid_entry_by_default():
 def test_catalog_skip_mode_drops_bad_entries_and_malformed_metadata():
     from protoverta import Catalog
 
-    result = fetch_catalog("https://example.test/v1", {}, CatalogPolicy(invalid_entries="skip", **SKIP_FIELDS), upstream_open=pages([SKIP_BODY]))
+    result = fetch_catalog(
+        "https://example.test/v1",
+        {},
+        CatalogPolicy(invalid_entries="skip", **SKIP_FIELDS),
+        upstream_open=pages([SKIP_BODY]),
+    )
     assert isinstance(result, Catalog) and isinstance(result, tuple)
     assert [model.id for model in result] == ["good", "odd-limits", "odd-name"]
     good, odd_limits, odd_name = result

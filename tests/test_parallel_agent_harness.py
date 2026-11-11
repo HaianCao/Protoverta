@@ -20,12 +20,19 @@ def harness(monkeypatch):
 def lifecycle(harness, *, error=False, swapped=False):
     items = []
     for index, task in enumerate(harness.TASKS):
-        items.append({"tool": "spawn_agent", "status": "completed", "prompt": task, "receiver_thread_ids": [f"child-{index}"]})
-    states = {f"child-{index}": {"status": "completed", "message": harness.FINALS[1 - index if swapped else index]} for index in range(2)}
+        items.append(
+            {"tool": "spawn_agent", "status": "completed", "prompt": task, "receiver_thread_ids": [f"child-{index}"]}
+        )
+    states = {
+        f"child-{index}": {"status": "completed", "message": harness.FINALS[1 - index if swapped else index]}
+        for index in range(2)
+    }
     if error:
         states["child-0"] = {"status": "errored", "message": "exceeded retry limit, last status: 429 Too Many Requests"}
     items.append({"tool": "wait", "status": "failed" if error else "completed", "agents_states": states})
-    return "\n".join(json.dumps({"type": "item.completed", "item": {"type": "collab_tool_call", **item}}) for item in items)
+    return "\n".join(
+        json.dumps({"type": "item.completed", "item": {"type": "collab_tool_call", **item}}) for item in items
+    )
 
 
 @pytest.mark.parametrize("failure", [False, True])
@@ -36,7 +43,9 @@ def test_codex_acceptance_requires_correlated_lifecycle_with_expected_failure(ha
 
 
 @pytest.mark.parametrize("client", ["codex", "claude"])
-@pytest.mark.parametrize("raw", ["P05_PARALLEL_PARENT_VERIFIED", "[]", "null", '{"item":null}', '{"is_error":false,"subagent_stats":null}'])
+@pytest.mark.parametrize(
+    "raw", ["P05_PARALLEL_PARENT_VERIFIED", "[]", "null", '{"item":null}', '{"is_error":false,"subagent_stats":null}']
+)
 def test_text_or_malformed_output_is_not_parallel_agent_evidence(harness, client, raw):
     assert not harness.completed_lifecycle(client, raw)
 
@@ -60,7 +69,10 @@ def test_batched_spawn_wire_keeps_two_distinct_call_ids_and_arguments(harness, p
     deltas = [delta for event in SSEParser().feed(raw) for delta in decoder.feed(event)]
     decoder.finish()
     assert [delta.call_id for delta in deltas if delta.kind == "tool_start"] == ["spawn_0", "spawn_1"]
-    arguments = {index: "".join(delta.text for delta in deltas if delta.kind == "tool_delta" and delta.index == index) for index in range(2)}
+    arguments = {
+        index: "".join(delta.text for delta in deltas if delta.kind == "tool_delta" and delta.index == index)
+        for index in range(2)
+    }
     assert [json.loads(arguments[index])["prompt"] for index in range(2)] == list(harness.TASKS)
 
 
@@ -100,7 +112,9 @@ def test_fixture_rejections_are_explicit_nonretryable_and_do_not_echo_exception_
 
     scenario.open = reject
     with harness.fixture_server(scenario) as origin:
-        request = Request(origin + "/v1/chat/completions", data=b"{}", headers={"Authorization": "Bearer fake-upstream-key"})
+        request = Request(
+            origin + "/v1/chat/completions", data=b"{}", headers={"Authorization": "Bearer fake-upstream-key"}
+        )
         with pytest.raises(HTTPError) as error:
             urlopen(request, timeout=2)
         with error.value as response:

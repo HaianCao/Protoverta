@@ -19,7 +19,11 @@ def measure(project, package, output, core):
     data_file = output / ".coverage"
     config_file = output / "coverage.ini"
     config_file.write_text(
-        "[run]\nbranch = true\nparallel = true\npatch = subprocess\nsource = " + str(project / "src" / package) + "\ndata_file = " + str(data_file) + "\n",
+        "[run]\nbranch = true\nparallel = true\npatch = subprocess\nsource = "
+        + str(project / "src" / package)
+        + "\ndata_file = "
+        + str(data_file)
+        + "\n",
         encoding="utf-8",
     )
     env = sanitized_environment()
@@ -58,7 +62,9 @@ def measure(project, package, output, core):
         text = (result.stdout + result.stderr).decode("utf-8", errors="replace")
         failures = [line.partition(" - ")[0] for line in text.splitlines() if line.startswith(("FAILED ", "ERROR "))]
         detail = "\n" + "\n".join(failures[:8]) if failures else ""
-        raise RuntimeError(f"{project.name} pytest failed (exit {result.returncode}); inspect {output / 'pytest.log'}{detail}")
+        raise RuntimeError(
+            f"{project.name} pytest failed (exit {result.returncode}); inspect {output / 'pytest.log'}{detail}"
+        )
     int(pid_file.read_text(encoding="ascii"))  # Keep the root PID for diagnostics.
     # Windows venv python.exe may redirect to another OS process. Its measured
     # PID need not equal Popen.pid, so verify a CLI-only coverage context instead.
@@ -96,7 +102,11 @@ def main():
     if any(output.iterdir()):
         parser.error("Use an empty output directory")
     results = []
-    for project, package in [(core, "protoverta"), (args.codex_source.resolve(), "codexapter"), (args.claude_source.resolve(), "claudapter")]:
+    for project, package in [
+        (core, "protoverta"),
+        (args.codex_source.resolve(), "codexapter"),
+        (args.claude_source.resolve(), "claudapter"),
+    ]:
         print(f"Running source tests: {project.name} (may take several minutes)", flush=True)
         try:
             record = measure(project, package, output / package, core)

@@ -14,7 +14,10 @@ def harness(monkeypatch):
 
 
 @pytest.mark.parametrize("mode", ["normal", "interrupt"])
-@pytest.mark.parametrize("fault", [None, "after_cleanup", "members_remain", "timeout", "wrong_exit", "boolean_count", "not_owned", "no_signal"])
+@pytest.mark.parametrize(
+    "fault",
+    [None, "after_cleanup", "members_remain", "timeout", "wrong_exit", "boolean_count", "not_owned", "no_signal"],
+)
 def test_cleanup_gate_needs_pre_job_close_evidence_and_real_signal(harness, mode, fault):
     report = {
         "timed_out": False,
@@ -38,7 +41,9 @@ def test_cleanup_gate_needs_pre_job_close_evidence_and_real_signal(harness, mode
         report["console_owned"] = False
     elif fault == "no_signal":
         report["event_sent"] = False
-    assert harness.verified_cleanup(report, mode) is (fault is None or mode == "normal" and fault in {"not_owned", "no_signal"})
+    assert harness.verified_cleanup(report, mode) is (
+        fault is None or mode == "normal" and fault in {"not_owned", "no_signal"}
+    )
 
 
 @pytest.mark.parametrize(
@@ -64,7 +69,12 @@ def test_claude_lifecycle_distinguishes_background_drain_from_interrupt(harness,
         "is_error": mode == "interrupt",
         "terminal_reason": "aborted_streaming" if mode == "interrupt" else "end_turn",
         "permission_denials": [],
-        "subagent_stats": {"spawned": 1, "started_in_background": 1, "completed": 0 if mode == "interrupt" else 1, "failed": 0},
+        "subagent_stats": {
+            "spawned": 1,
+            "started_in_background": 1,
+            "completed": 0 if mode == "interrupt" else 1,
+            "failed": 0,
+        },
     }
     if fault == "wrong_complete":
         result["subagent_stats"]["completed"] = 1 if mode == "interrupt" else 0
@@ -81,7 +91,13 @@ def test_claude_lifecycle_distinguishes_background_drain_from_interrupt(harness,
 def test_codex_actual_spawn_event_must_match_returned_child_id(harness, identity):
     result = {
         "type": "item.completed",
-        "item": {"type": "collab_tool_call", "tool": "spawn_agent", "status": "completed", "prompt": harness.TASK, "receiver_thread_ids": [identity]},
+        "item": {
+            "type": "collab_tool_call",
+            "tool": "spawn_agent",
+            "status": "completed",
+            "prompt": harness.TASK,
+            "receiver_thread_ids": [identity],
+        },
     }
     assert harness.verified_lifecycle("codex", json.dumps(result), "child", "normal") is (identity == "child")
     assert not harness.verified_lifecycle("codex", "parent says it spawned", "child", "normal")

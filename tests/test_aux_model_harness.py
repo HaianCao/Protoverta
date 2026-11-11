@@ -14,14 +14,32 @@ def harness(monkeypatch):
 @pytest.mark.parametrize("fault", [None, "wrong_spawn", "wrong_send", "missing_resume", "wrong_history_result"])
 def test_codex_resume_gate_requires_same_child_and_both_verified_turns(harness, fault):
     items = [
-        {"tool": "spawn_agent", "receiver_thread_ids": ["other" if fault == "wrong_spawn" else "child"], "prompt": harness.TASK},
-        {"tool": "send_input", "receiver_thread_ids": ["other" if fault == "wrong_send" else "child"], "prompt": harness.RESUME_TASK},
+        {
+            "tool": "spawn_agent",
+            "receiver_thread_ids": ["other" if fault == "wrong_spawn" else "child"],
+            "prompt": harness.TASK,
+        },
+        {
+            "tool": "send_input",
+            "receiver_thread_ids": ["other" if fault == "wrong_send" else "child"],
+            "prompt": harness.RESUME_TASK,
+        },
     ]
     for marker in (harness.FIRST, harness.RESUMED):
         if marker == harness.RESUMED and fault == "missing_resume":
             continue
-        items.append({"tool": "wait", "agents_states": {"child": {"status": "completed", "message": "fake" if fault == "wrong_history_result" else marker}}})
-    raw = "\n".join(json.dumps({"type": "item.completed", "item": {"type": "collab_tool_call", "status": "completed", **item}}) for item in items)
+        items.append(
+            {
+                "tool": "wait",
+                "agents_states": {
+                    "child": {"status": "completed", "message": "fake" if fault == "wrong_history_result" else marker}
+                },
+            }
+        )
+    raw = "\n".join(
+        json.dumps({"type": "item.completed", "item": {"type": "collab_tool_call", "status": "completed", **item}})
+        for item in items
+    )
     assert harness.verified_lifecycle("codex", raw, "child") is (fault is None)
 
 

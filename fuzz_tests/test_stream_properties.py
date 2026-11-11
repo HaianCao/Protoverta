@@ -44,7 +44,10 @@ def wire(source, text, arguments):
         return value
 
     return b"".join(
-        encode_sse(event.event, json.dumps(replace(json.loads(event.data)), ensure_ascii=False) if event.data != "[DONE]" else event.data)
+        encode_sse(
+            event.event,
+            json.dumps(replace(json.loads(event.data)), ensure_ascii=False) if event.data != "[DONE]" else event.data,
+        )
         for event in SSEParser().feed(source_wire(source))
     )
 
@@ -97,14 +100,18 @@ def test_missing_terminal_never_commits_success(source, target, cuts, text):
         for chunk in chunks(truncated, cuts):
             output.extend(pipe.feed(chunk))
         output.extend(pipe.finish())
-    assert not any(marker in output for marker in (b"event: response.completed", b"event: message_stop", b"data: [DONE]"))
+    assert not any(
+        marker in output for marker in (b"event: response.completed", b"event: message_stop", b"data: [DONE]")
+    )
 
 
 @pytest.mark.parametrize(("source", "target"), ROUTES)
 @PROPERTY
 @given(cuts=PARTITIONS, text=UNICODE)
 def test_length_termination_remains_incomplete(source, target, cuts, text):
-    raw = source_wire(source, tools=False, length=True).replace(json.dumps(TEXT, ensure_ascii=False).encode(), json.dumps(text, ensure_ascii=False).encode())
+    raw = source_wire(source, tools=False, length=True).replace(
+        json.dumps(TEXT, ensure_ascii=False).encode(), json.dumps(text, ensure_ascii=False).encode()
+    )
     assert semantics(translate(raw, source, target, cuts), target)[2] == "length"
 
 
@@ -116,7 +123,10 @@ def test_invalid_tool_json_never_commits_success(source, target, cuts, text):
         if isinstance(value, list):
             return [corrupt(item) for item in value]
         if isinstance(value, dict):
-            return {key: '{"x":' if key in ("arguments", "partial_json") and isinstance(item, str) else corrupt(item) for key, item in value.items()}
+            return {
+                key: '{"x":' if key in ("arguments", "partial_json") and isinstance(item, str) else corrupt(item)
+                for key, item in value.items()
+            }
         return value
 
     raw = b"".join(
@@ -129,4 +139,6 @@ def test_invalid_tool_json_never_commits_success(source, target, cuts, text):
         for chunk in chunks(raw, cuts):
             output.extend(pipe.feed(chunk))
         output.extend(pipe.finish())
-    assert not any(marker in output for marker in (b"event: response.completed", b"event: message_stop", b"data: [DONE]"))
+    assert not any(
+        marker in output for marker in (b"event: response.completed", b"event: message_stop", b"data: [DONE]")
+    )

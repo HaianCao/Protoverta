@@ -14,7 +14,9 @@ class ToolPolicyViolation(StreamError):
     """The upstream result violates this request's declared tool permissions."""
 
 
-def normalize_tool_policy(body: dict[str, Any], protocol: Protocol | str) -> tuple[dict[str, Any], str | dict[str, Any], bool]:
+def normalize_tool_policy(
+    body: dict[str, Any], protocol: Protocol | str
+) -> tuple[dict[str, Any], str | dict[str, Any], bool]:
     """Apply gateway defaults to a copy; native forwarding never calls this."""
     protocol = Protocol(protocol)
     result = copy.deepcopy(body)
@@ -54,7 +56,9 @@ class BoundToolPolicy:
         self.choice = _tool_choice(body.get("tool_choice"), protocol) or ("auto" if self.allowed else "none")
         if protocol == Protocol.MESSAGES:
             raw = body.get("tool_choice", {})
-            self.parallel = not raw.get("disable_parallel_tool_use", False) if self.allowed and self.choice != "none" else False
+            self.parallel = (
+                not raw.get("disable_parallel_tool_use", False) if self.allowed and self.choice != "none" else False
+            )
         else:
             flag = _parallel_flag(body.get("parallel_tool_calls"))
             self.parallel = bool(self.allowed) if flag is None else flag

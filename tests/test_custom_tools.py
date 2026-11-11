@@ -20,7 +20,11 @@ def chat_request():
                 "role": "assistant",
                 "content": None,
                 "tool_calls": [
-                    {"id": "c1", "type": "custom", "custom": {"name": "execute", "input": "print('xin chào')\nnot JSON"}},
+                    {
+                        "id": "c1",
+                        "type": "custom",
+                        "custom": {"name": "execute", "input": "print('xin chào')\nnot JSON"},
+                    },
                     {"id": "c2", "type": "function", "function": {"name": "lookup", "arguments": "{}"}},
                 ],
             },
@@ -61,7 +65,9 @@ def test_request_round_trip_preserves_raw_input_grammar_identity_and_order():
     assert body == original
 
 
-@pytest.mark.parametrize("form", [None, {"type": "text"}, {"type": "grammar", "grammar": {"syntax": "regex", "definition": "[a-z]+"}}])
+@pytest.mark.parametrize(
+    "form", [None, {"type": "text"}, {"type": "grammar", "grammar": {"syntax": "regex", "definition": "[a-z]+"}}]
+)
 def test_optional_formats_are_preserved(form):
     body = chat_request()
     tool = body["tools"][0]["custom"]
@@ -139,7 +145,14 @@ def test_type_mismatch_and_incomplete_history_are_rejected():
 def test_custom_capability_is_not_inferred_from_function_support():
     body = chat_request()
     assert {"tools", "custom_tools", "forced_tool_choice"} <= request_features(body, "chat")
-    record = CapabilityRecord("https://example.test/v1", "chat", "m", {"text": True, "tools": True, "custom_tools": False}, "2026-10-24", "fixture")
+    record = CapabilityRecord(
+        "https://example.test/v1",
+        "chat",
+        "m",
+        {"text": True, "tools": True, "custom_tools": False},
+        "2026-10-24",
+        "fixture",
+    )
     with pytest.raises(ConversionError, match="custom_tools"):
         CapabilityRegistry((record,)).preflight("https://example.test/v1", "chat", body)
     assert "custom_tools" in request_features({"messages": body["messages"]}, "chat")
@@ -148,7 +161,11 @@ def test_custom_capability_is_not_inferred_from_function_support():
 
 def test_custom_aliases_only_change_names_not_raw_input():
     body = chat_request()
-    for value in (body["tools"][0]["custom"], body["tool_choice"]["custom"], body["messages"][1]["tool_calls"][0]["custom"]):
+    for value in (
+        body["tools"][0]["custom"],
+        body["tool_choice"]["custom"],
+        body["messages"][1]["tool_calls"][0]["custom"],
+    ):
         value["name"] = "tool.with.dots"
     mapping = ToolNameMap()
     prepared = mapping.prepare(body, "chat")
@@ -158,4 +175,7 @@ def test_custom_aliases_only_change_names_not_raw_input():
     response["choices"][0]["message"]["tool_calls"][0]["custom"]["name"] = converted["tools"][0]["name"]
     restored = mapping.restore(response, "chat")
     assert restored["choices"][0]["message"]["tool_calls"][0]["custom"]["name"] == "tool.with.dots"
-    assert prepared["messages"][1]["tool_calls"][0]["custom"]["input"] == body["messages"][1]["tool_calls"][0]["custom"]["input"]
+    assert (
+        prepared["messages"][1]["tool_calls"][0]["custom"]["input"]
+        == body["messages"][1]["tool_calls"][0]["custom"]["input"]
+    )

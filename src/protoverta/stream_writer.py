@@ -64,7 +64,9 @@ class StreamHeartbeatWriter:
             self.thread.start()
 
     def _run(self) -> None:
-        while not self.stopped.wait(min(threading.TIMEOUT_MAX, max(0, self.interval - (self.clock() - self.last_write)))):
+        while not self.stopped.wait(
+            min(threading.TIMEOUT_MAX, max(0, self.interval - (self.clock() - self.last_write)))
+        ):
             if not self.lock.acquire(timeout=0.05):
                 # A slow consumer already has a bounded real write in flight.
                 if self.stopped.wait(0.05):

@@ -41,8 +41,16 @@ class ContextAssessment:
     def headers(self) -> dict[str, str]:
         kind = "unavailable" if self.input_tokens is None else "operator-exact" if self.exact else self.count_kind
         category = "unavailable" if self.input_tokens is None else "exact" if self.exact else "estimate"
-        values = {"X-Protoverta-Context-Verdict": self.verdict, "X-Protoverta-Context-Count-Kind": kind, "X-Protoverta-Context-Count-Category": category}
-        for name, value in (("Input", self.input_tokens), ("Output-Reserve", self.reserved_output_tokens), ("Limit", self.context_window_tokens)):
+        values = {
+            "X-Protoverta-Context-Verdict": self.verdict,
+            "X-Protoverta-Context-Count-Kind": kind,
+            "X-Protoverta-Context-Count-Category": category,
+        }
+        for name, value in (
+            ("Input", self.input_tokens),
+            ("Output-Reserve", self.reserved_output_tokens),
+            ("Limit", self.context_window_tokens),
+        ):
             if value is not None:
                 values["X-Protoverta-Context-" + name] = str(value)
         return values
@@ -109,7 +117,18 @@ def assess_context(
     if count is not None and output is not None and limit is not None:
         over = count.tokens + output > limit
         verdict = ("over" if over else "within") + ("-exact" if exact else "-estimate")
-    result = ContextAssessment(count.tokens if count else None, output, limit, exact, verdict, "operator-estimate" if counter else "utf8-json-byte-estimate")
+    result = ContextAssessment(
+        count.tokens if count else None,
+        output,
+        limit,
+        exact,
+        verdict,
+        "operator-estimate" if counter else "utf8-json-byte-estimate",
+    )
     if policy in ("reject_estimate", "exact") and (verdict == "unknown" or verdict.startswith("over")):
-        raise ConversionError("context preflight rejected: " + verdict + "; choose an explicit smaller request/budget (history was not changed)")
+        raise ConversionError(
+            "context preflight rejected: "
+            + verdict
+            + "; choose an explicit smaller request/budget (history was not changed)"
+        )
     return result

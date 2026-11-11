@@ -24,11 +24,18 @@ def fault_prefix(protocol):
     events = SSEParser().feed(raw)
     terminal = {
         Protocol.CHAT: lambda event: (
-            event.data == "[DONE]" or any(choice.get("finish_reason") is not None for choice in json.loads(event.data).get("choices", []))
+            event.data == "[DONE]"
+            or any(choice.get("finish_reason") is not None for choice in json.loads(event.data).get("choices", []))
         ),
         Protocol.MESSAGES: lambda event: event.event in {"message_delta", "message_stop"},
         Protocol.RESPONSES: lambda event: (
-            event.event in {"response.output_text.done", "response.content_part.done", "response.output_item.done", "response.completed"}
+            event.event
+            in {
+                "response.output_text.done",
+                "response.content_part.done",
+                "response.output_item.done",
+                "response.completed",
+            }
         ),
     }[protocol]
     prefix = []
@@ -40,9 +47,14 @@ def fault_prefix(protocol):
 
 
 def verified_trace(records, fault):
-    category, operation = ("upstream_timeout", "read") if fault == "timeout" else ("invalid_stream", "feed" if fault == "invalid" else "finish")
+    category, operation = (
+        ("upstream_timeout", "read")
+        if fault == "timeout"
+        else ("invalid_stream", "feed" if fault == "invalid" else "finish")
+    )
     return isinstance(records, list) and any(
-        isinstance(item, dict) and item.get("stream_error") == category and item.get("operation") == operation for item in records
+        isinstance(item, dict) and item.get("stream_error") == category and item.get("operation") == operation
+        for item in records
     )
 
 
@@ -124,7 +136,11 @@ class Scenario(parallel.Scenario):
 
     def open(self, request, *, timeout):
         body = json.loads(request.data)
-        expected_path = {Protocol.CHAT: "/v1/chat/completions", Protocol.MESSAGES: "/v1/messages", Protocol.RESPONSES: "/v1/responses"}[self.protocol]
+        expected_path = {
+            Protocol.CHAT: "/v1/chat/completions",
+            Protocol.MESSAGES: "/v1/messages",
+            Protocol.RESPONSES: "/v1/responses",
+        }[self.protocol]
         if body.get("model") != "p04-fixture-model" or urlsplit(request.full_url).path != expected_path:
             raise ValueError("Unexpected fault scenario endpoint/model")
         text = single.user_text(body, self.protocol)
@@ -136,10 +152,12 @@ class Scenario(parallel.Scenario):
                         for block in message["content"]:
                             if isinstance(block, dict) and block.get("type") == "tool_result":
                                 records[block["tool_use_id"]] = block.get("content")
-            self.parent_failure_correlated |= self.expected_failure(json.dumps(records.get("spawn_0"))) and parallel.FINALS[1] in json.dumps(
-                records.get("spawn_1")
+            self.parent_failure_correlated |= self.expected_failure(
+                json.dumps(records.get("spawn_0"))
+            ) and parallel.FINALS[1] in json.dumps(records.get("spawn_1"))
+            self.native_partial_handback |= self.protocol == Protocol.MESSAGES and native_partial_failure(
+                json.dumps(records.get("spawn_0"))
             )
-            self.native_partial_handback |= self.protocol == Protocol.MESSAGES and native_partial_failure(json.dumps(records.get("spawn_0")))
         if parallel.TASKS[0] in text and self.stages["a"]:
             if self.stages["a"] >= MAX_FAULT_ATTEMPTS:
                 raise ValueError("Faulting child exceeded bounded retry allowance")
@@ -164,14 +182,20 @@ class Scenario(parallel.Scenario):
             "upstream stream error",
             "invalid_stream",
         )
-        found = any(marker.lower() in text.lower() for marker in markers) or self.protocol == Protocol.MESSAGES and native_partial_failure(text)
+        found = (
+            any(marker.lower() in text.lower() for marker in markers)
+            or self.protocol == Protocol.MESSAGES
+            and native_partial_failure(text)
+        )
         self.failure_seen |= found
         return found
 
 
 def run(client, upstream, adapter_source, fault):
     scenario = Scenario(client, upstream, fault)
-    driver = parallel.drive(scenario, adapter_source, gateway_limits={"timeout": 15, "progress_timeout": 2, "total_timeout": 30})
+    driver = parallel.drive(
+        scenario, adapter_source, gateway_limits={"timeout": 15, "progress_timeout": 2, "total_timeout": 30}
+    )
     result = scenario.result
     lifecycle = result is not None and verified_lifecycle(client, result.stdout, scenario)
     trace_verified = verified_trace(scenario.trace_data, fault)
@@ -227,7 +251,16 @@ def main():
     result = run(args.client, args.upstream, args.adapter_source, args.fault)
     if args.report:
         args.report.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps({key: value for key, value in result.items() if key not in {"stdout", "stderr", "trace", "observed", "parent_records"}}, indent=2))
+    print(
+        json.dumps(
+            {
+                key: value
+                for key, value in result.items()
+                if key not in {"stdout", "stderr", "trace", "observed", "parent_records"}
+            },
+            indent=2,
+        )
+    )
     return 0 if result["passed"] else 1
 
 

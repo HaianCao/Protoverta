@@ -11,7 +11,9 @@ _INVALID = "Value must be valid JSON with finite numbers and valid Unicode withi
 def encode_json(value: Any, *, compact: bool = False) -> bytes:
     """Reject nonfinite numbers, lone surrogates, cycles and excessive nesting."""
     try:
-        return json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":") if compact else None).encode("utf-8")
+        return json.dumps(
+            value, ensure_ascii=False, allow_nan=False, separators=(",", ":") if compact else None
+        ).encode("utf-8")
     except (ValueError, TypeError, RecursionError, OverflowError) as exc:
         raise ConversionError(_INVALID) from exc
 

@@ -40,10 +40,15 @@ def reply(source, calls=(), *, stream=False, length=False, text="ok"):
     if not stream:
         message = {"role": "assistant", "content": text}
         if calls:
-            message["tool_calls"] = [{"id": f"c{i}", "type": "function", "function": {"name": n, "arguments": "{}"}} for i, n in enumerate(calls)]
+            message["tool_calls"] = [
+                {"id": f"c{i}", "type": "function", "function": {"name": n, "arguments": "{}"}}
+                for i, n in enumerate(calls)
+            ]
         chat = {
             "model": "m",
-            "choices": [{"message": message, "finish_reason": "length" if length else "tool_calls" if calls else "stop"}],
+            "choices": [
+                {"message": message, "finish_reason": "length" if length else "tool_calls" if calls else "stop"}
+            ],
             "usage": {"prompt_tokens": 2, "completion_tokens": 1},
         }
         return json.dumps(convert_response(chat, "chat", source)).encode()
@@ -52,8 +57,16 @@ def reply(source, calls=(), *, stream=False, length=False, text="ok"):
     if text:
         deltas.append(Delta("text", text=text))
     for i, name in enumerate(calls):
-        deltas += [Delta("tool_start", index=i, call_id=f"c{i}", name=name), Delta("tool_delta", index=i, text="{}"), Delta("tool_end", index=i)]
-    deltas.append(Delta("finish", reason="length" if length else "tool_calls" if calls else "stop", input_tokens=2, output_tokens=1))
+        deltas += [
+            Delta("tool_start", index=i, call_id=f"c{i}", name=name),
+            Delta("tool_delta", index=i, text="{}"),
+            Delta("tool_end", index=i),
+        ]
+    deltas.append(
+        Delta(
+            "finish", reason="length" if length else "tool_calls" if calls else "stop", input_tokens=2, output_tokens=1
+        )
+    )
     return b"".join(encode_sse(e.event, e.data) for d in deltas for e in encoder.feed(d))
 
 
@@ -158,7 +171,9 @@ def test_late_stream_violation_does_not_expose_unauthorized_tool_or_success(sour
         events = [json.loads(e.data) for e in SSEParser().feed(response.read())]
     assert any(e.get("delta") == "visible" for e in events)
     assert events[-1]["code"] == "tool_policy_violation"
-    assert not any(e.get("type") == "response.completed" or e.get("item", {}).get("type") == "function_call" for e in events)
+    assert not any(
+        e.get("type") == "response.completed" or e.get("item", {}).get("type") == "function_call" for e in events
+    )
 
 
 @pytest.mark.parametrize("stream", [False, True])
@@ -190,7 +205,13 @@ def test_policy_uses_wire_names_but_snapshot_keeps_effective_logical_tools(sourc
     before = copy.deepcopy(body)
     body["stream"] = stream
     cfg = GatewayConfig(
-        source, "https://example.invalid/v1", "synthetic", "local", namespace_tools="flatten", tool_names="alias", client_tool_search="function"
+        source,
+        "https://example.invalid/v1",
+        "synthetic",
+        "local",
+        namespace_tools="flatten",
+        tool_names="alias",
+        client_tool_search="function",
     )
     seen = []
 

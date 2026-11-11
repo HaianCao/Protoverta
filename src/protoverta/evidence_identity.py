@@ -30,4 +30,7 @@ def route_identity(config: Any) -> str:
 
 
 def evidence_options(config: Any) -> dict[str, Any]:
-    return {"current_identity": route_identity(config) if config.require_current_evidence else None, "max_age_days": config.evidence_max_age_days}
+    return {
+        "current_identity": route_identity(config) if config.require_current_evidence else None,
+        "max_age_days": config.evidence_max_age_days,
+    }

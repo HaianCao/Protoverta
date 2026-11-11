@@ -53,7 +53,11 @@ class NamespaceMap:
         inputs = result.get("input")
         if isinstance(inputs, list):
             for item in inputs:
-                if isinstance(item, dict) and item.get("type") in ("function_call", "custom_tool_call") and item.get("namespace") is None:
+                if (
+                    isinstance(item, dict)
+                    and item.get("type") in ("function_call", "custom_tool_call")
+                    and item.get("namespace") is None
+                ):
                     self.flat_names.add(_name(item.get("name"), "historical function name"))
         flattened: list[Any] = []
         seen: set[tuple[str, str]] = set()
@@ -75,7 +79,11 @@ class NamespaceMap:
             if not isinstance(children, list) or not children:
                 raise ConversionError("namespace must contain function tools")
             for child in children:
-                if not isinstance(child, dict) or child.get("type") != "function" or set(child) - {"type", "name", "description", "parameters", "strict"}:
+                if (
+                    not isinstance(child, dict)
+                    or child.get("type") != "function"
+                    or set(child) - {"type", "name", "description", "parameters", "strict"}
+                ):
                     raise ConversionError("namespace mapping supports only synchronous function tools")
                 if child.get("strict") not in (None, False):
                     raise ConversionError("strict namespaced functions are not portable")

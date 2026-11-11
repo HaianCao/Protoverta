@@ -42,7 +42,11 @@ class Scenario(parallel.Scenario):
 
     def open(self, request, *, timeout):
         body = json.loads(request.data)
-        expected = {Protocol.CHAT: "/v1/chat/completions", Protocol.MESSAGES: "/v1/messages", Protocol.RESPONSES: "/v1/responses"}[self.protocol]
+        expected = {
+            Protocol.CHAT: "/v1/chat/completions",
+            Protocol.MESSAGES: "/v1/messages",
+            Protocol.RESPONSES: "/v1/responses",
+        }[self.protocol]
         text = single.user_text(body, self.protocol)
         role = "child" if TASK in text or RESUME_TASK in text else "parent"
         if urlsplit(request.full_url).path != expected or body.get("model") != (MAIN if role == "parent" else CHILD):
@@ -64,31 +68,54 @@ class Scenario(parallel.Scenario):
             if stage == 2 and single.VALUE in json.dumps(records.get("p06_child_read")):
                 self.first_done.set()
                 return single.encode(self.protocol, CHILD, text=FIRST)
-            if stage == 3 and RESUME_TASK in json.dumps(body) and FIRST in json.dumps(body) and single.VALUE in json.dumps(body):
+            if (
+                stage == 3
+                and RESUME_TASK in json.dumps(body)
+                and FIRST in json.dumps(body)
+                and single.VALUE in json.dumps(body)
+            ):
                 self.history_verified = True
                 self.resumed.set()
                 return single.encode(self.protocol, CHILD, text=RESUMED)
             raise ValueError("Child model read failed")
         if stage == 1:
-            names = {NamespaceMap().alias("multi_agent_v1", name) for name in ("spawn_agent", "resume_agent", "close_agent", "send_input", "wait_agent")}
+            names = {
+                NamespaceMap().alias("multi_agent_v1", name)
+                for name in ("spawn_agent", "resume_agent", "close_agent", "send_input", "wait_agent")
+            }
             self.schemas = {
                 tool["name"]: tool.get("parameters")
                 for tool in tools
                 if isinstance(tool.get("name"), str)
-                and (tool["name"] in names or any(word in tool["name"].lower() for word in ("agent", "send_input", "message")))
+                and (
+                    tool["name"] in names
+                    or any(word in tool["name"].lower() for word in ("agent", "send_input", "message"))
+                )
             }
             tool = single.find_tool(tools, "agent" if self.client == "claude" else "spawn_agent")
             args = (
-                {"prompt": TASK, "description": "Read local fixture", "subagent_type": "p04-worker", "run_in_background": True}
+                {
+                    "prompt": TASK,
+                    "description": "Read local fixture",
+                    "subagent_type": "p04-worker",
+                    "run_in_background": True,
+                }
                 if self.client == "claude"
                 else {"message": TASK}
             )
             return parallel.calls_wire(self.protocol, MAIN, [(tool, args, "p06_spawn")])
         self.child_id = cancel.task_identifier(records.get("p06_spawn"))
-        first_received = cancel.notification_evidence(body, self.child_id, FIRST)[0] if self.client == "claude" else FIRST in json.dumps(records)
+        first_received = (
+            cancel.notification_evidence(body, self.child_id, FIRST)[0]
+            if self.client == "claude"
+            else FIRST in json.dumps(records)
+        )
         if self.phase == "first" and first_received:
             self.phase = "closing" if self.closed_resume else "wait-resume"
-            tool = single.find_tool(tools, "close_agent" if self.closed_resume else "sendmessage" if self.client == "claude" else "send_input")
+            tool = single.find_tool(
+                tools,
+                "close_agent" if self.closed_resume else "sendmessage" if self.client == "claude" else "send_input",
+            )
             args = (
                 {"target": self.child_id}
                 if self.closed_resume
@@ -101,15 +128,33 @@ class Scenario(parallel.Scenario):
             if not self.first_done.wait(6):
                 raise ValueError("Claude background model B did not finish")
             return parallel.calls_wire(
-                self.protocol, MAIN, [(single.find_tool(tools, "read"), {"file_path": str(self.root / "fixture.txt")}, f"p06_first_notification_{stage}")]
+                self.protocol,
+                MAIN,
+                [
+                    (
+                        single.find_tool(tools, "read"),
+                        {"file_path": str(self.root / "fixture.txt")},
+                        f"p06_first_notification_{stage}",
+                    )
+                ],
             )
         if self.phase == "closing":
             self.phase = "reopening"
-            return parallel.calls_wire(self.protocol, MAIN, [(single.find_tool(tools, "resume_agent"), {"id": self.child_id}, "p06_reopen")])
+            return parallel.calls_wire(
+                self.protocol, MAIN, [(single.find_tool(tools, "resume_agent"), {"id": self.child_id}, "p06_reopen")]
+            )
         if self.phase == "reopening":
             self.phase = "wait-resume"
             return parallel.calls_wire(
-                self.protocol, MAIN, [(single.find_tool(tools, "send_input"), {"target": self.child_id, "message": RESUME_TASK}, "p06_send")]
+                self.protocol,
+                MAIN,
+                [
+                    (
+                        single.find_tool(tools, "send_input"),
+                        {"target": self.child_id, "message": RESUME_TASK},
+                        "p06_send",
+                    )
+                ],
             )
         if self.phase == "wait-resume":
             if self.client == "claude":
@@ -119,7 +164,15 @@ class Scenario(parallel.Scenario):
                 if not self.resumed.wait(6):
                     raise ValueError("Claude child did not resume via native SendMessage")
                 return parallel.calls_wire(
-                    self.protocol, MAIN, [(single.find_tool(tools, "read"), {"file_path": str(self.root / "fixture.txt")}, f"p06_notification_{stage}")]
+                    self.protocol,
+                    MAIN,
+                    [
+                        (
+                            single.find_tool(tools, "read"),
+                            {"file_path": str(self.root / "fixture.txt")},
+                            f"p06_notification_{stage}",
+                        )
+                    ],
                 )
             if RESUMED in json.dumps(records):
                 return single.encode(self.protocol, MAIN, text=DONE)
@@ -127,7 +180,15 @@ class Scenario(parallel.Scenario):
                 self.resume_error = {key: value for key, value in records.items() if "errored" in json.dumps(value)}
                 return single.encode(self.protocol, MAIN, text="P06_CLOSED_RESUME_NOT_CERTIFIED")
         return parallel.calls_wire(
-            self.protocol, MAIN, [(single.find_tool(tools, "wait_agent"), {"targets": [self.child_id], "timeout_ms": 10000}, f"p06_wait_{stage}")]
+            self.protocol,
+            MAIN,
+            [
+                (
+                    single.find_tool(tools, "wait_agent"),
+                    {"targets": [self.child_id], "timeout_ms": 10000},
+                    f"p06_wait_{stage}",
+                )
+            ],
         )
 
 
@@ -156,7 +217,12 @@ def verified_lifecycle(client, stdout, child_id):
         if not isinstance(event, dict):
             continue
         item = event.get("item")
-        if not isinstance(item, dict) or event.get("type") != "item.completed" or item.get("type") != "collab_tool_call" or item.get("status") != "completed":
+        if (
+            not isinstance(item, dict)
+            or event.get("type") != "item.completed"
+            or item.get("type") != "collab_tool_call"
+            or item.get("status") != "completed"
+        ):
             continue
         if item.get("tool") == "spawn_agent":
             spawned.append((item.get("receiver_thread_ids"), item.get("prompt")))
@@ -237,7 +303,11 @@ def main():
     result = run(args.client, args.upstream, args.adapter_source, closed_resume=args.closed_resume)
     if args.report:
         args.report.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps({key: value for key, value in result.items() if key not in {"stdout", "stderr", "schemas"}}, indent=2))
+    print(
+        json.dumps(
+            {key: value for key, value in result.items() if key not in {"stdout", "stderr", "schemas"}}, indent=2
+        )
+    )
     return 0 if result["passed"] else 1
 
 

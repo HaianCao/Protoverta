@@ -210,7 +210,9 @@ def _stream_verdict(protocol: str, event: Any) -> str:
             if not isinstance(choice, dict):
                 continue
             delta = choice.get("delta")
-            if choice.get("finish_reason") or (isinstance(delta, dict) and any(delta.get(key) for key in _CHAT_OUTPUT_FIELDS)):
+            if choice.get("finish_reason") or (
+                isinstance(delta, dict) and any(delta.get(key) for key in _CHAT_OUTPUT_FIELDS)
+            ):
                 return "ok"
         return "pending"
     kind = event.event if event.event and event.event != "message" else payload.get("type")

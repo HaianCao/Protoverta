@@ -47,7 +47,13 @@ class ModelTokenCounter:
         encode: Callable[[str], Sequence[int]],
         exact: bool = False,
     ) -> None:
-        if not isinstance(model, str) or not model or not callable(render_request) or not callable(encode) or type(exact) is not bool:
+        if (
+            not isinstance(model, str)
+            or not model
+            or not callable(render_request)
+            or not callable(encode)
+            or type(exact) is not bool
+        ):
             raise ValueError("tokenizer plugin needs exact model, renderer, encoder and exactness")
         self.model, self.protocol = model, Protocol(protocol)
         self.render, self.encode, self.exact = render_request, encode, exact
@@ -59,7 +65,11 @@ class ModelTokenCounter:
         if not isinstance(rendered, str) or len(rendered.encode()) > 8 * 1024 * 1024:
             raise ConversionError("tokenizer renderer must return bounded complete input text")
         tokens = self.encode(rendered)
-        if not isinstance(tokens, (list, tuple)) or len(tokens) > 8 * 1024 * 1024 or any(type(value) is not int or value < 0 for value in tokens):
+        if (
+            not isinstance(tokens, (list, tuple))
+            or len(tokens) > 8 * 1024 * 1024
+            or any(type(value) is not int or value < 0 for value in tokens)
+        ):
             raise ConversionError("tokenizer encoder returned invalid token IDs")
         return TokenCount(len(tokens), exact=self.exact)
 
@@ -71,7 +81,9 @@ class NativeTokenCounter:
         self.config = config
         self.open = upstream_open or build_opener(_NoRedirect(), DeadlineHTTPHandler(), DeadlineHTTPSHandler()).open
 
-    def __call__(self, body: dict[str, Any], protocol: Protocol | str, *, budget: RequestBudget | None = None) -> TokenCount:
+    def __call__(
+        self, body: dict[str, Any], protocol: Protocol | str, *, budget: RequestBudget | None = None
+    ) -> TokenCount:
         config = self.config
         protocol = Protocol(protocol)
         if protocol != config.upstream_protocol or protocol == Protocol.CHAT:
@@ -86,8 +98,12 @@ class NativeTokenCounter:
         )
         if protocol == Protocol.MESSAGES:
             headers["anthropic-version"] = "2023-06-01"
-        budget = budget or RequestBudget(min(config.timeout, 10), min(config.total_timeout, 30), min(config.progress_timeout, 30))
-        request = Request(config.upstream_base_url.rstrip("/") + endpoint, data=json.dumps(payload).encode(), headers=headers)
+        budget = budget or RequestBudget(
+            min(config.timeout, 10), min(config.total_timeout, 30), min(config.progress_timeout, 30)
+        )
+        request = Request(
+            config.upstream_base_url.rstrip("/") + endpoint, data=json.dumps(payload).encode(), headers=headers
+        )
         attach_budget(request, budget)
         try:
             with self.open(request, timeout=budget.remaining()) as response:
@@ -101,14 +117,21 @@ class NativeTokenCounter:
                     raise ValueError("count response too large")
                 result = json.loads(raw)
             value = result.get("input_tokens") if isinstance(result, dict) else None
-            if type(value) is not int or value < 0 or protocol == Protocol.RESPONSES and result.get("object") != "response.input_tokens":
+            if (
+                type(value) is not int
+                or value < 0
+                or protocol == Protocol.RESPONSES
+                and result.get("object") != "response.input_tokens"
+            ):
                 raise ValueError("invalid count response")
             return TokenCount(value, exact=True)
         except HTTPError as exc:
             exc.close()
             raise NativeCountError(exc.code, exc.headers) from None
         except (TimeoutError, URLError) as exc:
-            raise NativeCountError(504 if isinstance(exc, TimeoutError) or isinstance(exc.reason, TimeoutError) else 502) from None
+            raise NativeCountError(
+                504 if isinstance(exc, TimeoutError) or isinstance(exc.reason, TimeoutError) else 502
+            ) from None
         except (OSError, ValueError, RecursionError, HTTPException):
             raise NativeCountError(502) from None
 

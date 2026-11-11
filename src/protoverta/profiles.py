@@ -52,7 +52,12 @@ def prepare_claude_request(body: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(value, dict) or "cache_control" not in value:
             return
         hint = value.pop("cache_control")
-        if not isinstance(hint, dict) or hint.get("type") != "ephemeral" or set(hint) - {"type", "ttl"} or hint.get("ttl", "5m") not in ("5m", "1h"):
+        if (
+            not isinstance(hint, dict)
+            or hint.get("type") != "ephemeral"
+            or set(hint) - {"type", "ttl"}
+            or hint.get("ttl", "5m") not in ("5m", "1h")
+        ):
             raise ConversionError("unsupported Claude cache hint")
 
     def content(blocks: Any) -> None:
@@ -86,7 +91,11 @@ def prepare_claude_request(body: dict[str, Any]) -> dict[str, Any]:
 
 
 def prepare_codex_request(
-    body: dict[str, Any], target: Protocol, *, default_max_output_tokens: int | None = None, messages_mid_system: bool = False
+    body: dict[str, Any],
+    target: Protocol,
+    *,
+    default_max_output_tokens: int | None = None,
+    messages_mid_system: bool = False,
 ) -> dict[str, Any]:
     """Adapt Codex's stateless text/function subset under an opt-in policy.
 
@@ -122,7 +131,9 @@ def prepare_codex_request(
             raise ConversionError("Codex prompt_cache_key must be a string")
         result.pop("prompt_cache_key")
     include = result.pop("include", [])
-    if not isinstance(include, list) or any(value not in ("reasoning.encrypted_content", "message.output_text.logprobs") for value in include):
+    if not isinstance(include, list) or any(
+        value not in ("reasoning.encrypted_content", "message.output_text.logprobs") for value in include
+    ):
         raise ConversionError("Codex profile only permits the encrypted reasoning include hint")
     if "message.output_text.logprobs" in include:
         result["include"] = ["message.output_text.logprobs"]

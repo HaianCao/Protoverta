@@ -22,7 +22,12 @@ from protoverta.streaming import Delta, StreamError
 def chat_result():
     return {
         "model": "m",
-        "choices": [{"finish_reason": "stop", "message": {"role": "assistant", "reasoning_content": "public analysis", "content": "answer"}}],
+        "choices": [
+            {
+                "finish_reason": "stop",
+                "message": {"role": "assistant", "reasoning_content": "public analysis", "content": "answer"},
+            }
+        ],
         "usage": {"prompt_tokens": 3, "completion_tokens": 4},
     }
 
@@ -71,14 +76,27 @@ def test_messages_never_gets_fabricated_thinking_or_signature():
     with pytest.raises(ConversionError, match="signatures"):
         convert_response(chat_result(), "chat", "messages", public_reasoning=True)
     with pytest.raises(ConversionError, match="signatures"):
-        convert_request({"model": "m", "max_tokens": 32, "messages": [chat_result()["choices"][0]["message"]]}, "chat", "messages", public_reasoning=True)
+        convert_request(
+            {"model": "m", "max_tokens": 32, "messages": [chat_result()["choices"][0]["message"]]},
+            "chat",
+            "messages",
+            public_reasoning=True,
+        )
 
 
 def wire(protocol, *, tools=False):
     encoder = StreamEncoder(protocol, public_reasoning=True)
-    deltas = [Delta("start", model="m", input_tokens=3, output_tokens=0), Delta("reasoning_text", text="public "), Delta("reasoning_text", text="analysis")]
+    deltas = [
+        Delta("start", model="m", input_tokens=3, output_tokens=0),
+        Delta("reasoning_text", text="public "),
+        Delta("reasoning_text", text="analysis"),
+    ]
     if tools:
-        deltas += [Delta("tool_start", index=0, call_id="c", name="lookup"), Delta("tool_delta", index=0, text="{}"), Delta("tool_end", index=0)]
+        deltas += [
+            Delta("tool_start", index=0, call_id="c", name="lookup"),
+            Delta("tool_delta", index=0, text="{}"),
+            Delta("tool_end", index=0),
+        ]
     else:
         deltas += [Delta("text", text="answer")]
     deltas += [Delta("finish", reason="tool_calls" if tools else "stop", input_tokens=3, output_tokens=4)]
@@ -90,7 +108,9 @@ def wire(protocol, *, tools=False):
 def test_stream_reasoning_and_answer_or_tool_remain_separate(source, target, tools):
     original = wire(source, tools=tools)
     pipeline = StreamTranscoder(source, target, public_reasoning=True)
-    output = b"".join(pipeline.feed(original[index : index + 7]) for index in range(0, len(original), 7)) + pipeline.finish()
+    output = (
+        b"".join(pipeline.feed(original[index : index + 7]) for index in range(0, len(original), 7)) + pipeline.finish()
+    )
     decoder = StreamDecoder(target, public_reasoning=True)
     deltas = [delta for event in SSEParser().feed(output) for delta in decoder.feed(event)]
     decoder.finish()

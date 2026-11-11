@@ -49,7 +49,10 @@ def fixture_server(open_upstream):
             pass
 
         def do_POST(self):
-            auth = self.headers.get("Authorization") == "Bearer fake-upstream-key" or self.headers.get("x-api-key") == "fake-upstream-key"
+            auth = (
+                self.headers.get("Authorization") == "Bearer fake-upstream-key"
+                or self.headers.get("x-api-key") == "fake-upstream-key"
+            )
             if not auth:
                 self.send_error(401)
                 return
@@ -102,7 +105,9 @@ def run_smoke(
     mcp_fixture: bool = False,
     agent_model_policy: str | None = None,
 ) -> dict:
-    if agent_model_policy is not None and (agent_model_policy not in {"inherit", "selected"} or not (adapter_source or installed_adapter)):
+    if agent_model_policy is not None and (
+        agent_model_policy not in {"inherit", "selected"} or not (adapter_source or installed_adapter)
+    ):
         raise ValueError("Agent policy fixture requires an adapter and inherit or selected policy")
     if mcp_fixture and (client != "claude" or not tool_loop or not (adapter_source or installed_adapter)):
         raise ValueError("MCP fixture requires Claude, --tool-loop and an adapter")
@@ -128,10 +133,14 @@ def run_smoke(
             name = "get_goal" if client == "codex" else "Read"
             available = {tool.get("name") or tool.get("function", {}).get("name") for tool in body.get("tools", [])}
             if mcp_fixture:
-                name = next((value for value in available if value and "fixture_lookup" in value), "missing-mcp-fixture")
+                name = next(
+                    (value for value in available if value and "fixture_lookup" in value), "missing-mcp-fixture"
+                )
             if name not in available:
                 raise RuntimeError(f"Smoke tool {name} is absent from the client request")
-            arguments = "{}" if client == "codex" or mcp_fixture else json.dumps({"file_path": str(task_root / "fixture.txt")})
+            arguments = (
+                "{}" if client == "codex" or mcp_fixture else json.dumps({"file_path": str(task_root / "fixture.txt")})
+            )
             for index in range(2):
                 deltas.extend(
                     [
@@ -158,7 +167,10 @@ def run_smoke(
                     tool_result_count = sum(item.get("role") == "tool" for item in body["messages"])
                 else:
                     tool_result_count = sum(
-                        block.get("type") == "tool_result" for item in body["messages"] for block in item.get("content", []) if isinstance(block, dict)
+                        block.get("type") == "tool_result"
+                        for item in body["messages"]
+                        for block in item.get("content", [])
+                        if isinstance(block, dict)
                     )
             deltas.extend(
                 [
@@ -216,7 +228,11 @@ def run_smoke(
                         "mcpServers": {
                             "fixture": {
                                 "command": sys.executable,
-                                "args": [str(Path(__file__).with_name("smoke_tool_search.py")), "--mcp", "--mcp-verify-env"],
+                                "args": [
+                                    str(Path(__file__).with_name("smoke_tool_search.py")),
+                                    "--mcp",
+                                    "--mcp-verify-env",
+                                ],
                                 "env_vars": ["PYTHONPATH", token_name],
                             }
                         }
@@ -239,7 +255,9 @@ def run_smoke(
             if reasoning_policy == "auto":
                 from protoverta.automatic_reasoning import automatic_reasoning
 
-                reasoning_policy, public_reasoning = automatic_reasoning("responses" if client == "codex" else "messages", upstream, upstream_origin + "/v1")
+                reasoning_policy, public_reasoning = automatic_reasoning(
+                    "responses" if client == "codex" else "messages", upstream, upstream_origin + "/v1"
+                )
             config = GatewayConfig(
                 upstream,
                 upstream_origin + "/v1",
@@ -276,7 +294,14 @@ def run_smoke(
             "adapter": "installed" if installed_adapter else (str(adapter_source) if adapter_source else None),
             "passed": result.returncode == 0
             and MARKER in result.stdout
-            and (not tool_loop or (rounds == 2 and tool_result_count == 2 and not tool_execution_failed(client, result.stdout, result.stderr))),
+            and (
+                not tool_loop
+                or (
+                    rounds == 2
+                    and tool_result_count == 2
+                    and not tool_execution_failed(client, result.stdout, result.stderr)
+                )
+            ),
             "returncode": result.returncode,
             "requests": requests,
             "rounds": rounds,
@@ -311,9 +336,13 @@ def run_client(
     agent_model_policy: str | None = None,
     agent_model_id: str | None = None,
 ):
-    if agent_model_policy is not None and (agent_model_policy not in {"inherit", "selected", "custom"} or not (adapter_source or installed_adapter)):
+    if agent_model_policy is not None and (
+        agent_model_policy not in {"inherit", "selected", "custom"} or not (adapter_source or installed_adapter)
+    ):
         raise ValueError("Agent policy fixture requires an adapter and an explicit known policy")
-    if agent_model_policy == "custom" and (not isinstance(agent_model_id, str) or not agent_model_id or any(char.isspace() for char in agent_model_id)):
+    if agent_model_policy == "custom" and (
+        not isinstance(agent_model_id, str) or not agent_model_id or any(char.isspace() for char in agent_model_id)
+    ):
         raise ValueError("Custom agent fixture requires an exact child model")
     if client == "codex":
         settings = {
@@ -463,7 +492,9 @@ def run_client(
             config_path.write_text(content, encoding="utf-8")
         if provider_id != "smoke":
             content = config_path.read_text(encoding="utf-8")
-            content = content.replace("[providers.smoke]", f"[providers.{provider_id}]").replace('id = "smoke"', f'id = "{provider_id}"')
+            content = content.replace("[providers.smoke]", f"[providers.{provider_id}]").replace(
+                'id = "smoke"', f'id = "{provider_id}"'
+            )
             config_path.write_text(content, encoding="utf-8")
             args[args.index("-p") + 1] = provider_id
             if client == "claude":
@@ -522,7 +553,11 @@ def run_client(
             raise ValueError("Tracing requires a source adapter and synthetic state")
         module_index = args.index("-m")
         module_name = args[module_index + 1]
-        args[module_index : module_index + 2] = [str(Path(__file__).with_name("trace_adapter.py")), module_name, str(trace_file)]
+        args[module_index : module_index + 2] = [
+            str(Path(__file__).with_name("trace_adapter.py")),
+            module_name,
+            str(trace_file),
+        ]
     return run_process(
         args,
         cwd=directory,
@@ -540,9 +575,19 @@ def run_client(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--client", choices=["codex", "claude"], required=True)
-    parser.add_argument("--upstream-reasoning", choices=["auto", "provider_default", "disabled", "openrouter_disabled"], default="provider_default")
-    parser.add_argument("--mcp-fixture", action="store_true", help="Claude adapter: execute the fixed read-only MCP tool")
-    parser.add_argument("--agent-model-policy", choices=["inherit", "selected"], help="Exercise an explicit launcher agent-model policy; does not spawn agents")
+    parser.add_argument(
+        "--upstream-reasoning",
+        choices=["auto", "provider_default", "disabled", "openrouter_disabled"],
+        default="provider_default",
+    )
+    parser.add_argument(
+        "--mcp-fixture", action="store_true", help="Claude adapter: execute the fixed read-only MCP tool"
+    )
+    parser.add_argument(
+        "--agent-model-policy",
+        choices=["inherit", "selected"],
+        help="Exercise an explicit launcher agent-model policy; does not spawn agents",
+    )
     parser.add_argument("--upstream", type=Protocol, choices=list(Protocol), required=True)
     parser.add_argument(
         "--model",

@@ -59,7 +59,11 @@ def test_exact_scope_copy_isolation_explicit_zero_and_evidence_identity():
     assert registry.apply(record.base_url, "chat", request_body) == before
     assert request_body == before
     assert registry.apply(record.base_url, "chat", {"model": "m"})["temperature"] == 0.7
-    for base, proto, model in ((record.base_url, "chat", "other"), ("https://other.invalid/v1", "chat", "m"), (record.base_url, "messages", "m")):
+    for base, proto, model in (
+        (record.base_url, "chat", "other"),
+        ("https://other.invalid/v1", "chat", "m"),
+        (record.base_url, "messages", "m"),
+    ):
         body = {"model": model}
         assert registry.apply(base, proto, body) == body
     with pytest.raises(TypeError):
@@ -99,10 +103,24 @@ def test_configured_default_respects_a_model_record_explicitly_rejecting_tempera
 
     assert "temperature" in request_features({"temperature": 0}, "chat")
     caps = CapabilityRegistry(
-        (CapabilityRecord("https://example.invalid/v1", "chat", "m", {"temperature": False}, "2026-11-04", "synthetic unsupported fixture"),)
+        (
+            CapabilityRecord(
+                "https://example.invalid/v1",
+                "chat",
+                "m",
+                {"temperature": False},
+                "2026-11-04",
+                "synthetic unsupported fixture",
+            ),
+        )
     )
     cfg = GatewayConfig(
-        "chat", "https://example.invalid/v1", "synthetic", "local", provider_profiles=ProviderProfiles((profile({"temperature": 0.7}),)), capabilities=caps
+        "chat",
+        "https://example.invalid/v1",
+        "synthetic",
+        "local",
+        provider_profiles=ProviderProfiles((profile({"temperature": 0.7}),)),
+        capabilities=caps,
     )
     seen = []
     with listener(cfg, lambda *a, **k: seen.append(1)) as url:

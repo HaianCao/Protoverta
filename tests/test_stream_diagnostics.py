@@ -20,7 +20,11 @@ def diagnostics_module(monkeypatch):
 
 
 def chat_chunk(delta, reason=None, usage=None):
-    body = {"object": "chat.completion.chunk", "model": "synthetic", "choices": [{"index": 0, "delta": delta, "finish_reason": reason}]}
+    body = {
+        "object": "chat.completion.chunk",
+        "model": "synthetic",
+        "choices": [{"index": 0, "delta": delta, "finish_reason": reason}],
+    }
     if usage is not None:
         body["usage"] = usage
     return encode_sse("message", json.dumps(body))
@@ -30,14 +34,28 @@ def tool_stream(*, usage=False):
     wire = chat_chunk(
         {
             "role": "assistant",
-            "tool_calls": [{"index": 0, "id": "private-call-id", "type": "function", "function": {"name": "private-tool-name", "arguments": "{}"}}],
+            "tool_calls": [
+                {
+                    "index": 0,
+                    "id": "private-call-id",
+                    "type": "function",
+                    "function": {"name": "private-tool-name", "arguments": "{}"},
+                }
+            ],
         }
     )
     wire += chat_chunk({}, "tool_calls")
     if usage:
         wire += encode_sse(
             "message",
-            json.dumps({"object": "chat.completion.chunk", "model": "synthetic", "choices": [], "usage": {"prompt_tokens": 3, "completion_tokens": 2}}),
+            json.dumps(
+                {
+                    "object": "chat.completion.chunk",
+                    "model": "synthetic",
+                    "choices": [],
+                    "usage": {"prompt_tokens": 3, "completion_tokens": 2},
+                }
+            ),
         )
     return wire + encode_sse("message", "[DONE]")
 
@@ -59,7 +77,9 @@ def test_missing_usage_tool_failure_is_in_encoder_without_decoder_exception(diag
 
 @pytest.mark.parametrize("target", ["responses", "messages"])
 def test_diagnostics_preserve_successful_bytes_and_clean_eof(diagnostics_module, target, monkeypatch):
-    monkeypatch.setattr("protoverta.stream_encoder.uuid", SimpleNamespace(uuid4=lambda: SimpleNamespace(hex="synthetic")))
+    monkeypatch.setattr(
+        "protoverta.stream_encoder.uuid", SimpleNamespace(uuid4=lambda: SimpleNamespace(hex="synthetic"))
+    )
     monkeypatch.setattr("protoverta.stream_encoder.time", SimpleNamespace(time=lambda: 100))
 
     def convert():
@@ -81,7 +101,9 @@ def test_diagnostics_preserve_successful_bytes_and_clean_eof(diagnostics_module,
     assert StreamTranscoder.feed.__module__ == "protoverta.stream_pipe"
 
 
-@pytest.mark.parametrize("mode,operation,category", [("utf8", "feed", "invalid_utf8"), ("incomplete_frame", "finish", "invalid_stream")])
+@pytest.mark.parametrize(
+    "mode,operation,category", [("utf8", "feed", "invalid_utf8"), ("incomplete_frame", "finish", "invalid_stream")]
+)
 def test_parser_failure_is_recorded_without_decoder_exception(diagnostics_module, mode, operation, category):
     diagnostic = diagnostics_module.StreamDiagnostics()
     with diagnostic.capture(observe_transport=False):
@@ -117,14 +139,21 @@ def test_diagnostics_retain_strict_rejection_and_never_echo_field_values(diagnos
         with pytest.raises(expected):
             pipe.feed(chat_chunk({field: "private-reasoning-key"}))
     assert diagnostic.failures[0]["stage"] == "decoder"
-    assert diagnostic.failures[0]["category"] == ("invalid_stream" if field.startswith("private") else "unsupported_reasoning")
+    assert diagnostic.failures[0]["category"] == (
+        "invalid_stream" if field.startswith("private") else "unsupported_reasoning"
+    )
     assert "private" not in json.dumps(diagnostic.snapshot())
 
 
 @pytest.mark.parametrize(
     "exc,category",
     [
-        (HTTPError("https://private-url", 429, "private-error-key", {"Retry-After": "38"}, io.BytesIO(b"private-body")), "upstream_http"),
+        (
+            HTTPError(
+                "https://private-url", 429, "private-error-key", {"Retry-After": "38"}, io.BytesIO(b"private-body")
+            ),
+            "upstream_http",
+        ),
         (URLError("private-key"), "upstream_transport"),
         (URLError(TimeoutError("private-key")), "upstream_timeout"),
     ],
@@ -165,7 +194,10 @@ def test_response_read_failure_is_distinct_from_open_failure(diagnostics_module)
             raise TimeoutError("private-key")
 
     diagnostic = diagnostics_module.StreamDiagnostics()
-    with diagnostic.wrap_open(lambda request, timeout: Response())(Request("https://example.test"), timeout=1) as proxy, pytest.raises(TimeoutError):
+    with (
+        diagnostic.wrap_open(lambda request, timeout: Response())(Request("https://example.test"), timeout=1) as proxy,
+        pytest.raises(TimeoutError),
+    ):
         proxy.read1(4)
     assert diagnostic.failures == [{"stage": "transport", "operation": "read", "category": "upstream_timeout"}]
 
@@ -194,7 +226,11 @@ def test_shape_never_echoes_unknown_object_finish_reason_or_function_fields(diag
                 {
                     "id": "private-id",
                     "private-field": "private-value",
-                    "function": {"name": "private-name", "arguments": "private-arguments", "private-signature": "private-state"},
+                    "function": {
+                        "name": "private-name",
+                        "arguments": "private-arguments",
+                        "private-signature": "private-state",
+                    },
                 }
             ]
         },

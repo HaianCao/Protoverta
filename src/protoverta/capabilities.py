@@ -80,7 +80,9 @@ class RouteCapabilityRecord:
     identity: str | None = None
 
     def __post_init__(self) -> None:
-        record = CapabilityRecord(self.base_url, self.protocol, self.model, self.features, self.checked_at, self.evidence)
+        record = CapabilityRecord(
+            self.base_url, self.protocol, self.model, self.features, self.checked_at, self.evidence
+        )
         object.__setattr__(self, "base_url", record.base_url)
         object.__setattr__(self, "protocol", record.protocol)
         object.__setattr__(self, "source_protocol", Protocol(self.source_protocol))
@@ -90,7 +92,9 @@ class RouteCapabilityRecord:
         if not isinstance(self.verified_with, str) or not self.verified_with.strip():
             raise ValueError("route evidence must record tested core/client versions")
         _policy_key(self.policies)
-        if self.identity is not None and (not isinstance(self.identity, str) or not re.fullmatch(r"[a-f0-9]{64}", self.identity)):
+        if self.identity is not None and (
+            not isinstance(self.identity, str) or not re.fullmatch(r"[a-f0-9]{64}", self.identity)
+        ):
             raise ValueError("evidence identity must be a SHA-256 digest")
         object.__setattr__(self, "policies", MappingProxyType(dict(self.policies)))
 
@@ -153,7 +157,11 @@ class CapabilityRecord:
         object.__setattr__(self, "protocol", Protocol(self.protocol))
         if not isinstance(self.model, str) or not self.model or any(char.isspace() for char in self.model):
             raise ValueError("capability model must be an exact nonempty model ID")
-        if not isinstance(self.features, Mapping) or set(self.features) - FEATURES or any(not isinstance(value, bool) for value in self.features.values()):
+        if (
+            not isinstance(self.features, Mapping)
+            or set(self.features) - FEATURES
+            or any(not isinstance(value, bool) for value in self.features.values())
+        ):
             raise ValueError("capabilities require known feature names and boolean values")
         if not isinstance(self.checked_at, str):
             raise TypeError("checked_at must be an ISO date string")
@@ -169,7 +177,9 @@ class CapabilityRecord:
             not isinstance(self.reasoning_efforts, tuple)
             or not self.reasoning_efforts
             or any(
-                not isinstance(effort, str) or effort not in {"none", "minimal", "low", "medium", "high", "xhigh", "max"} for effort in self.reasoning_efforts
+                not isinstance(effort, str)
+                or effort not in {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+                for effort in self.reasoning_efforts
             )
             or len(set(self.reasoning_efforts)) != len(self.reasoning_efforts)
         ):
@@ -233,7 +243,8 @@ def request_features(body: dict[str, Any], protocol: Protocol | str) -> frozense
         if any(isinstance(tool, dict) and tool.get("type") == "custom" for tool in body["tools"]):
             features.add("custom_tools")
         if any(
-            isinstance(tool, dict) and (tool.get("function", tool) if protocol == Protocol.CHAT else tool).get("strict") is True
+            isinstance(tool, dict)
+            and (tool.get("function", tool) if protocol == Protocol.CHAT else tool).get("strict") is True
             for tool in body["tools"]
             if isinstance(tool, dict) and (protocol != Protocol.CHAT or isinstance(tool.get("function"), dict))
         ):
@@ -241,7 +252,12 @@ def request_features(body: dict[str, Any], protocol: Protocol | str) -> frozense
     if body.get("stop" if protocol == Protocol.CHAT else "stop_sequences") is not None:
         features.add("stop_sequences")
     choice = body.get("tool_choice")
-    if choice == "required" or isinstance(choice, dict) and isinstance(choice.get("type"), str) and choice["type"] in {"function", "custom", "tool", "any"}:
+    if (
+        choice == "required"
+        or isinstance(choice, dict)
+        and isinstance(choice.get("type"), str)
+        and choice["type"] in {"function", "custom", "tool", "any"}
+    ):
         features.add("forced_tool_choice")
     if protocol == Protocol.CHAT:
         format_value = body.get("response_format")
@@ -295,7 +311,11 @@ def request_features(body: dict[str, Any], protocol: Protocol | str) -> frozense
         if isinstance(value, list):
             return any(contains_document(item) for item in value)
         if isinstance(value, dict):
-            return value.get("type") in ("file", "input_file", "document") or contains_document(value.get("content")) or contains_document(value.get("output"))
+            return (
+                value.get("type") in ("file", "input_file", "document")
+                or contains_document(value.get("content"))
+                or contains_document(value.get("output"))
+            )
         return False
 
     if contains_document(body.get("messages", body.get("input"))):
@@ -325,7 +345,11 @@ def request_features(body: dict[str, Any], protocol: Protocol | str) -> frozense
         if isinstance(value, list):
             return any(rich_result(item) for item in value)
         if isinstance(value, dict):
-            if isinstance(value.get("type"), str) and value["type"] in {"tool_result", "function_call_output", "custom_tool_call_output"}:
+            if isinstance(value.get("type"), str) and value["type"] in {
+                "tool_result",
+                "function_call_output",
+                "custom_tool_call_output",
+            }:
                 return contains_image(value.get("content", value.get("output")))
             return rich_result(value.get("content"))
         return False
@@ -337,14 +361,22 @@ def request_features(body: dict[str, Any], protocol: Protocol | str) -> frozense
         isinstance(item, dict)
         and (
             item.get("type") in ("custom_tool_call", "custom_tool_call_output")
-            or any(isinstance(call, dict) and call.get("type") == "custom" for call in (item["tool_calls"] if isinstance(item.get("tool_calls"), list) else []))
+            or any(
+                isinstance(call, dict) and call.get("type") == "custom"
+                for call in (item["tool_calls"] if isinstance(item.get("tool_calls"), list) else [])
+            )
         )
         for item in history
     ):
         features.add("custom_tools")
     if isinstance(history, list) and any(
         isinstance(item, dict)
-        and (item.get("role") == "assistant" and item.get("reasoning_content") is not None or item.get("type") == "reasoning" and bool(item.get("content")))
+        and (
+            item.get("role") == "assistant"
+            and item.get("reasoning_content") is not None
+            or item.get("type") == "reasoning"
+            and bool(item.get("content"))
+        )
         for item in history
     ):
         features.add("public_reasoning")
@@ -359,7 +391,9 @@ class CapabilityRegistry:
     names or catalogs.
     """
 
-    def __init__(self, records: tuple[CapabilityRecord, ...] = (), routes: tuple[RouteCapabilityRecord, ...] = ()) -> None:
+    def __init__(
+        self, records: tuple[CapabilityRecord, ...] = (), routes: tuple[RouteCapabilityRecord, ...] = ()
+    ) -> None:
         index: dict[tuple[str, Protocol | str, str], CapabilityRecord] = {}
         for record in records:
             if not isinstance(record, CapabilityRecord):
@@ -373,7 +407,15 @@ class CapabilityRegistry:
         for route in routes:
             if not isinstance(route, RouteCapabilityRecord):
                 raise TypeError("route entries must be RouteCapabilityRecord instances")
-            route_key = (route.base_url, route.protocol, route.model, route.source_protocol, route.streaming, route.client_profile, _policy_key(route.policies))
+            route_key = (
+                route.base_url,
+                route.protocol,
+                route.model,
+                route.source_protocol,
+                route.streaming,
+                route.client_profile,
+                _policy_key(route.policies),
+            )
             if route_key in route_index:
                 raise ValueError("duplicate exact route capability record")
             route_index[route_key] = route
@@ -385,12 +427,17 @@ class CapabilityRegistry:
             not isinstance(body, dict)
             or type(body.get("schema_version")) is not int
             or body["schema_version"] not in {1, 2, 3}
-            or set(body) != ({"schema_version", "models", "routes"} if body["schema_version"] == 3 else {"schema_version", "models"})
+            or set(body)
+            != ({"schema_version", "models", "routes"} if body["schema_version"] == 3 else {"schema_version", "models"})
             or not isinstance(body["models"], list)
         ):
             raise ValueError("invalid capability registry schema")
         fields = {"base_url", "protocol", "model", "features", "checked_at", "evidence"}
-        optional = {"max_output_tokens", "context_window_tokens", "reasoning_efforts"} if body["schema_version"] >= 2 else set()
+        optional = (
+            {"max_output_tokens", "context_window_tokens", "reasoning_efforts"}
+            if body["schema_version"] >= 2
+            else set()
+        )
         records = []
         for item in body["models"]:
             if not isinstance(item, dict) or not fields <= set(item) or set(item) - fields - optional:
@@ -423,12 +470,25 @@ class CapabilityRegistry:
         current_identity: str | None = None,
         max_age_days: int | None = None,
     ) -> CapabilityReport:
-        if not isinstance(model, str) or not model or type(streaming) is not bool or client_profile not in ("strict", "codex", "claude"):
+        if (
+            not isinstance(model, str)
+            or not model
+            or type(streaming) is not bool
+            or client_profile not in ("strict", "codex", "claude")
+        ):
             raise ValueError("invalid exact route selector")
         requested = frozenset(features)
         if requested - FEATURES:
             raise ValueError("unknown requested route capability")
-        key = (_prefix(base_url), Protocol(protocol), model, Protocol(source_protocol), streaming, client_profile, _policy_key(policies))
+        key = (
+            _prefix(base_url),
+            Protocol(protocol),
+            model,
+            Protocol(source_protocol),
+            streaming,
+            client_profile,
+            _policy_key(policies),
+        )
         record = self._routes.get(key)
         values: Mapping[str, bool] = record.features if record else {}
         if max_age_days is not None and (type(max_age_days) is not int or max_age_days < 0):
@@ -454,7 +514,9 @@ class CapabilityRegistry:
             raise ValueError("capability registry exceeds 2 MiB")
         return cls.from_dict(json.loads(raw))
 
-    def assess(self, base_url: str, protocol: Protocol | str, model: object, features: Iterable[str]) -> CapabilityReport:
+    def assess(
+        self, base_url: str, protocol: Protocol | str, model: object, features: Iterable[str]
+    ) -> CapabilityReport:
         if not isinstance(model, str) or not model:
             raise ConversionError("capability preflight requires an exact model ID")
         requested = frozenset(features)
@@ -474,7 +536,9 @@ class CapabilityRegistry:
             raise ValueError("capability lookup requires an exact model ID")
         return self._records.get((_prefix(base_url), Protocol(protocol), model))
 
-    def preflight(self, base_url: str, protocol: Protocol | str, body: dict[str, Any], *, require_verified: bool = False) -> CapabilityReport:
+    def preflight(
+        self, base_url: str, protocol: Protocol | str, body: dict[str, Any], *, require_verified: bool = False
+    ) -> CapabilityReport:
         features = request_features(body, protocol)
         model = body.get("model")
         report = self.assess(base_url, protocol, model, features)
@@ -490,9 +554,21 @@ class CapabilityRegistry:
             if budget is not None and (type(budget) is not int or budget <= 0):
                 raise ConversionError("capability preflight requires a positive output token limit")
             if budget is not None and record.max_output_tokens is not None and budget > record.max_output_tokens:
-                raise ConversionError(f"upstream max_output_tokens limit exceeded ({record.max_output_tokens}); choose an explicit smaller budget")
+                raise ConversionError(
+                    f"upstream max_output_tokens limit exceeded ({record.max_output_tokens}); choose an explicit smaller budget"
+                )
             settings = body.get("reasoning" if protocol == Protocol.RESPONSES else "output_config")
-            effort = body.get("reasoning_effort") if protocol == Protocol.CHAT else settings.get("effort") if isinstance(settings, dict) else None
-            if effort is not None and record.reasoning_efforts is not None and (not isinstance(effort, str) or effort not in record.reasoning_efforts):
+            effort = (
+                body.get("reasoning_effort")
+                if protocol == Protocol.CHAT
+                else settings.get("effort")
+                if isinstance(settings, dict)
+                else None
+            )
+            if (
+                effort is not None
+                and record.reasoning_efforts is not None
+                and (not isinstance(effort, str) or effort not in record.reasoning_efforts)
+            ):
                 raise ConversionError("upstream does not support the requested reasoning effort")
         return report

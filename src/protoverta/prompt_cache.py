@@ -25,7 +25,9 @@ class CacheCheckpoint:
             for index, block in enumerate(system):
                 if isinstance(block, dict) and "cache_control" in block:
                     if index != len(system) - 1 or block.get("type") != "text":
-                        raise ConversionError("only an end-of-system text cache checkpoint is portable under this policy")
+                        raise ConversionError(
+                            "only an end-of-system text cache checkpoint is portable under this policy"
+                        )
                     hint = block.pop("cache_control")
                     if (
                         not isinstance(hint, dict)
@@ -41,7 +43,12 @@ class CacheCheckpoint:
                 return any(has_hint(item) for item in block)
             return isinstance(block, dict) and ("cache_control" in block or has_hint(block.get("content")))
 
-        if has_hint(value.get("messages")) or has_hint(value.get("input")) or has_hint(value.get("tools")) or has_hint(value.get("system")):
+        if (
+            has_hint(value.get("messages"))
+            or has_hint(value.get("input"))
+            or has_hint(value.get("tools"))
+            or has_hint(value.get("system"))
+        ):
             raise ConversionError("this cache checkpoint has no certified portable location")
         profiles = config.provider_profiles
         if self.hint is not None and (

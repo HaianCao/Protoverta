@@ -44,7 +44,14 @@ def _stream(target, chunks):
 
 @pytest.mark.parametrize("target", ["messages", "responses"])
 def test_json_null_function_call_and_audio_are_omitted(target):
-    message = {"role": "assistant", "content": "hi", "function_call": None, "audio": None, "tool_calls": None, "refusal": None}
+    message = {
+        "role": "assistant",
+        "content": "hi",
+        "function_call": None,
+        "audio": None,
+        "tool_calls": None,
+        "refusal": None,
+    }
     converted = convert_response(_response(message), "chat", target)
     assert "hi" in json.dumps(converted)
 
@@ -57,11 +64,19 @@ def test_json_non_null_legacy_fields_still_rejected(field, value):
 
 @pytest.mark.parametrize("target", ["messages", "responses"])
 def test_stream_null_function_call_and_audio_are_omitted(target):
-    out = _stream(target, [_chunk({"role": "assistant", "content": "hi", "function_call": None, "audio": None}), _chunk({}, "stop", usage=USAGE)])
+    out = _stream(
+        target,
+        [
+            _chunk({"role": "assistant", "content": "hi", "function_call": None, "audio": None}),
+            _chunk({}, "stop", usage=USAGE),
+        ],
+    )
     assert b"hi" in out
 
 
 @pytest.mark.parametrize("field,value", [("function_call", {"name": "f"}), ("audio", {"id": "a"})])
 def test_stream_non_null_legacy_fields_still_rejected(field, value):
     with pytest.raises(StreamError, match=field):
-        _stream("messages", [_chunk({"role": "assistant", "content": "hi", field: value}), _chunk({}, "stop", usage=USAGE)])
+        _stream(
+            "messages", [_chunk({"role": "assistant", "content": "hi", field: value}), _chunk({}, "stop", usage=USAGE)]
+        )

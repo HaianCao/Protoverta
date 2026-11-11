@@ -45,7 +45,10 @@ def fixture_server(scenario):
             pass
 
         def do_POST(self):
-            if self.headers.get("Authorization") != "Bearer fake-upstream-key" and self.headers.get("x-api-key") != "fake-upstream-key":
+            if (
+                self.headers.get("Authorization") != "Bearer fake-upstream-key"
+                and self.headers.get("x-api-key") != "fake-upstream-key"
+            ):
                 self.send_error(401)
                 return
             try:
@@ -162,9 +165,17 @@ def completed_lifecycle(client, stdout, *, failure=False, failure_match=expected
                     assigned[task] = receivers[0]
         if item.get("tool") == "wait" and isinstance(item.get("agents_states"), dict):
             for key, state in item["agents_states"].items():
-                if isinstance(state, dict) and state.get("status") == "completed" and isinstance(state.get("message"), str):
+                if (
+                    isinstance(state, dict)
+                    and state.get("status") == "completed"
+                    and isinstance(state.get("message"), str)
+                ):
                     waited[key] = state.get("message")
-                elif isinstance(state, dict) and state.get("status") == "errored" and failure_match(str(state.get("message"))):
+                elif (
+                    isinstance(state, dict)
+                    and state.get("status") == "errored"
+                    and failure_match(str(state.get("message")))
+                ):
                     failed.add(key)
     if len(assigned) != 2 or len(children) != 2 or children != set(assigned.values()):
         return False
@@ -194,7 +205,11 @@ class Scenario:
         raise ExpectedRejection
 
     def open(self, request, *, timeout):
-        expected_path = {Protocol.CHAT: "/v1/chat/completions", Protocol.RESPONSES: "/v1/responses", Protocol.MESSAGES: "/v1/messages"}[self.protocol]
+        expected_path = {
+            Protocol.CHAT: "/v1/chat/completions",
+            Protocol.RESPONSES: "/v1/responses",
+            Protocol.MESSAGES: "/v1/messages",
+        }[self.protocol]
         if urlsplit(request.full_url).path != expected_path:
             raise ValueError("Unexpected upstream endpoint")
         body = json.loads(request.data)
@@ -215,7 +230,9 @@ class Scenario:
         with self.lock:
             self.stages[role] += 1
             stage = self.stages[role]
-            self.observed.append({"role": role, "stage": stage, "model": body["model"], "result_call_ids": sorted(records)})
+            self.observed.append(
+                {"role": role, "stage": stage, "model": body["model"], "result_call_ids": sorted(records)}
+            )
             if len(self.observed) > 16:
                 raise ValueError("Bounded fixture inference budget exhausted")
         if role != "parent":
@@ -259,9 +276,17 @@ class Scenario:
                 ],
             )
         if self.client == "codex" and stage <= 2:
-            return calls_wire(self.protocol, body["model"], [(spawn, {"message": TASKS[stage - 1] + " Read the local fixture"}, f"spawn_{stage - 1}")])
+            return calls_wire(
+                self.protocol,
+                body["model"],
+                [(spawn, {"message": TASKS[stage - 1] + " Read the local fixture"}, f"spawn_{stage - 1}")],
+            )
         returned = json.dumps(records)
-        complete = (self.expected_failure(returned) and FINALS[1] in returned) if self.failure else all(marker in returned for marker in FINALS)
+        complete = (
+            (self.expected_failure(returned) and FINALS[1] in returned)
+            if self.failure
+            else all(marker in returned for marker in FINALS)
+        )
         if complete:
             return single.encode(self.protocol, body["model"], text=DONE)
         if self.client == "codex":
@@ -269,10 +294,13 @@ class Scenario:
             pending = [
                 identifier
                 for index, identifier in enumerate(identifiers)
-                if FINALS[index] not in returned and not (self.failure and index == 0 and self.expected_failure(returned))
+                if FINALS[index] not in returned
+                and not (self.failure and index == 0 and self.expected_failure(returned))
             ]
             return calls_wire(
-                self.protocol, body["model"], [(single.find_tool(tools, "wait_agent"), {"targets": pending, "timeout_ms": 10000}, f"wait_{stage}")]
+                self.protocol,
+                body["model"],
+                [(single.find_tool(tools, "wait_agent"), {"targets": pending, "timeout_ms": 10000}, f"wait_{stage}")],
             )
         raise ValueError("Parent did not replay both verified child results")
 
@@ -304,7 +332,10 @@ def drive(
             args[5]["CLAUDE_CODE_MAX_RETRIES"] = "0"
         options = dict(kwargs.get("codex_config") or {})
         options["agents.max_concurrent_threads_per_session"] = 2
-        kwargs.update(codex_config=options, prompt="Explicitly delegate two independent read-only tasks to two subagents, wait for both, then summarize.")
+        kwargs.update(
+            codex_config=options,
+            prompt="Explicitly delegate two independent read-only tasks to two subagents, wait for both, then summarize.",
+        )
         if getattr(scenario, "capture_trace", False):
             kwargs["trace_file"] = scenario.root / "fault-trace.json"
         result = original_client(*args, **kwargs)
@@ -380,7 +411,12 @@ def main():
     result = run(args.client, args.upstream, args.adapter_source, failure=args.failure_429)
     if args.report:
         args.report.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps({key: value for key, value in result.items() if not result["passed"] or key not in {"stdout", "stderr"}}, indent=2))
+    print(
+        json.dumps(
+            {key: value for key, value in result.items() if not result["passed"] or key not in {"stdout", "stderr"}},
+            indent=2,
+        )
+    )
     return 0 if result["passed"] else 1
 
 

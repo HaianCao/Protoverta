@@ -29,7 +29,9 @@ def test_only_explicit_codex_profile_omits_blank_post_tool_placeholder(text):
     assert body == original
 
 
-@pytest.mark.parametrize("extra", [{"text": "Meaningful commentary"}, {"annotations": [{"type": "url_citation"}]}, {"unknown": True}])
+@pytest.mark.parametrize(
+    "extra", [{"text": "Meaningful commentary"}, {"annotations": [{"type": "url_citation"}]}, {"unknown": True}]
+)
 def test_profile_never_discards_meaningful_or_unsupported_post_tool_content(extra):
     body = request("\n")
     body["input"][1]["content"][0].update(extra)

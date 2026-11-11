@@ -30,7 +30,9 @@ from protoverta.streaming import Delta
 CODEX_COMPACT_PROMPT_MARKER = "CONTEXT CHECKPOINT COMPACTION"
 CODEX_COMPACT_HANDOFF_MARKER = "Another language model started to solve this problem and produced a summary"
 CLAUDE_COMPACT_PROMPT_MARKER = "CRITICAL: Respond with TEXT ONLY. Do NOT call any tools."
-CLAUDE_COMPACT_HANDOFF_MARKER = "Continue the conversation from where it left off without asking the user any further questions."
+CLAUDE_COMPACT_HANDOFF_MARKER = (
+    "Continue the conversation from where it left off without asking the user any further questions."
+)
 
 
 def classify_compaction_request(client: str, serialized_body: str) -> dict[str, bool]:
@@ -99,7 +101,9 @@ def run_compaction_smoke(
                     Delta("finish", reason="stop", input_tokens=500, output_tokens=20),
                 ]
             else:
-                answer = final_marker if flags["has_compacted_summary"] and summary_replayed else "COMPACT_SUMMARY_MISSING"
+                answer = (
+                    final_marker if flags["has_compacted_summary"] and summary_replayed else "COMPACT_SUMMARY_MISSING"
+                )
                 deltas = [
                     Delta("start", model=body["model"], input_tokens=200, output_tokens=0),
                     Delta("text", text=answer),
@@ -135,22 +139,32 @@ def run_compaction_smoke(
                     Delta("start", model=body["model"], input_tokens=500, output_tokens=1),
                     Delta(
                         "text",
-                        text=(f"<analysis>Read two fixture files.</analysis>\n<summary>Primary Request: Read fixtures ({summary_nonce}) and finish.</summary>"),
+                        text=(
+                            f"<analysis>Read two fixture files.</analysis>\n<summary>Primary Request: Read fixtures ({summary_nonce}) and finish.</summary>"
+                        ),
                     ),
                     Delta("finish", reason="stop", input_tokens=500, output_tokens=30),
                 ]
             else:
-                answer = final_marker if flags["has_compacted_summary"] and summary_replayed else "COMPACT_SUMMARY_MISSING"
+                answer = (
+                    final_marker if flags["has_compacted_summary"] and summary_replayed else "COMPACT_SUMMARY_MISSING"
+                )
                 deltas = [
                     Delta("start", model=body["model"], input_tokens=200, output_tokens=1),
                     Delta("text", text=answer),
                     Delta("finish", reason="stop", input_tokens=200, output_tokens=10),
                 ]
-        return io.BytesIO(b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta)))
+        return io.BytesIO(
+            b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta))
+        )
 
     with tempfile.TemporaryDirectory(prefix="protoverta-compact-") as directory:
         root = Path(directory)
-        env = {name: value for name, value in os.environ.items() if name.upper() in {"PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP"}}
+        env = {
+            name: value
+            for name, value in os.environ.items()
+            if name.upper() in {"PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP"}
+        }
         env.update(
             {
                 "HOME": directory,

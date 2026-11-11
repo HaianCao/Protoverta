@@ -11,7 +11,9 @@ def test_fixture_codex_settings_are_launcher_decisions(monkeypatch):
     decisions = ["features.multi_agent=false", "agents.enabled=false", 'web_search="disabled"']
     policy = types.SimpleNamespace(cross_protocol_overrides=lambda prefix: decisions if prefix == ["fixture"] else [])
     monkeypatch.setattr(harness_policy, "_policy", lambda package, source: policy)
-    assert harness_policy.codex_settings("fixture") == {key: json.loads(value) for key, value in (item.split("=", 1) for item in decisions)}
+    assert harness_policy.codex_settings("fixture") == {
+        key: json.loads(value) for key, value in (item.split("=", 1) for item in decisions)
+    }
 
 
 def test_fixture_claude_environment_uses_launcher_decisions(monkeypatch):
@@ -49,7 +51,10 @@ def test_claude_batch_probe_resolves_npm_prefix(tmp_path):
     directory = tmp_path / "src" / "claudapter"
     directory.mkdir(parents=True)
     (directory / "harness.py").write_text(
-        'def cross_protocol_environment(prefix):\n    assert prefix == ["node.exe", "cli.js"]\n    return {"fixture": "ok"}\n', encoding="utf-8"
+        'def cross_protocol_environment(prefix):\n    assert prefix == ["node.exe", "cli.js"]\n    return {"fixture": "ok"}\n',
+        encoding="utf-8",
     )
-    (directory / "command.py").write_text('def command_prefix(*args):\n    return ["node.exe", "cli.js"]\n', encoding="utf-8")
+    (directory / "command.py").write_text(
+        'def command_prefix(*args):\n    return ["node.exe", "cli.js"]\n', encoding="utf-8"
+    )
     assert harness_policy.claude_environment([str(Path("claude.cmd"))], tmp_path) == {"fixture": "ok"}

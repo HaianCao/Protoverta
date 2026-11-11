@@ -52,7 +52,12 @@ def test_messages_signed_thinking_history_is_not_silently_replayed():
     body = {
         "model": "m",
         "max_tokens": 128,
-        "messages": [{"role": "assistant", "content": [{"type": "thinking", "thinking": "private", "signature": "opaque-signature"}]}],
+        "messages": [
+            {
+                "role": "assistant",
+                "content": [{"type": "thinking", "thinking": "private", "signature": "opaque-signature"}],
+            }
+        ],
     }
     with pytest.raises(ConversionError):
         convert_request(body, "messages", "chat")

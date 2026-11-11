@@ -122,7 +122,10 @@ def test_deadlines_bound_chunked_framing_and_body(framing, deadline):
         request = Request(f"http://127.0.0.1:{server.server_port}")
         request.protoverta_budget = budget
         start = time.monotonic()
-        with build_opener(DeadlineHTTPHandler()).open(request, timeout=budget.remaining()) as response, pytest.raises(DeadlineExceeded) as caught:
+        with (
+            build_opener(DeadlineHTTPHandler()).open(request, timeout=budget.remaining()) as response,
+            pytest.raises(DeadlineExceeded) as caught,
+        ):
             assert started_drip.wait(1)
             while budget.read(response, 4096, streaming=framing != "body"):
                 pass
@@ -140,7 +143,16 @@ def test_heartbeats_and_repeated_function_metadata_are_not_progress():
     for _ in range(3):
         limits.observe(SSEEvent("ping", '{"type":"ping"}'))
     assert limits.progress == 0
-    event = SSEEvent("message", json.dumps({"choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "function": {"name": "fn", "arguments": ""}}]}}]}))
+    event = SSEEvent(
+        "message",
+        json.dumps(
+            {
+                "choices": [
+                    {"index": 0, "delta": {"tool_calls": [{"index": 0, "function": {"name": "fn", "arguments": ""}}]}}
+                ]
+            }
+        ),
+    )
     limits.observe(event)
     before = limits.progress
     limits.observe(event)
@@ -161,7 +173,9 @@ def test_native_initial_tool_inputs_also_count_toward_argument_budget(block):
         limits.observe(event)
 
 
-@pytest.mark.parametrize("factory", [lambda **kw: StreamTranscoder("chat", "responses", **kw), lambda **kw: StreamValidator("chat", **kw)])
+@pytest.mark.parametrize(
+    "factory", [lambda **kw: StreamTranscoder("chat", "responses", **kw), lambda **kw: StreamValidator("chat", **kw)]
+)
 def test_native_and_translated_total_stream_limits(factory):
     pipe = factory(max_stream_bytes=10)
     with pytest.raises(StreamError, match="total byte"):
@@ -173,7 +187,11 @@ def test_native_and_translated_total_stream_limits(factory):
         "choices": [
             {
                 "index": 0,
-                "delta": {"tool_calls": [{"index": 0, "id": "a", "type": "function", "function": {"name": "f", "arguments": "12345"}}]},
+                "delta": {
+                    "tool_calls": [
+                        {"index": 0, "id": "a", "type": "function", "function": {"name": "f", "arguments": "12345"}}
+                    ]
+                },
                 "finish_reason": None,
             }
         ],
@@ -181,14 +199,22 @@ def test_native_and_translated_total_stream_limits(factory):
     with pytest.raises(StreamError, match="arguments exceed"):
         pipe.feed(encode_sse("message", json.dumps(body)))
     pipe = factory(max_stream_items=1)
-    body["choices"][0]["delta"]["tool_calls"] = [{"index": i, "id": str(i), "function": {"name": "f", "arguments": ""}} for i in (0, 1)]
+    body["choices"][0]["delta"]["tool_calls"] = [
+        {"index": i, "id": str(i), "function": {"name": "f", "arguments": ""}} for i in (0, 1)
+    ]
     with pytest.raises(StreamError, match="item limit"):
         pipe.feed(encode_sse("message", json.dumps(body)))
 
 
 @pytest.mark.parametrize(
     "options",
-    [{"total_timeout": float("inf")}, {"progress_timeout": True}, {"max_stream_bytes": 0}, {"max_stream_items": 1.5}, {"max_tool_argument_bytes": False}],
+    [
+        {"total_timeout": float("inf")},
+        {"progress_timeout": True},
+        {"max_stream_bytes": 0},
+        {"max_stream_items": 1.5},
+        {"max_tool_argument_bytes": False},
+    ],
 )
 def test_config_rejects_invalid_resource_budgets(options):
     with pytest.raises(ValueError):

@@ -55,7 +55,11 @@ class ProviderProfile:
         if self.sampling_defaults is not None:
             from .core import _optional_temperature, _optional_top_p
 
-            if not isinstance(self.sampling_defaults, Mapping) or not self.sampling_defaults or set(self.sampling_defaults) - {"temperature", "top_p"}:
+            if (
+                not isinstance(self.sampling_defaults, Mapping)
+                or not self.sampling_defaults
+                or set(self.sampling_defaults) - {"temperature", "top_p"}
+            ):
                 raise ValueError("sampling defaults require explicit temperature/top_p values")
             normalized = {}
             for key, value in self.sampling_defaults.items():
@@ -81,7 +85,8 @@ class ProviderProfile:
             ):
                 raise ValueError("reasoning mapping requires equivalent-effort evidence")
             if any(
-                type(value) not in (str, bool, int) or isinstance(value, str) and (not value or len(value) > 64) for value in self.reasoning_values.values()
+                type(value) not in (str, bool, int) or isinstance(value, str) and (not value or len(value) > 64)
+                for value in self.reasoning_values.values()
             ):
                 raise ValueError("reasoning values must be bounded JSON scalars")
             if len({(type(value), value) for value in self.reasoning_values.values()}) != len(self.reasoning_values):
@@ -108,7 +113,9 @@ class ProviderProfile:
                         or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", dst_param)
                         or src_param == dst_param
                     ):
-                        raise ValueError("parameter_aliases requires distinct non-empty source and portable target parameter names")
+                        raise ValueError(
+                            "parameter_aliases requires distinct non-empty source and portable target parameter names"
+                        )
                 if len(set(param_map.values())) != len(param_map):
                     raise ValueError("parameter_aliases mapping must be injective")
                 if set(param_map.keys()) & set(param_map.values()):
@@ -148,7 +155,11 @@ class GenerationProfile:
         if self.sampling_defaults is not None:
             from .core import _optional_temperature, _optional_top_p
 
-            if not isinstance(self.sampling_defaults, Mapping) or not self.sampling_defaults or set(self.sampling_defaults) - {"temperature", "top_p"}:
+            if (
+                not isinstance(self.sampling_defaults, Mapping)
+                or not self.sampling_defaults
+                or set(self.sampling_defaults) - {"temperature", "top_p"}
+            ):
                 raise ValueError("sampling defaults require explicit temperature/top_p values")
             normalized = {}
             for key, value in self.sampling_defaults.items():
@@ -189,7 +200,9 @@ class ProviderProfiles:
 
     def supports_prompt_cache(self, base_url: str, protocol: Protocol | str, model: Any) -> bool:
         record = self._records.get((_prefix(base_url), Protocol(protocol), model))
-        return record is not None and getattr(record, "prompt_cache_semantics", None) == "anthropic_ephemeral_system_end"
+        return (
+            record is not None and getattr(record, "prompt_cache_semantics", None) == "anthropic_ephemeral_system_end"
+        )
 
     def supports_responses_penalties(self, base_url: str, protocol: Protocol | str, model: Any) -> bool:
         if not isinstance(model, str):
@@ -278,7 +291,9 @@ class ProviderProfiles:
         _restore_parameter_aliases_response(result, aliases)
         return result
 
-    def stream_delta_restorer(self, base_url: str, protocol: Protocol | str, model: Any) -> Callable[[Delta], list[Delta]] | None:
+    def stream_delta_restorer(
+        self, base_url: str, protocol: Protocol | str, model: Any
+    ) -> Callable[[Delta], list[Delta]] | None:
         aliases = self._aliases(base_url, protocol, model)
         if aliases is None:
             return None
@@ -296,7 +311,12 @@ class _StreamParameterAliasRestorer:
 
         from .streaming import Delta, StreamError
 
-        if delta.kind == "tool_start" and delta.tool_type == "function" and delta.name is not None and delta.name in self.reverse_aliases:
+        if (
+            delta.kind == "tool_start"
+            and delta.tool_type == "function"
+            and delta.name is not None
+            and delta.name in self.reverse_aliases
+        ):
             self._active[delta.position] = (delta.name, [])
             return [delta]
         if delta.kind == "tool_delta" and delta.index in self._active:
@@ -368,7 +388,9 @@ def _apply_parameter_aliases_request(body: dict[str, Any], aliases: Mapping[str,
                     if item in param_map:
                         new_req.append(param_map[item])
                     elif item in set(param_map.values()):
-                        raise ConversionError(f"collision with reserved parameter alias {item!r} in required list for {name!r}")
+                        raise ConversionError(
+                            f"collision with reserved parameter alias {item!r} in required list for {name!r}"
+                        )
                     else:
                         new_req.append(item)
                 if len(set(new_req)) != len(new_req):
@@ -378,7 +400,11 @@ def _apply_parameter_aliases_request(body: dict[str, Any], aliases: Mapping[str,
         if not isinstance(msg, dict) or msg.get("role") != "assistant":
             continue
         for call in msg.get("tool_calls", []) if isinstance(msg.get("tool_calls"), list) else []:
-            if not isinstance(call, dict) or call.get("type") != "function" or not isinstance(call.get("function"), dict):
+            if (
+                not isinstance(call, dict)
+                or call.get("type") != "function"
+                or not isinstance(call.get("function"), dict)
+            ):
                 continue
             fn = call["function"]
             name = fn.get("name")
@@ -393,7 +419,11 @@ def _restore_parameter_aliases_response(body: dict[str, Any], aliases: Mapping[s
             continue
         msg = choice["message"]
         for call in msg.get("tool_calls", []) if isinstance(msg.get("tool_calls"), list) else []:
-            if not isinstance(call, dict) or call.get("type") != "function" or not isinstance(call.get("function"), dict):
+            if (
+                not isinstance(call, dict)
+                or call.get("type") != "function"
+                or not isinstance(call.get("function"), dict)
+            ):
                 continue
             fn = call["function"]
             name = fn.get("name")

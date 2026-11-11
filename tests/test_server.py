@@ -15,15 +15,26 @@ def test_native_error_preserves_body_and_retry_headers():
     original = b'{"type":"error","error":{"type":"invalid_request_error","message":"thinking.type is unsupported"}}'
 
     def upstream_open(request, *, timeout):
-        raise HTTPError(request.full_url, 400, "Bad Request", {"retry-after": "5", "x-should-retry": "false", "Authorization": "secret"}, io.BytesIO(original))
+        raise HTTPError(
+            request.full_url,
+            400,
+            "Bad Request",
+            {"retry-after": "5", "x-should-retry": "false", "Authorization": "secret"},
+            io.BytesIO(original),
+        )
 
     server = ThreadingHTTPServer(
-        ("127.0.0.1", 0), make_handler(GatewayConfig("messages", "https://example.com/v1", "key", "local"), upstream_open=upstream_open)
+        ("127.0.0.1", 0),
+        make_handler(GatewayConfig("messages", "https://example.com/v1", "key", "local"), upstream_open=upstream_open),
     )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        request = Request(f"http://127.0.0.1:{server.server_port}/v1/messages", data=b'{"model":"m"}', headers={"Authorization": "Bearer local"})
+        request = Request(
+            f"http://127.0.0.1:{server.server_port}/v1/messages",
+            data=b'{"model":"m"}',
+            headers={"Authorization": "Bearer local"},
+        )
         with pytest.raises(HTTPError) as caught:
             urlopen(request, timeout=3)
         assert caught.value.read() == original
@@ -40,11 +51,26 @@ def test_native_error_preserves_body_and_retry_headers():
 def test_base_url_joining_and_validation():
     config = GatewayConfig(Protocol.MESSAGES, "https://example.com/v1", "key", "local", "x-api-key")
     assert config.upstream_url == "https://example.com/v1/messages"
-    assert GatewayConfig(Protocol.CHAT, "https://example.com", "key", "local").upstream_url == "https://example.com/chat/completions"
-    assert GatewayConfig(Protocol.CHAT, "https://example.com/api/v1", "key", "local").upstream_url == "https://example.com/api/v1/chat/completions"
-    assert GatewayConfig(Protocol.MESSAGES, "https://example.com/prefix", "key", "local").upstream_url == "https://example.com/prefix/messages"
-    assert GatewayConfig(Protocol.CHAT, "https://example.com/api/v4", "key", "local").upstream_url == "https://example.com/api/v4/chat/completions"
-    assert GatewayConfig(Protocol.CHAT, "http://127.0.0.1:8765/v1", "key", "local").upstream_url == "http://127.0.0.1:8765/v1/chat/completions"
+    assert (
+        GatewayConfig(Protocol.CHAT, "https://example.com", "key", "local").upstream_url
+        == "https://example.com/chat/completions"
+    )
+    assert (
+        GatewayConfig(Protocol.CHAT, "https://example.com/api/v1", "key", "local").upstream_url
+        == "https://example.com/api/v1/chat/completions"
+    )
+    assert (
+        GatewayConfig(Protocol.MESSAGES, "https://example.com/prefix", "key", "local").upstream_url
+        == "https://example.com/prefix/messages"
+    )
+    assert (
+        GatewayConfig(Protocol.CHAT, "https://example.com/api/v4", "key", "local").upstream_url
+        == "https://example.com/api/v4/chat/completions"
+    )
+    assert (
+        GatewayConfig(Protocol.CHAT, "http://127.0.0.1:8765/v1", "key", "local").upstream_url
+        == "http://127.0.0.1:8765/v1/chat/completions"
+    )
     with pytest.raises(ValueError):
         GatewayConfig(Protocol.CHAT, "http://example.com/v1", "key", "local")
     with pytest.raises(ValueError, match="line breaks"):
@@ -77,7 +103,11 @@ def test_native_messages_preserves_beta_query_and_version_with_bearer_auth():
         request = Request(
             f"http://127.0.0.1:{server.server_port}/v1/messages?beta=true",
             data=b'{"model":"m","stream":false}',
-            headers={"Authorization": "Bearer local", "anthropic-version": "2023-06-01", "anthropic-beta": "fixture-beta"},
+            headers={
+                "Authorization": "Bearer local",
+                "anthropic-version": "2023-06-01",
+                "anthropic-beta": "fixture-beta",
+            },
             method="POST",
         )
         with urlopen(request, timeout=3) as response:
@@ -104,7 +134,14 @@ def test_local_auth_and_unsupported_stream_route():
         assert unauth.value.code == 401
         body = json.dumps({"model": "m", "messages": [], "max_tokens": 8, "stream": True}).encode()
         with pytest.raises(HTTPError) as unsupported:
-            urlopen(Request(url.replace("/chat/completions", "/messages"), data=body, headers={"Authorization": "Bearer local"}, method="POST"))
+            urlopen(
+                Request(
+                    url.replace("/chat/completions", "/messages"),
+                    data=body,
+                    headers={"Authorization": "Bearer local"},
+                    method="POST",
+                )
+            )
         assert unsupported.value.code == 422
     finally:
         server.shutdown()
@@ -118,11 +155,23 @@ def test_gateway_transcodes_messages_sse_to_chat_without_network():
     def upstream_open(request, *, timeout):
         captured["body"] = json.loads(request.data)
         events = [
-            ("message_start", {"type": "message_start", "message": {"model": "m", "content": [], "usage": {"input_tokens": 3}}}),
-            ("content_block_start", {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
-            ("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "pong"}}),
+            (
+                "message_start",
+                {"type": "message_start", "message": {"model": "m", "content": [], "usage": {"input_tokens": 3}}},
+            ),
+            (
+                "content_block_start",
+                {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}},
+            ),
+            (
+                "content_block_delta",
+                {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "pong"}},
+            ),
             ("content_block_stop", {"type": "content_block_stop", "index": 0}),
-            ("message_delta", {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 1}}),
+            (
+                "message_delta",
+                {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 1}},
+            ),
             ("message_stop", {"type": "message_stop"}),
         ]
         from protoverta.sse import encode_sse
@@ -136,7 +185,9 @@ def test_gateway_transcodes_messages_sse_to_chat_without_network():
     try:
         url = f"http://127.0.0.1:{server.server_port}/v1/chat/completions"
         body = {"model": "m", "messages": [{"role": "user", "content": "ping"}], "max_tokens": 8, "stream": True}
-        request = Request(url, data=json.dumps(body).encode(), headers={"Authorization": "Bearer local-token"}, method="POST")
+        request = Request(
+            url, data=json.dumps(body).encode(), headers={"Authorization": "Bearer local-token"}, method="POST"
+        )
         with urlopen(request) as response:
             wire = response.read()
             assert response.headers["Content-Type"].startswith("text/event-stream")
@@ -301,8 +352,14 @@ def test_client_disconnect_stops_upstream_stream_processing(disconnect):
             }
         ),
     )
-    first += encode_sse("content_block_start", json.dumps({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}))
-    first += encode_sse("content_block_delta", json.dumps({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "visible"}}))
+    first += encode_sse(
+        "content_block_start",
+        json.dumps({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
+    )
+    first += encode_sse(
+        "content_block_delta",
+        json.dumps({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "visible"}}),
+    )
     upstream = Upstream(first + b"irrelevant trailing bytes")
     handler._stream(upstream, Protocol.MESSAGES, Protocol.CHAT)
     assert upstream.tell() < len(first) + len(b"irrelevant trailing bytes")
@@ -333,7 +390,9 @@ def test_gateway_converts_request_and_response_without_network():
     try:
         url = f"http://127.0.0.1:{server.server_port}/v1/messages"
         body = {"model": "m", "messages": [{"role": "user", "content": "ping"}], "max_tokens": 32}
-        request = Request(url, data=json.dumps(body).encode(), headers={"Authorization": "Bearer local-token"}, method="POST")
+        request = Request(
+            url, data=json.dumps(body).encode(), headers={"Authorization": "Bearer local-token"}, method="POST"
+        )
         with urlopen(request) as response:
             result = json.loads(response.read())
         assert result["content"] == [{"type": "text", "text": "pong"}]

@@ -37,8 +37,16 @@ def test_failure_taxonomy_is_independent_of_provider_message(target, status, kin
 @pytest.mark.parametrize("status", [400, 401, 403, 429, 503, 504])
 def test_translated_upstream_errors_preserve_status_retry_headers_and_redact_secrets(target, status):
     def upstream(request, *, timeout):
-        raw = json.dumps({"error": {"message": "failed upstream-secret and local-secret", "code": "unknown-provider-code"}}).encode()
-        raise HTTPError(request.full_url, status, "failed", {"Retry-After": "12", "x-should-retry": "false", "Authorization": "private"}, io.BytesIO(raw))
+        raw = json.dumps(
+            {"error": {"message": "failed upstream-secret and local-secret", "code": "unknown-provider-code"}}
+        ).encode()
+        raise HTTPError(
+            request.full_url,
+            status,
+            "failed",
+            {"Retry-After": "12", "x-should-retry": "false", "Authorization": "private"},
+            io.BytesIO(raw),
+        )
 
     config = GatewayConfig("chat", "https://example.test/v1", "upstream-secret", "local")
     body = {"model": "m", "messages": [], "max_tokens": 8} if target == "messages" else {"model": "m", "input": "Hi"}
@@ -63,7 +71,13 @@ def test_context_errors_require_known_structured_codes_and_messages_are_bounded(
 def test_responses_stream_errors_use_event_fields_not_http_error_envelope():
     failure = gateway_failure(502, "Upstream failed")
     payload = failure.stream_payload("responses", sequence_number=12)
-    assert payload == {"type": "error", "code": "upstream", "message": "Upstream failed", "param": None, "sequence_number": 12}
+    assert payload == {
+        "type": "error",
+        "code": "upstream",
+        "message": "Upstream failed",
+        "param": None,
+        "sequence_number": 12,
+    }
     assert "error" not in payload
 
 

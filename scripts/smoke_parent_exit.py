@@ -75,7 +75,11 @@ class Scenario(parallel.Scenario):
 
     def open(self, request, *, timeout):
         body = json.loads(request.data)
-        expected = {Protocol.CHAT: "/v1/chat/completions", Protocol.MESSAGES: "/v1/messages", Protocol.RESPONSES: "/v1/responses"}[self.protocol]
+        expected = {
+            Protocol.CHAT: "/v1/chat/completions",
+            Protocol.MESSAGES: "/v1/messages",
+            Protocol.RESPONSES: "/v1/responses",
+        }[self.protocol]
         if body.get("model") != "p04-fixture-model" or urlsplit(request.full_url).path != expected:
             raise ValueError("Unexpected lifecycle endpoint/model")
         role = "child" if TASK in single.user_text(body, self.protocol) else "parent"
@@ -94,7 +98,11 @@ class Scenario(parallel.Scenario):
                     if not self.parent_final_sent.wait(6):
                         raise ValueError("Claude child did not wait for parent final response")
                     tool = single.find_tool(list(functions(body, self.protocol)), "read")
-                    return parallel.calls_wire(self.protocol, body["model"], [(tool, {"file_path": str(self.root / "fixture.txt")}, "exit_child_read")])
+                    return parallel.calls_wire(
+                        self.protocol,
+                        body["model"],
+                        [(tool, {"file_path": str(self.root / "fixture.txt")}, "exit_child_read")],
+                    )
                 records = dict(single.tool_records(body, self.protocol))
                 if single.VALUE not in json.dumps(records.get("exit_child_read")):
                     raise ValueError("Background child read was not replayed")
@@ -114,7 +122,12 @@ class Scenario(parallel.Scenario):
         if stage == 1:
             tool = single.find_tool(tools, "agent" if self.client == "claude" else "spawn_agent")
             args = (
-                {"prompt": TASK, "description": "Wait in local fixture", "subagent_type": "p04-worker", "run_in_background": True}
+                {
+                    "prompt": TASK,
+                    "description": "Wait in local fixture",
+                    "subagent_type": "p04-worker",
+                    "run_in_background": True,
+                }
                 if self.client == "claude"
                 else {"message": TASK}
             )
@@ -128,7 +141,9 @@ class Scenario(parallel.Scenario):
         self.child_id = cancel.task_identifier(records.get("spawn_exit_child"))
         if self.client == "claude":
             match = re.search(r"output_file:\s*([^\r\n]+)", cancel.result_text(records.get("spawn_exit_child")))
-            self.background_artifact_owned = match is not None and Path(match[1]).resolve().is_relative_to(self.root.resolve())
+            self.background_artifact_owned = match is not None and Path(match[1]).resolve().is_relative_to(
+                self.root.resolve()
+            )
             if not self.background_artifact_owned:
                 raise ValueError("Background output escaped the owned root")
         if not self.child_started.wait(6):
@@ -188,7 +203,12 @@ def verified_lifecycle(client, stdout, child_id, mode):
         if not isinstance(event, dict):
             continue
         item = event.get("item")
-        if isinstance(item, dict) and event.get("type") == "item.completed" and item.get("type") == "collab_tool_call" and item.get("tool") == "spawn_agent":
+        if (
+            isinstance(item, dict)
+            and event.get("type") == "item.completed"
+            and item.get("type") == "collab_tool_call"
+            and item.get("tool") == "spawn_agent"
+        ):
             if item.get("status") != "completed" or TASK not in str(item.get("prompt")):
                 return False
             spawned.append(item.get("receiver_thread_ids"))
@@ -206,7 +226,9 @@ def run(client, upstream, adapter_source, mode):
             return original(args, **kwargs)
         root = Path(kwargs["cwd"])
         path = root / "console-input.json"
-        path.write_text(json.dumps({"args": args, "env": kwargs["env"], "cwd": str(root), "mode": mode}), encoding="utf-8")
+        path.write_text(
+            json.dumps({"args": args, "env": kwargs["env"], "cwd": str(root), "mode": mode}), encoding="utf-8"
+        )
         startup = subprocess.STARTUPINFO()
         startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         startup.wShowWindow = 0  # Hidden console, independent of any user terminal.

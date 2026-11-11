@@ -40,7 +40,9 @@ class _MessagesOrder:
 
     @staticmethod
     def _size(delta: Delta) -> int:
-        return 64 + sum(len(value.encode("utf-8")) for value in (delta.text, delta.name, delta.call_id, delta.item_id) if value)
+        return 64 + sum(
+            len(value.encode("utf-8")) for value in (delta.text, delta.name, delta.call_id, delta.item_id) if value
+        )
 
     def feed(self, delta: Delta) -> list[Delta]:
         if delta.kind == "start":
@@ -120,17 +122,27 @@ class StreamTranscoder:
             raise ValueError("max_pending_bytes must be positive")
         cross_messages = self.target == Protocol.MESSAGES and self.source != Protocol.MESSAGES
         if cross_messages and messages_usage_policy == "strict":
-            raise StreamError("incremental Messages output needs input_tokens at stream start; this source reports usage later")
+            raise StreamError(
+                "incremental Messages output needs input_tokens at stream start; this source reports usage later"
+            )
         self.order = _MessagesOrder(max_pending_bytes) if cross_messages else None
         self.parser = SSEParser()
         limit = max_top_logprobs if max_top_logprobs is not None else (request_context or {}).get("top_logprobs")
         self.decoder = StreamDecoder(
-            self.source, public_reasoning=public_reasoning, text_logprobs=text_logprobs, max_top_logprobs=limit, omit_reasoning=omit_reasoning
+            self.source,
+            public_reasoning=public_reasoning,
+            text_logprobs=text_logprobs,
+            max_top_logprobs=limit,
+            omit_reasoning=omit_reasoning,
         )
         if request_context is not None and self.source == self.target:
             raise ValueError("request_context requires translated Responses output")
         self.encoder = StreamEncoder(
-            self.target, response_transform=response_transform, public_reasoning=public_reasoning, request_context=request_context, text_logprobs=text_logprobs
+            self.target,
+            response_transform=response_transform,
+            public_reasoning=public_reasoning,
+            request_context=request_context,
+            text_logprobs=text_logprobs,
         )
         self.tool_name_transform = tool_name_transform
         self.delta_transform = delta_transform
@@ -254,7 +266,12 @@ class _LifecycleValidator:
 
     def feed(self, event: SSEEvent) -> None:
         if self.ended:
-            if self.protocol == Protocol.RESPONSES and event.event == "message" and event.data == "[DONE]" and not self.saw_trailing_done:
+            if (
+                self.protocol == Protocol.RESPONSES
+                and event.event == "message"
+                and event.data == "[DONE]"
+                and not self.saw_trailing_done
+            ):
                 self.saw_trailing_done = True
                 return
             raise StreamError("event after stream completion")
@@ -273,7 +290,12 @@ class _LifecycleValidator:
         if not isinstance(body, dict):
             raise StreamError("native stream event must be an object")
         kind = body.get("type")
-        if event.event == "error" or kind == "error" or self.protocol != Protocol.RESPONSES and body.get("error") is not None:
+        if (
+            event.event == "error"
+            or kind == "error"
+            or self.protocol != Protocol.RESPONSES
+            and body.get("error") is not None
+        ):
             self._upstream_failure(body, "error")
             return
         if self.protocol == Protocol.RESPONSES and kind == "response.failed" and event.event in {"message", kind}:

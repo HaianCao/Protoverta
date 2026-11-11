@@ -22,9 +22,20 @@ def body():
                 "type": "namespace",
                 "name": "crm",
                 "description": "CRM tools",
-                "tools": [{"type": "function", "name": "lookup", "description": "Find contact", "parameters": {"type": "object"}}],
+                "tools": [
+                    {
+                        "type": "function",
+                        "name": "lookup",
+                        "description": "Find contact",
+                        "parameters": {"type": "object"},
+                    }
+                ],
             },
-            {"type": "namespace", "name": "mail", "tools": [{"type": "function", "name": "lookup", "parameters": {"type": "object"}}]},
+            {
+                "type": "namespace",
+                "name": "mail",
+                "tools": [{"type": "function", "name": "lookup", "parameters": {"type": "object"}}],
+            },
         ],
     }
 
@@ -71,7 +82,13 @@ def test_json_tool_response_restores_only_call_name_not_text_or_arguments():
                 "message": {
                     "role": "assistant",
                     "content": alias,
-                    "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": alias, "arguments": json.dumps({"value": alias})}}],
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {"name": alias, "arguments": json.dumps({"value": alias})},
+                        }
+                    ],
                 },
             }
         ],
@@ -137,7 +154,9 @@ def test_unknown_alias_rejects_stream_without_fabricated_success():
 
 def test_historical_flat_function_cannot_collide_with_generated_alias():
     request = body()
-    request["input"] = [{"type": "function_call", "name": NamespaceMap().alias("crm", "lookup"), "call_id": "old", "arguments": "{}"}]
+    request["input"] = [
+        {"type": "function_call", "name": NamespaceMap().alias("crm", "lookup"), "call_id": "old", "arguments": "{}"}
+    ]
     with pytest.raises(ConversionError, match="collides"):
         NamespaceMap().prepare(request)
 
@@ -146,7 +165,9 @@ def test_messages_direct_caller_is_portable_but_server_caller_is_not():
     response = {
         "model": "m",
         "role": "assistant",
-        "content": [{"type": "tool_use", "id": "c1", "name": "add", "input": {"a": 2, "b": 3}, "caller": {"type": "direct"}}],
+        "content": [
+            {"type": "tool_use", "id": "c1", "name": "add", "input": {"a": 2, "b": 3}, "caller": {"type": "direct"}}
+        ],
         "stop_reason": "tool_use",
         "usage": {"input_tokens": 4, "output_tokens": 5},
     }

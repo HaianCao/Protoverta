@@ -94,13 +94,21 @@ def test_concurrent_truncated_stream_churn_keeps_isolation_and_closes_resources(
         return Response(wire)
 
     config = GatewayConfig(
-        "chat", "https://example.test/v1", "key", "local", shared_admission_db=str(tmp_path / "quota.sqlite"), shared_requests=128, shared_concurrency=16
+        "chat",
+        "https://example.test/v1",
+        "key",
+        "local",
+        shared_admission_db=str(tmp_path / "quota.sqlite"),
+        shared_requests=128,
+        shared_concurrency=16,
     )
     with listener(config, upstream) as url:
 
         def run(index):
             with post(url, {"model": "m-" + str(index), "input": "hi", "stream": True}) as response:
-                events = [json.loads(event.data) for event in SSEParser().feed(response.read()) if event.data != "[DONE]"]
+                events = [
+                    json.loads(event.data) for event in SSEParser().feed(response.read()) if event.data != "[DONE]"
+                ]
             completed = [event for event in events if event.get("type") == "response.completed"]
             assert bool(completed) is (index % 5 != 0)
             if completed:
@@ -112,7 +120,11 @@ def test_concurrent_truncated_stream_churn_keeps_isolation_and_closes_resources(
     # Monitor threads exit asynchronously; a loaded full-suite run can need more
     # than a few seconds. The assertion below still requires full cleanup.
     deadline = time.monotonic() + 10
-    while time.monotonic() < deadline and any(thread.name in monitor_names and (thread.name, thread.ident) not in baseline for thread in threading.enumerate()):
+    while time.monotonic() < deadline and any(
+        thread.name in monitor_names and (thread.name, thread.ident) not in baseline for thread in threading.enumerate()
+    ):
         time.sleep(0.01)
     assert len(opened) == len(closed) == 48 and not active
-    assert not any(thread.name in monitor_names and (thread.name, thread.ident) not in baseline for thread in threading.enumerate())
+    assert not any(
+        thread.name in monitor_names and (thread.name, thread.ident) not in baseline for thread in threading.enumerate()
+    )

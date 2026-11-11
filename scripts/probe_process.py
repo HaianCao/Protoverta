@@ -25,7 +25,10 @@ def run_process(args, **kwargs):
     input_data = kwargs.pop("input", "")
     kwargs.pop("capture_output", None)
     kwargs.pop("check", None)
-    with _start(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs) as (process, job):
+    with _start(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs) as (
+        process,
+        job,
+    ):
         try:
             stdout, stderr = process.communicate(input_data, timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -50,6 +53,10 @@ def run_process(args, **kwargs):
             stdout, stderr = process.communicate(timeout=10)
             detail = "still running" if root_status is None else f"exited {root_status}; descendant pipes remained open"
             return subprocess.CompletedProcess(
-                args, 124, stdout, stderr + f"\nIsolated client timed out (root {detail}; own-job images={images}); its process tree was terminated.\n"
+                args,
+                124,
+                stdout,
+                stderr
+                + f"\nIsolated client timed out (root {detail}; own-job images={images}); its process tree was terminated.\n",
             )
         return subprocess.CompletedProcess(args, process.returncode, stdout, stderr)

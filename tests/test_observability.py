@@ -38,13 +38,17 @@ def post(origin, body=None, *, path="/v1/chat/completions", auth="Bearer local-t
     data = (
         b""
         if auth != "Bearer local-token"
-        else json.dumps(body or {"model": "private-model", "messages": [{"role": "user", "content": "private-prompt"}]}).encode()
+        else json.dumps(
+            body or {"model": "private-model", "messages": [{"role": "user", "content": "private-prompt"}]}
+        ).encode()
     )
     return urlopen(Request(origin + path, data=data, headers={"Authorization": auth, **(headers or {})}), timeout=5)
 
 
 def chat_response():
-    response = io.BytesIO(b'{"model":"m","choices":[{"message":{"role":"assistant","content":"private-answer"},"finish_reason":"stop"}]}')
+    response = io.BytesIO(
+        b'{"model":"m","choices":[{"message":{"role":"assistant","content":"private-answer"},"finish_reason":"stop"}]}'
+    )
     response.headers = {"x-request-id": "upstream-private-id"}
     return response
 
@@ -123,7 +127,9 @@ def test_native_success_has_local_id_and_does_not_log_sensitive_fields():
         return chat_response()
 
     with observed_server(upstream, records.append) as origin:
-        with post(origin, path="/v1/chat/completions?private-query=value", headers={"X-Request-ID": "client-private-id"}) as response:
+        with post(
+            origin, path="/v1/chat/completions?private-query=value", headers={"X-Request-ID": "client-private-id"}
+        ) as response:
             wire = response.read()
             local_id = response.headers["X-Protoverta-Request-ID"]
             assert response.headers["x-request-id"] == "upstream-private-id"
@@ -221,14 +227,24 @@ class Segments(io.BytesIO):
 
 def chat_chunk(delta, finish=None):
     return encode_sse(
-        "message", json.dumps({"object": "chat.completion.chunk", "model": "m", "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]})
+        "message",
+        json.dumps(
+            {
+                "object": "chat.completion.chunk",
+                "model": "m",
+                "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
+            }
+        ),
     )
 
 
 @pytest.mark.parametrize("visible", [False, True])
 def test_reasoning_failure_before_or_after_headers_is_not_success(visible):
     records = []
-    chunks = [chat_chunk({"role": "assistant", "content": "visible" if visible else ""}), chat_chunk({"reasoning_content": "private-reasoning"})]
+    chunks = [
+        chat_chunk({"role": "assistant", "content": "visible" if visible else ""}),
+        chat_chunk({"reasoning_content": "private-reasoning"}),
+    ]
     with observed_server(lambda request, timeout: Segments(chunks), records.append) as origin:
         body = {"model": "m", "input": "hi", "stream": True}
         if visible:
@@ -326,7 +342,9 @@ def test_capacity_rejection_and_followup_success_are_separate_records():
 
 def test_stream_limit_record_is_distinct_from_generic_bad_stream():
     records = []
-    with observed_server(lambda request, timeout: Segments([chat_chunk({"content": "large"})]), records.append, max_stream_bytes=1) as origin:
+    with observed_server(
+        lambda request, timeout: Segments([chat_chunk({"content": "large"})]), records.append, max_stream_bytes=1
+    ) as origin:
         with pytest.raises(HTTPError) as caught:
             post(origin, {"model": "m", "messages": [], "stream": True})
         caught.value.close()
@@ -373,7 +391,9 @@ def test_translated_upstream_auth_failure_is_not_local_authentication_failure():
     records = []
 
     def upstream(request, timeout):
-        raise HTTPError(request.full_url, 401, "private", {}, io.BytesIO(b'{"error":{"message":"private-provider-auth"}}'))
+        raise HTTPError(
+            request.full_url, 401, "private", {}, io.BytesIO(b'{"error":{"message":"private-provider-auth"}}')
+        )
 
     with observed_server(upstream, records.append) as origin:
         with pytest.raises(HTTPError) as caught:

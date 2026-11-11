@@ -53,16 +53,27 @@ def test_gateway_keeps_sampling_in_outbound_and_generated_responses_snapshots(st
         assert outbound["top_p"] == 0.25 and outbound["temperature"] == 0.5
         if stream:
             encoder = StreamEncoder("chat")
-            deltas = [Delta("start", model="m"), Delta("text", text="Hi"), Delta("finish", reason="stop", input_tokens=1, output_tokens=1)]
-            return io.BytesIO(b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta)))
+            deltas = [
+                Delta("start", model="m"),
+                Delta("text", text="Hi"),
+                Delta("finish", reason="stop", input_tokens=1, output_tokens=1),
+            ]
+            return io.BytesIO(
+                b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta))
+            )
         return io.BytesIO(
             b'{"model":"m","choices":[{"message":{"role":"assistant","content":"Hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}'
         )
 
     config = GatewayConfig("chat", "https://example.test/v1", "key", "local")
-    with listener(config, upstream) as url, post(url, dict(body("responses"), stream=stream, top_p=0.25, temperature=0.5)) as response:
+    with (
+        listener(config, upstream) as url,
+        post(url, dict(body("responses"), stream=stream, top_p=0.25, temperature=0.5)) as response,
+    ):
         wire = response.read()
     snapshots = (
-        [json.loads(event.data)["response"] for event in SSEParser().feed(wire) if "response" in json.loads(event.data)] if stream else [json.loads(wire)]
+        [json.loads(event.data)["response"] for event in SSEParser().feed(wire) if "response" in json.loads(event.data)]
+        if stream
+        else [json.loads(wire)]
     )
     assert snapshots and all(item["top_p"] == 0.25 and item["temperature"] == 0.5 for item in snapshots)

@@ -64,7 +64,10 @@ class SharedAdmission:
     ) -> None:
         if type(requests) is not int or requests < 1 or type(concurrency) is not int or concurrency < 1:
             raise ValueError("shared request and concurrency limits must be positive integers")
-        if any(isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value) or value <= 0 for value in (window, lease)):
+        if any(
+            isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value) or value <= 0
+            for value in (window, lease)
+        ):
             raise ValueError("shared time limits must be finite positive numbers")
         self.path = Path(path).expanduser().resolve()
         with _LOCAL_LOCKS_GUARD:
@@ -81,7 +84,9 @@ class SharedAdmission:
 
     def _connect(self) -> sqlite3.Connection:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(self.path, timeout=STORAGE_WAIT_SECONDS, isolation_level=None, check_same_thread=False)
+        connection = sqlite3.connect(
+            self.path, timeout=STORAGE_WAIT_SECONDS, isolation_level=None, check_same_thread=False
+        )
         try:
             # WAL keeps one log file instead of creating and deleting a rollback
             # journal on every write; on Windows that create/delete is what file
@@ -92,8 +97,12 @@ class SharedAdmission:
             mode = connection.execute("PRAGMA journal_mode=WAL").fetchone()
             if mode is not None and str(mode[0]).lower() == "wal":
                 connection.execute("PRAGMA synchronous=NORMAL")
-            connection.execute("CREATE TABLE IF NOT EXISTS budgets (scope TEXT PRIMARY KEY, requests INTEGER, window REAL, concurrency INTEGER, cooldown REAL)")
-            connection.execute("CREATE TABLE IF NOT EXISTS attempts (id TEXT PRIMARY KEY, scope TEXT, started REAL, active_until REAL)")
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS budgets (scope TEXT PRIMARY KEY, requests INTEGER, window REAL, concurrency INTEGER, cooldown REAL)"
+            )
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS attempts (id TEXT PRIMARY KEY, scope TEXT, started REAL, active_until REAL)"
+            )
             connection.execute("CREATE INDEX IF NOT EXISTS attempts_scope ON attempts(scope)")
             connection.execute("CREATE INDEX IF NOT EXISTS attempts_rate ON attempts(scope,started)")
             connection.execute("CREATE INDEX IF NOT EXISTS attempts_active ON attempts(scope,active_until)")
@@ -170,15 +179,28 @@ class SharedAdmission:
         now = self.clock()
         identifier = uuid.uuid4().hex
         with self._transaction() as db:
-            db.execute("INSERT OR IGNORE INTO budgets VALUES (?,?,?,?,0)", (self.scope, self.requests, self.window, self.concurrency))
-            policy = db.execute("SELECT requests,window,concurrency,cooldown FROM budgets WHERE scope=?", (self.scope,)).fetchone()
+            db.execute(
+                "INSERT OR IGNORE INTO budgets VALUES (?,?,?,?,0)",
+                (self.scope, self.requests, self.window, self.concurrency),
+            )
+            policy = db.execute(
+                "SELECT requests,window,concurrency,cooldown FROM budgets WHERE scope=?", (self.scope,)
+            ).fetchone()
             if policy is None:
                 raise AdmissionStorageError("Shared provider budget record is unavailable.")
             if policy[:3] != (self.requests, self.window, self.concurrency):
                 raise AdmissionPolicyError("Conflicting shared budget policy for the same upstream account.")
-            db.execute("DELETE FROM attempts WHERE scope=? AND started<=? AND active_until<=?", (self.scope, now - self.window, now))
-            rate = db.execute("SELECT COUNT(*),MIN(started) FROM attempts WHERE scope=? AND started>?", (self.scope, now - self.window)).fetchone()
-            active = db.execute("SELECT COUNT(*),MIN(active_until) FROM attempts WHERE scope=? AND active_until>?", (self.scope, now)).fetchone()
+            db.execute(
+                "DELETE FROM attempts WHERE scope=? AND started<=? AND active_until<=?",
+                (self.scope, now - self.window, now),
+            )
+            rate = db.execute(
+                "SELECT COUNT(*),MIN(started) FROM attempts WHERE scope=? AND started>?",
+                (self.scope, now - self.window),
+            ).fetchone()
+            active = db.execute(
+                "SELECT COUNT(*),MIN(active_until) FROM attempts WHERE scope=? AND active_until>?", (self.scope, now)
+            ).fetchone()
             wait = max(0, policy[3] - now)
             if rate[0] >= self.requests:
                 wait = max(wait, rate[1] + self.window - now)
@@ -197,4 +219,6 @@ class SharedAdmission:
         if not isinstance(seconds, int | float) or not math.isfinite(seconds) or seconds < 0:
             raise ValueError("cooldown must be finite and nonnegative")
         with self._transaction() as db:
-            db.execute("UPDATE budgets SET cooldown=MAX(cooldown,?) WHERE scope=?", (self.clock() + seconds, self.scope))
+            db.execute(
+                "UPDATE budgets SET cooldown=MAX(cooldown,?) WHERE scope=?", (self.clock() + seconds, self.scope)
+            )

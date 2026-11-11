@@ -118,12 +118,16 @@ def test_p13_request_context_restores_declared_controls_without_inventing_zero_o
     assert restored_full["top_p"] == 0.9
     assert restored_full["parallel_tool_calls"] is False
     assert restored_full["tool_choice"] == "none"
-    assert restored_full["tools"] == [{"type": "function", "name": "f1", "description": None, "parameters": None, "strict": None}]
+    assert restored_full["tools"] == [
+        {"type": "function", "name": "f1", "description": None, "parameters": None, "strict": None}
+    ]
 
 
 def test_p13_sdk_candidate_evaluation_mode_preserves_pinned_baseline_gate(monkeypatch):
     sdk_gate = load_script(monkeypatch, "check_sdk")
-    monkeypatch.setattr(sdk_gate.importlib.metadata, "version", lambda name: {"openai": "99.0.0", "anthropic": "2.3.0"}[name])
+    monkeypatch.setattr(
+        sdk_gate.importlib.metadata, "version", lambda name: {"openai": "99.0.0", "anthropic": "2.3.0"}[name]
+    )
 
     # Default baseline gate fails closed (exit 2) when SDK version drifts from pinned baseline
     monkeypatch.setattr("sys.argv", ["check_sdk"])
@@ -136,7 +140,9 @@ def test_p13_sdk_candidate_evaluation_mode_preserves_pinned_baseline_gate(monkey
 
     def fake_run(command, *, cwd, env, check):
         Path(command[command.index("--junitxml") + 1]).write_text(
-            "<testsuites><testsuite>" + "".join(f'<testcase name="candidate_{i}"/>' for i in range(29)) + "</testsuite></testsuites>",
+            "<testsuites><testsuite>"
+            + "".join(f'<testcase name="candidate_{i}"/>' for i in range(29))
+            + "</testsuite></testsuites>",
             encoding="utf-8",
         )
         return SimpleNamespace(returncode=0)
@@ -154,7 +160,11 @@ def test_p13_cli_matrix_and_keyless_snapshot_exclude_user_sessions(monkeypatch, 
         (project / "src").mkdir(parents=True)
         (project / "pyproject.toml").write_text(f'[project]\nname="{name}"\nversion="0.0.0"\n', encoding="utf-8")
         (project / "src/fixture.py").write_text("SYNTHETIC = True\n", encoding="utf-8")
-    monkeypatch.setattr(snap_mod.subprocess, "check_output", lambda command, **options: "0" * 40 if command[-2:] == ["rev-parse", "HEAD"] else "")
+    monkeypatch.setattr(
+        snap_mod.subprocess,
+        "check_output",
+        lambda command, **options: "0" * 40 if command[-2:] == ["rev-parse", "HEAD"] else "",
+    )
     data = snap_mod.snapshot(tmp_path)
     assert data["provider_certification"] is False
     assert "cli_version_matrix" in data
@@ -173,7 +183,16 @@ def test_p13_feature_gating_by_route_not_coverage():
     base_cfg = GatewayConfig("chat", "https://example.test/v1", "k", "t", client_profile="codex")
     policies = route_policies(base_cfg)
     reg = CapabilityRegistry(
-        records=(CapabilityRecord("https://example.test/v1", "chat", "m", {"text": True, "streaming": True, "tools": True}, "2026-11-04", "model record"),),
+        records=(
+            CapabilityRecord(
+                "https://example.test/v1",
+                "chat",
+                "m",
+                {"text": True, "streaming": True, "tools": True},
+                "2026-11-04",
+                "model record",
+            ),
+        ),
         routes=(
             RouteCapabilityRecord(
                 base_url="https://example.test/v1",
@@ -190,7 +209,15 @@ def test_p13_feature_gating_by_route_not_coverage():
             ),
         ),
     )
-    cfg = GatewayConfig("chat", "https://example.test/v1", "k", "t", client_profile="codex", capabilities=reg, require_verified_routes=True)
+    cfg = GatewayConfig(
+        "chat",
+        "https://example.test/v1",
+        "k",
+        "t",
+        client_profile="codex",
+        capabilities=reg,
+        require_verified_routes=True,
+    )
     assert route_policies(cfg) == policies
     # Text+streaming passes on this exact route
     reg.assess_route(

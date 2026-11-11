@@ -121,7 +121,9 @@ class DeadlineHTTPHandler(HTTPHandler):
 
 
 class DeadlineHTTPSHandler(HTTPSHandler):
-    def __init__(self, debuglevel: int | None = None, context: ssl.SSLContext | None = None, check_hostname: bool | None = None) -> None:
+    def __init__(
+        self, debuglevel: int | None = None, context: ssl.SSLContext | None = None, check_hostname: bool | None = None
+    ) -> None:
         # Python 3.11 expects an integer debug level; later versions accept None.
         super().__init__(0 if debuglevel is None else debuglevel, context, check_hostname)
         # Kept here rather than read back from CPython's private attributes.

@@ -25,10 +25,14 @@ def main():
         action="store_true",
         help="Evaluate candidate SDK versions in a separate evaluation job without replacing the pinned baseline gate",
     )
-    parser.add_argument("--report-dir", type=Path, help="New directory for persistent JUnit and SDK version/verdict evidence")
+    parser.add_argument(
+        "--report-dir", type=Path, help="New directory for persistent JUnit and SDK version/verdict evidence"
+    )
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
-    requirements = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["optional-dependencies"]["sdk-test"]
+    requirements = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"][
+        "optional-dependencies"
+    ]["sdk-test"]
     baseline = dict(requirement.split("==") for requirement in requirements)
     versions = {}
     for name in baseline:
@@ -55,7 +59,11 @@ def main():
     if args.report_dir:
         args.report_dir = args.report_dir.resolve()
         args.report_dir.mkdir(parents=True, exist_ok=False)
-    context = nullcontext(args.report_dir) if args.report_dir else tempfile.TemporaryDirectory(prefix="protoverta-sdk-report-")
+    context = (
+        nullcontext(args.report_dir)
+        if args.report_dir
+        else tempfile.TemporaryDirectory(prefix="protoverta-sdk-report-")
+    )
     with context as folder:
         report = Path(folder) / "report.xml"
         try:
@@ -67,7 +75,9 @@ def main():
             return run_tests(root, args.installed, env, report, evidence)
         finally:
             if args.report_dir:
-                (args.report_dir / "sdk-evidence.json").write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
+                (args.report_dir / "sdk-evidence.json").write_text(
+                    json.dumps(evidence, indent=2) + "\n", encoding="utf-8"
+                )
 
 
 def run_tests(root, installed, env, report, evidence):
@@ -104,8 +114,13 @@ def run_tests(root, installed, env, report, evidence):
         return result.returncode
     cases = ET.parse(report).getroot().findall(".//testcase")
     evidence["testcases"] = len(cases)
-    if len(cases) != EXPECTED_TESTCASES or any(any(case.find(tag) is not None for tag in ("skipped", "failure", "error")) for case in cases):
-        print(f"SDK conformance requires all {EXPECTED_TESTCASES} mandatory cases, without skips or failures.", file=sys.stderr)
+    if len(cases) != EXPECTED_TESTCASES or any(
+        any(case.find(tag) is not None for tag in ("skipped", "failure", "error")) for case in cases
+    ):
+        print(
+            f"SDK conformance requires all {EXPECTED_TESTCASES} mandatory cases, without skips or failures.",
+            file=sys.stderr,
+        )
         return 1
     evidence["outcome"] = "PASSED"
     print(

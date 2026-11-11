@@ -28,7 +28,11 @@ from protoverta.streaming import Delta
 def session_id(client: str, stdout: str) -> str:
     if client == "claude":
         return json.loads(stdout)["session_id"]
-    return next(event["thread_id"] for line in stdout.splitlines() if (event := json.loads(line)).get("type") == "thread.started")
+    return next(
+        event["thread_id"]
+        for line in stdout.splitlines()
+        if (event := json.loads(line)).get("type") == "thread.started"
+    )
 
 
 def tool_deltas(client: str, fixture_path: str) -> list[Delta]:
@@ -71,7 +75,9 @@ def run_resume(
             calls = {item["call_id"]: item["name"] for item in body["input"] if item.get("type") == "function_call"}
             results = {item["call_id"] for item in body["input"] if item.get("type") == "function_call_output"}
         elif protocol == Protocol.CHAT:
-            calls = {call["id"]: call["function"]["name"] for item in body["messages"] for call in item.get("tool_calls", [])}
+            calls = {
+                call["id"]: call["function"]["name"] for item in body["messages"] for call in item.get("tool_calls", [])
+            }
             results = {item["tool_call_id"] for item in body["messages"] if item.get("role") == "tool"}
         else:
             blocks = [block for item in body["messages"] for block in item["content"] if isinstance(block, dict)]
@@ -87,20 +93,39 @@ def run_resume(
         serialized = json.dumps(body)
         history_present = previous in serialized
         tool_present = tool_history(body, protocol) if tool_loop else False
-        requests.append({"protocol": protocol.value, "model": body["model"], "previous_answer_present": history_present, "tool_history_present": tool_present})
+        requests.append(
+            {
+                "protocol": protocol.value,
+                "model": body["model"],
+                "previous_answer_present": history_present,
+                "tool_history_present": tool_present,
+            }
+        )
         encoder = StreamEncoder(protocol)
         deltas = [Delta("start", model=body["model"], input_tokens=1, output_tokens=0)]
         if tool_loop and len(requests) == 1:
             deltas.extend(tool_deltas(client, fixture_path))
         else:
-            answer = previous if not initial_finished else final if history_present and (not tool_loop or tool_present) else "HISTORY_MISSING"
+            answer = (
+                previous
+                if not initial_finished
+                else final
+                if history_present and (not tool_loop or tool_present)
+                else "HISTORY_MISSING"
+            )
             initial_finished = True
             deltas.extend([Delta("text", text=answer), Delta("finish", reason="stop", input_tokens=1, output_tokens=1)])
-        return io.BytesIO(b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta)))
+        return io.BytesIO(
+            b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta))
+        )
 
     with tempfile.TemporaryDirectory(prefix="protoverta-resume-") as directory:
         root = Path(directory)
-        env = {name: value for name, value in os.environ.items() if name.upper() in {"PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP"}}
+        env = {
+            name: value
+            for name, value in os.environ.items()
+            if name.upper() in {"PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP"}
+        }
         env.update(
             {
                 "HOME": directory,
@@ -139,8 +164,17 @@ def run_resume(
                 persist_session=True,
                 **client_options,
             )
-            if first.returncode != 0 or previous not in first.stdout or (tool_loop and not any(request["tool_history_present"] for request in requests)):
-                return {"passed": False, "stage": "initial", "client": client, "error": (first.stderr + first.stdout)[-2000:]}
+            if (
+                first.returncode != 0
+                or previous not in first.stdout
+                or (tool_loop and not any(request["tool_history_present"] for request in requests))
+            ):
+                return {
+                    "passed": False,
+                    "stage": "initial",
+                    "client": client,
+                    "error": (first.stderr + first.stdout)[-2000:],
+                }
             identifier = session_id(client, first.stdout)
             config = GatewayConfig(target, origin + "/v1", "fake-upstream-key", "smoke-local-token")
             trace_file = root / "request-shapes.json" if trace else None
@@ -181,8 +215,13 @@ def run_resume(
                 and last["model"] == ("protoverta-second" if change_model else "protoverta-first")
             )
             error = "" if passed else (second.stderr + second.stdout)[-2500:]
-            unsupported = "Codex gateway cannot relocate mid-conversation instructions" in error or "Codex gateway cannot translate namespaced tools" in error
-            observations = json.loads(trace_file.read_text(encoding="utf-8")) if trace_file and trace_file.exists() else []
+            unsupported = (
+                "Codex gateway cannot relocate mid-conversation instructions" in error
+                or "Codex gateway cannot translate namespaced tools" in error
+            )
+            observations = (
+                json.loads(trace_file.read_text(encoding="utf-8")) if trace_file and trace_file.exists() else []
+            )
             return {
                 "passed": passed,
                 "classification": "supported" if passed else "unsupported_history" if unsupported else "failed",
@@ -207,7 +246,11 @@ def main() -> int:
     parser.add_argument("--adapter-source", type=Path, required=True)
     parser.add_argument("--change-provider", action="store_true")
     parser.add_argument("--change-model", action="store_true")
-    parser.add_argument("--trace", action="store_true", help="Capture converted Codex request shapes only, without content or credentials")
+    parser.add_argument(
+        "--trace",
+        action="store_true",
+        help="Capture converted Codex request shapes only, without content or credentials",
+    )
     parser.add_argument("--tool-loop", action="store_true", help="Resume after a completed read-only tool call")
     args = parser.parse_args()
     result = run_resume(

@@ -19,7 +19,12 @@ def probe(base_url: str, model: str, key: str, *, timeout: int = 90) -> dict:
         "max_tokens": 256,
         "stream": False,
     }
-    request = Request(config.upstream_url, json.dumps(body).encode(), {"Authorization": "Bearer " + key, "Content-Type": "application/json"}, method="POST")
+    request = Request(
+        config.upstream_url,
+        json.dumps(body).encode(),
+        {"Authorization": "Bearer " + key, "Content-Type": "application/json"},
+        method="POST",
+    )
     try:
         with build_opener(_RedirectBlocker()).open(request, timeout=timeout) as response:
             raw = response.read(2 * 1024 * 1024 + 1)
@@ -41,7 +46,9 @@ def probe(base_url: str, model: str, key: str, *, timeout: int = 90) -> dict:
         "http_status": 200,
         "passed": "PROTOVERTA_OK" in str(message.get("content", "")),
         "finish_reason": choice.get("finish_reason"),
-        "reasoning_fields": [name for name in ("reasoning", "reasoning_content", "reasoning_details") if message.get(name)],
+        "reasoning_fields": [
+            name for name in ("reasoning", "reasoning_content", "reasoning_details") if message.get(name)
+        ],
         "has_text": bool(message.get("content")),
     }
 

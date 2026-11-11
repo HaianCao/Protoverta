@@ -60,7 +60,11 @@ def chat_result(*, length=False):
 
 
 def snapshots(raw):
-    return [payload["response"] for item in SSEParser().feed(raw) if isinstance((payload := json.loads(item.data)).get("response"), dict)]
+    return [
+        payload["response"]
+        for item in SSEParser().feed(raw)
+        if isinstance((payload := json.loads(item.data)).get("response"), dict)
+    ]
 
 
 @pytest.mark.parametrize("source", ["chat", "messages"])
@@ -68,7 +72,9 @@ def snapshots(raw):
 @pytest.mark.parametrize("context", [None, {}, EXPLICIT, {name: None for name in CONTEXT_FIELDS}])
 def test_json_and_every_stream_snapshot_share_known_facts_and_explicit_settings(source, length, context):
     before = copy.deepcopy(context)
-    completed = convert_response(convert_response(chat_result(length=length), "chat", source), source, "responses", request_context=context)
+    completed = convert_response(
+        convert_response(chat_result(length=length), "chat", source), source, "responses", request_context=context
+    )
     pipe = StreamTranscoder(source, "responses", request_context=context)
     wire = pipe.feed(source_wire(source, tools=False, length=length)) + pipe.finish()
     streamed = snapshots(wire)
@@ -106,11 +112,17 @@ def listener(config, upstream):
 @pytest.mark.parametrize("explicit_cap", [None, 11])
 def test_gateway_snapshot_reports_only_the_output_cap_actually_applied(source, stream, explicit_cap):
     calls = []
-    config = GatewayConfig(source, "https://example.invalid/v1", "synthetic", "local", client_profile="codex", default_max_output_tokens=32)
+    config = GatewayConfig(
+        source, "https://example.invalid/v1", "synthetic", "local", client_profile="codex", default_max_output_tokens=32
+    )
 
     def upstream(req, *, timeout):
         calls.append(json.loads(req.data))
-        raw = source_wire(source, tools=False) if stream else json.dumps(convert_response(chat_result(), "chat", source)).encode()
+        raw = (
+            source_wire(source, tools=False)
+            if stream
+            else json.dumps(convert_response(chat_result(), "chat", source)).encode()
+        )
         return io.BytesIO(raw)
 
     body = {"model": "fixture-model", "input": "synthetic", "stream": stream, "text": {"format": {"type": "text"}}}
@@ -126,7 +138,9 @@ def test_gateway_snapshot_reports_only_the_output_cap_actually_applied(source, s
         assert snapshot["max_output_tokens"] == expected
         assert snapshot["text"] == body["text"]
         assert snapshot["truncation"] == "disabled"
-        assert snapshot["tools"] == [] and snapshot["tool_choice"] == "none" and snapshot["parallel_tool_calls"] is False
+        assert (
+            snapshot["tools"] == [] and snapshot["tool_choice"] == "none" and snapshot["parallel_tool_calls"] is False
+        )
         assert not {"temperature", "top_p", "service_tier"} & snapshot.keys()
     assert body == before
 
@@ -150,9 +164,10 @@ def test_native_responses_metadata_and_truncation_are_never_rewritten(stream):
     }
     assert convert_response(native, "responses", "responses") == native
     calls = []
-    wire = event("response.created", {"type": "response.created", "sequence_number": 0, "response": {**native, "status": "in_progress"}}) + event(
-        "response.completed", {"type": "response.completed", "sequence_number": 1, "response": native}
-    )
+    wire = event(
+        "response.created",
+        {"type": "response.created", "sequence_number": 0, "response": {**native, "status": "in_progress"}},
+    ) + event("response.completed", {"type": "response.completed", "sequence_number": 1, "response": native})
     raw = wire if stream else json.dumps(native).encode()
 
     def upstream(req, *, timeout):
@@ -160,7 +175,14 @@ def test_native_responses_metadata_and_truncation_are_never_rewritten(stream):
         return io.BytesIO(raw)
 
     body = {"model": "m", "input": "synthetic", "stream": stream, "truncation": "auto", "store": True}
-    config = GatewayConfig("responses", "https://example.invalid/v1", "synthetic", "local", client_profile="codex", default_max_output_tokens=32)
+    config = GatewayConfig(
+        "responses",
+        "https://example.invalid/v1",
+        "synthetic",
+        "local",
+        client_profile="codex",
+        default_max_output_tokens=32,
+    )
     with listener(config, upstream) as url, request(url, "responses", json.dumps(body).encode()) as response:
         result = response.read()
     assert calls == [body]
@@ -180,7 +202,12 @@ def test_native_responses_metadata_and_truncation_are_never_rewritten(stream):
                 "type": "json_schema",
                 "name": "answer",
                 "strict": True,
-                "schema": {"type": "object", "properties": {"answer": {"type": "string"}}, "required": ["answer"], "additionalProperties": False},
+                "schema": {
+                    "type": "object",
+                    "properties": {"answer": {"type": "string"}},
+                    "required": ["answer"],
+                    "additionalProperties": False,
+                },
             },
         },
     ],

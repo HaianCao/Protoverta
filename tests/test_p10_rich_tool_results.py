@@ -414,7 +414,12 @@ def test_text_after_tool_call_consistency_across_request_response_and_sse():
         "max_output_tokens": 64,
         "input": [
             {"type": "function_call", "call_id": "c1", "name": "f1", "arguments": "{}"},
-            {"type": "message", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "   "}]},
+            {
+                "type": "message",
+                "role": "assistant",
+                "status": "completed",
+                "content": [{"type": "output_text", "text": "   "}],
+            },
             {"type": "function_call_output", "call_id": "c1", "output": "ok"},
         ],
     }
@@ -470,7 +475,9 @@ def test_text_after_tool_call_consistency_across_request_response_and_sse():
         )
         + encode_sse(
             "content_block_delta",
-            json.dumps({"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": "{}"}}),
+            json.dumps(
+                {"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": "{}"}}
+            ),
         )
         + encode_sse("content_block_stop", json.dumps({"type": "content_block_stop", "index": 0}))
         + encode_sse(

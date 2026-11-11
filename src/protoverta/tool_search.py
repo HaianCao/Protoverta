@@ -90,7 +90,10 @@ class ClientToolSearchMap:
         searches = [tool for tool in tools if isinstance(tool, dict) and tool.get("type") == "tool_search"]
         inputs = result.get("input")
         history = inputs if isinstance(inputs, list) else []
-        has_history = any(isinstance(item, dict) and item.get("type") in ("tool_search_call", "tool_search_output") for item in history)
+        has_history = any(
+            isinstance(item, dict) and item.get("type") in ("tool_search_call", "tool_search_output")
+            for item in history
+        )
         if not searches and not has_history:
             return result
         if len(searches) > 1:
@@ -130,7 +133,11 @@ class ClientToolSearchMap:
         rewritten: list[Any] = []
         for item in history:
             if not isinstance(item, dict) or item.get("type") not in ("tool_search_call", "tool_search_output"):
-                if isinstance(item, dict) and item.get("type") in ("function_call", "custom_tool_call") and item.get("name") == _NAME:
+                if (
+                    isinstance(item, dict)
+                    and item.get("type") in ("function_call", "custom_tool_call")
+                    and item.get("name") == _NAME
+                ):
                     raise ConversionError("reserved client search name in ordinary history")
                 rewritten.append(item)
                 continue
@@ -157,7 +164,13 @@ class ClientToolSearchMap:
                 pending.remove(call_id)
                 for tool in item["tools"]:
                     add(tool, loaded=True)
-                rewritten.append({"type": "function_call_output", "call_id": call_id, "output": json.dumps({"tools": item["tools"]}, ensure_ascii=False)})
+                rewritten.append(
+                    {
+                        "type": "function_call_output",
+                        "call_id": call_id,
+                        "output": json.dumps({"tools": item["tools"]}, ensure_ascii=False),
+                    }
+                )
         if pending:
             raise ConversionError("unfinished client search history must not be replayed")
         self._snapshot_tools = copy.deepcopy([*definitions.values(), *searches])
@@ -165,12 +178,22 @@ class ClientToolSearchMap:
         if searches:
             search = searches[0]
             _only(search, {"type", "execution", "description", "parameters"}, "client tool search definition")
-            if search.get("execution") != "client" or not isinstance(search.get("parameters"), dict) or search["parameters"].get("type") != "object":
+            if (
+                search.get("execution") != "client"
+                or not isinstance(search.get("parameters"), dict)
+                or search["parameters"].get("type") != "object"
+            ):
                 raise ConversionError("client search requires explicit client execution and an object argument schema")
             if not isinstance(search.get("description", ""), str):
                 raise ConversionError("search description must be text")
             result["tools"].append(
-                {"type": "function", "name": _NAME, "description": search.get("description", ""), "parameters": search["parameters"], "strict": False}
+                {
+                    "type": "function",
+                    "name": _NAME,
+                    "description": search.get("description", ""),
+                    "parameters": search["parameters"],
+                    "strict": False,
+                }
             )
         if isinstance(inputs, list):
             result["input"] = rewritten

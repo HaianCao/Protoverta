@@ -41,7 +41,13 @@ def fixture(protocol):
             message = {
                 "role": "assistant",
                 "content": None,
-                "tool_calls": [{"id": "call_fixture", "type": "function", "function": {"name": tool["name"], "arguments": '{"location":"San Francisco"}'}}],
+                "tool_calls": [
+                    {
+                        "id": "call_fixture",
+                        "type": "function",
+                        "function": {"name": tool["name"], "arguments": '{"location":"San Francisco"}'},
+                    }
+                ],
             }
             reason = "tool_calls"
         if body.get("stream"):
@@ -62,7 +68,9 @@ def fixture(protocol):
                     reasoning_output_tokens=usage["completion_tokens_details"]["reasoning_tokens"],
                 ),
             ]
-            return io.BytesIO(b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta)))
+            return io.BytesIO(
+                b"".join(encode_sse(event.event, event.data) for delta in deltas for event in encoder.feed(delta))
+            )
         result = {"model": "fixture-model", "choices": [{"message": message, "finish_reason": reason}], "usage": usage}
         return io.BytesIO(json.dumps(convert_response(result, "chat", protocol)).encode())
 
@@ -87,7 +95,16 @@ def classify_missing_field(field):
         "truncation",
     }:
         return "gateway-owned"
-    if root in {"instructions", "max_output_tokens", "tools", "tool_choice", "parallel_tool_calls", "text", "temperature", "top_p"}:
+    if root in {
+        "instructions",
+        "max_output_tokens",
+        "tools",
+        "tool_choice",
+        "parallel_tool_calls",
+        "text",
+        "temperature",
+        "top_p",
+    }:
         return "request-declared"
     if root in {"usage", "service_tier"}:
         return "upstream-measured"
@@ -106,7 +123,9 @@ def summarize(reports):
         and counts["passed"] == total
         and all(report["exit_code"] == 0 for report in reports)
     )
-    fields = Counter(error.split(":", 1)[0] for report in reports for item in report["results"] for error in item["errors"])
+    fields = Counter(
+        error.split(":", 1)[0] for report in reports for item in report["results"] for error in item["errors"]
+    )
     groups = {}
     provenance_classes = {}
     for field, count in sorted(fields.items()):
@@ -146,7 +165,9 @@ def run(suite, runner, *, installed=False):
     if revision != PIN:
         raise ValueError("official compliance checkout does not match the reviewed commit")
     # Verify the test/validator checkout is not locally patched before execution.
-    if subprocess.check_output(["git", "-C", str(suite), "status", "--porcelain", "--untracked-files=no"], env=env, text=True).strip():
+    if subprocess.check_output(
+        ["git", "-C", str(suite), "status", "--porcelain", "--untracked-files=no"], env=env, text=True
+    ).strip():
         raise ValueError("official suite has tracked modifications")
     if not installed:
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -155,7 +176,12 @@ def run(suite, runner, *, installed=False):
     reports = []
     for protocol in ("chat", "messages"):
         config = GatewayConfig(
-            protocol, "https://example.invalid/v1", "synthetic-upstream", "synthetic-local", client_profile="codex", default_max_output_tokens=128
+            protocol,
+            "https://example.invalid/v1",
+            "synthetic-upstream",
+            "synthetic-local",
+            client_profile="codex",
+            default_max_output_tokens=128,
         )
         server = GatewayHTTPServer(("127.0.0.1", 0), make_handler(config, upstream_open=fixture(protocol)))
         worker = threading.Thread(target=server.serve_forever, daemon=True)
@@ -188,7 +214,10 @@ def run(suite, runner, *, installed=False):
                     "upstream": protocol,
                     "exit_code": result.returncode,
                     "summary": output["summary"],
-                    "results": [{"id": item["id"], "status": item["status"], "errors": item.get("errors", [])} for item in output["results"]],
+                    "results": [
+                        {"id": item["id"], "status": item["status"], "errors": item.get("errors", [])}
+                        for item in output["results"]
+                    ],
                 }
             )
         finally:
@@ -209,7 +238,12 @@ def run(suite, runner, *, installed=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--suite", type=Path, required=True)
-    parser.add_argument("--runner", type=Path, required=True, help="Bundled unmodified official CLI, generated from the reviewed checkout")
+    parser.add_argument(
+        "--runner",
+        type=Path,
+        required=True,
+        help="Bundled unmodified official CLI, generated from the reviewed checkout",
+    )
     parser.add_argument("--report", type=Path)
     parser.add_argument("--installed", action="store_true")
     args = parser.parse_args()

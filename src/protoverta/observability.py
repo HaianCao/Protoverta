@@ -65,7 +65,9 @@ Observer = Callable[[RequestObservation], None]
 class RequestTrace:
     """One request's mutable accumulator, never shared between handler threads."""
 
-    def __init__(self, protocol: WireProtocol, upstream: WireProtocol, *, clock: Callable[[], float] = time.monotonic) -> None:
+    def __init__(
+        self, protocol: WireProtocol, upstream: WireProtocol, *, clock: Callable[[], float] = time.monotonic
+    ) -> None:
         # Never trust/echo client or upstream IDs as the local correlation ID.
         self.request_id = secrets.token_hex(16)
         self.protocol = protocol
@@ -119,7 +121,9 @@ class RequestTrace:
         if self.first_payload_ms is None:
             self.first_payload_ms = max(0, int((self._clock() - self._started) * 1000))
 
-    def usage(self, inputs: int | None, outputs: int | None, cached: int | None = None, created: int | None = None) -> None:
+    def usage(
+        self, inputs: int | None, outputs: int | None, cached: int | None = None, created: int | None = None
+    ) -> None:
         if type(inputs) is int and inputs >= 0:
             self.input_tokens = inputs
         if type(outputs) is int and outputs >= 0:
