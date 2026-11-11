@@ -64,6 +64,30 @@ class _HeaderReader:
         return len(data)
 
     def readline(self, limit=-1):
+        if not hasattr(self.stream, "peek"):
+            return self._readline_bytewise(limit)
+        result = bytearray()
+        while limit < 0 or len(result) < limit:
+            # peek() makes at most one socket read, under a freshly armed
+            # deadline; the bytes it returns are then taken from the buffer.
+            timeout = self.budget.remaining()
+            self.sock.settimeout(timeout)
+            try:
+                buffered = self.stream.peek(1)
+            except TimeoutError:
+                self.budget.on_timeout(timeout)
+                raise
+            if not buffered:
+                break
+            wanted = len(buffered) if limit < 0 else min(len(buffered), limit - len(result))
+            newline = buffered.find(b"\n", 0, wanted)
+            result.extend(self.stream.read(newline + 1 if newline >= 0 else wanted))
+            if newline >= 0:
+                break
+        self.budget.remaining()
+        return bytes(result)
+
+    def _readline_bytewise(self, limit):
         result = bytearray()
         while limit < 0 or len(result) < limit:
             char = self.read1(1)
@@ -87,8 +111,15 @@ class DeadlineHTTPHandler(HTTPHandler):
 
 
 class DeadlineHTTPSHandler(HTTPSHandler):
+    def __init__(self, debuglevel=None, context=None, check_hostname=None):
+        # Python 3.11 expects an integer debug level; later versions accept None.
+        super().__init__(0 if debuglevel is None else debuglevel, context, check_hostname)
+        # Kept here rather than read back from CPython's private attributes.
+        # None lets http.client build its default verified context, as before.
+        self._tls_context = context
+
     def https_open(self, request):
-        return self.do_open(_connection(_HTTPSConnection, request), request, context=self._context)
+        return self.do_open(_connection(_HTTPSConnection, request), request, context=self._tls_context)
 
 
 def _connection(kind, request):

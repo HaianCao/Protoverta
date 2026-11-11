@@ -290,3 +290,52 @@ def test_malformed_reported_metadata_does_not_turn_into_unknown_or_certified(fie
     policy = CatalogPolicy(context_field="context_length", modalities_field="modalities")
     with pytest.raises(CatalogError):
         fetch_catalog("https://example.test/v1", {}, policy, upstream_open=pages([{"data": [{"id": "m", field: value}]}]))
+
+
+SKIP_BODY = {
+    "data": [
+        {"id": "good", "display_name": "Good", "context_length": 8000, "max_output": 1000, "modalities": ["text"]},
+        {"id": "bad limits", "display_name": "Bad ID"},
+        "not-an-object",
+        {"id": "odd-limits", "display_name": "Odd", "context_length": "128k", "max_output": 0},
+        {"id": "odd-name", "display_name": "", "modalities": ["Text Input"]},
+    ]
+}
+SKIP_FIELDS = {"context_field": "context_length", "output_field": "max_output", "modalities_field": "modalities"}
+
+
+def test_catalog_rejects_one_invalid_entry_by_default():
+    with pytest.raises(CatalogError, match="invalid model ID"):
+        fetch_catalog("https://example.test/v1", {}, CatalogPolicy(**SKIP_FIELDS), upstream_open=pages([SKIP_BODY]))
+
+
+def test_catalog_skip_mode_drops_bad_entries_and_malformed_metadata():
+    from protoverta import Catalog
+
+    result = fetch_catalog("https://example.test/v1", {}, CatalogPolicy(invalid_entries="skip", **SKIP_FIELDS), upstream_open=pages([SKIP_BODY]))
+    assert isinstance(result, Catalog) and isinstance(result, tuple)
+    assert [model.id for model in result] == ["good", "odd-limits", "odd-name"]
+    good, odd_limits, odd_name = result
+    assert (good.context_window_tokens, good.max_output_tokens, good.input_modalities) == (8000, 1000, ("text",))
+    # Malformed optional metadata is dropped, never guessed.
+    assert (odd_limits.context_window_tokens, odd_limits.max_output_tokens) == (None, None)
+    assert (odd_name.display_name, odd_name.input_modalities) == ("odd-name", ())
+    assert (result.skipped, result.dropped_fields) == (2, 4)
+
+
+def test_catalog_skip_mode_counts_across_pages_and_keeps_page_errors_strict():
+    policy = CatalogPolicy(pagination="after_id", invalid_entries="skip")
+    first = {"data": [{"id": "a"}, {"id": ""}], "has_more": True, "last_id": "a"}
+    second = {"data": [{"id": "b"}, 7], "has_more": False}
+    result = fetch_catalog("https://example.test/v1", {}, policy, upstream_open=pages([first, second]))
+    assert [model.id for model in result] == ["a", "b"] and result.skipped == 2
+    with pytest.raises(CatalogError, match="data array"):
+        parse_page({"data": "nope"}, policy)
+    with pytest.raises(CatalogError, match="pagination cursor"):
+        parse_page({"data": [], "has_more": True, "last_id": " "}, policy)
+
+
+def test_catalog_invalid_entries_value_is_checked():
+    with pytest.raises(ValueError, match="invalid_entries"):
+        CatalogPolicy(invalid_entries="ignore")
+    assert fetch_catalog("https://example.test/v1", {}, upstream_open=pages([{"data": [{"id": "x"}]}])).skipped == 0

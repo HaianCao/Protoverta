@@ -5,6 +5,23 @@ as a GitHub release with a wheel, an sdist and `SHA256SUMS`. Versions before
 0.3.0 were previews (`0.3.0aN`). The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+- `CatalogPolicy(invalid_entries="skip")`: one invalid entry no longer fails
+  the whole model catalog. Entries without a valid ID are left out and
+  malformed optional metadata (name, token limits, modalities) is dropped,
+  never guessed. The default stays `"reject"`.
+- `fetch_catalog` returns a `Catalog`: still a tuple of `ModelInfo`, with
+  `skipped` and `dropped_fields` counts.
+
+### Changed
+- The HTTPS transport keeps the TLS context it was given instead of reading
+  CPython's private `HTTPSHandler._context`.
+- Response headers and chunked framing are read a buffered run at a time
+  instead of byte by byte; every socket read still runs under the request
+  deadline.
+
 ## [0.3.0] - 2026-11-10
 
 First stable release.
@@ -91,6 +108,7 @@ fixed in 0.3.0a10); the tag was removed.
 Earlier previews (0.3.0a5 and 0.3.0a6) are described in their
 [GitHub releases](https://github.com/HaianCao/Protoverta/releases).
 
+[Unreleased]: https://github.com/HaianCao/Protoverta/compare/v0.3.0...HEAD
 [0.3.0]: https://github.com/HaianCao/Protoverta/compare/v0.3.0a11...v0.3.0
 [0.3.0a11]: https://github.com/HaianCao/Protoverta/releases/tag/v0.3.0a11
 [0.3.0a10]: https://github.com/HaianCao/Protoverta/releases/tag/v0.3.0a10

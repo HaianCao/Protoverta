@@ -18,7 +18,7 @@ from .capabilities import (
 )
 from .context import ContextAssessment, TokenCount, assess_context
 from .core import ConversionError, Protocol, convert_request, convert_response
-from .discovery import CatalogError, CatalogPolicy, ModelInfo, fetch_catalog
+from .discovery import Catalog, CatalogError, CatalogPolicy, ModelInfo, fetch_catalog
 from .errors import UnsupportedFeatureError
 from .response_context import bind_response_context
 from .stream_encoder import StreamEncoder
@@ -31,6 +31,7 @@ __all__ = [
     "CapabilityRecord",
     "CapabilityRegistry",
     "CapabilityReport",
+    "Catalog",
     "CatalogError",
     "CatalogPolicy",
     "ContextAssessment",

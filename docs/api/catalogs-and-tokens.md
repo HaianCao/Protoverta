@@ -2,6 +2,7 @@
 
 ```{eval-rst}
 .. autofunction:: protoverta.fetch_catalog
+.. autoclass:: protoverta.Catalog
 .. autoclass:: protoverta.CatalogPolicy
 .. autoclass:: protoverta.ModelInfo
 .. autoexception:: protoverta.CatalogError
