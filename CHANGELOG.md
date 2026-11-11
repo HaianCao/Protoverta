@@ -27,6 +27,10 @@ as a GitHub release with a wheel, an sdist and `SHA256SUMS`. Versions before
   response features it can represent, instead of `if/elif` branches.
   Responses stream events dispatch through a handler table, and the
   gateway classifies stream failures in one place. No wire behaviour changes.
+- `GatewayConfig` validation runs as named check groups (limits, admission,
+  token policies, endpoint, capabilities, ...) in the same order as before,
+  and the gateway handles a POST as read -> prepare -> exchange steps. The
+  public `GatewayConfig(...)` constructor is unchanged.
 - The HTTPS transport keeps the TLS context it was given instead of reading
   CPython's private `HTTPSHandler._context`.
 - Response headers and chunked framing are read a buffered run at a time

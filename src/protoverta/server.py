@@ -162,10 +162,31 @@ class GatewayConfig:
     retry_log: Callable[[str], None] | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
+        # Each group validates one area; they run in this fixed order, so the
+        # first error reported for an invalid combination never changes.
+        self._check_retry_hooks()
+        self._check_model_snapshot()
+        self._check_evidence_freshness()
+        self._check_token_policies()
+        self._check_simple_retry()
+        self._check_shared_admission()
+        self._check_tool_and_reasoning_policies()
+        self._normalize_protocol_and_routing()
+        self._check_token_quota()
+        self._check_upstream_endpoint()
+        self._check_limits()
+        self._check_client_policies()
+        self._check_capability_policies()
+
+    def _check_retry_hooks(self) -> None:
+        """Error-class retry policy and its log callback."""
         if self.retry_policy is not None and not isinstance(self.retry_policy, RetryPolicy):
             raise ValueError("retry_policy must be a RetryPolicy")
         if self.retry_log is not None and not callable(self.retry_log):
             raise ValueError("retry_log must be callable")
+
+    def _check_model_snapshot(self) -> None:
+        """The session model snapshot and Codex resume guard."""
         if self.model_snapshot is not None and (
             not isinstance(self.model_snapshot, ModelSnapshot)
             or not self.model_snapshot.matches(self.upstream_base_url, self.upstream_protocol)
@@ -173,12 +194,18 @@ class GatewayConfig:
             raise ValueError("model snapshot must match this gateway's exact upstream prefix and protocol")
         if type(self.codex_model_safe_resume) is not bool:
             raise ValueError("codex_model_safe_resume must be a boolean")
+
+    def _check_evidence_freshness(self) -> None:
+        """Evidence identity and age limits."""
         if (
             type(self.require_current_evidence) is not bool
             or self.evidence_max_age_days is not None
             and (type(self.evidence_max_age_days) is not int or self.evidence_max_age_days < 0)
         ):
             raise ValueError("invalid evidence identity/freshness policy")
+
+    def _check_token_policies(self) -> None:
+        """Prompt caching, token counting and context preflight."""
         if (
             self.prompt_caching not in ("off", "ephemeral")
             or self.prompt_caching != "off"
@@ -195,12 +222,18 @@ class GatewayConfig:
             raise ValueError("token_counter must be callable")
         if self.context_preflight == "exact" and self.token_counter is None:
             raise ValueError("exact context policy needs an operator token counter")
+
+    def _check_simple_retry(self) -> None:
+        """The fixed-attempt retry used without a retry policy."""
         if (
             type(self.retry_attempts) is not int
             or not 1 <= self.retry_attempts <= 4
             or not positive_number(self.retry_max_wait)
         ):
             raise ValueError("retry_attempts must be 1-4 and retry_max_wait must be finite and positive")
+
+    def _check_shared_admission(self) -> None:
+        """The shared admission database and its limits."""
         if self.shared_admission_db is not None:
             if not isinstance(self.shared_admission_db, str) or not self.shared_admission_db.strip():
                 raise ValueError("shared_admission_db must be a nonempty path")
@@ -211,6 +244,9 @@ class GatewayConfig:
                 window=self.shared_window,
                 concurrency=self.shared_concurrency,
             )
+
+    def _check_tool_and_reasoning_policies(self) -> None:
+        """Provider profiles, client tool search, reasoning and tool-name policies."""
         if self.provider_profiles is not None and not isinstance(self.provider_profiles, ProviderProfiles):
             raise ValueError("provider_profiles must be a ProviderProfiles registry")
         if self.client_tool_search not in ("reject", "function"):
@@ -223,10 +259,16 @@ class GatewayConfig:
             object.__setattr__(self, "tool_names", "alias" if self.client_profile in {"codex", "claude"} else "reject")
         if self.tool_names not in {"reject", "alias"}:
             raise ValueError("tool_names must be reject or alias")
+
+    def _normalize_protocol_and_routing(self) -> None:
+        """Normalizes the upstream protocol and checks OpenRouter routing."""
         object.__setattr__(self, "upstream_protocol", Protocol(self.upstream_protocol))
         from .routing import validate_openrouter
 
         validate_openrouter(self)
+
+    def _check_token_quota(self) -> None:
+        """The shared per-model token quota."""
         if self.shared_token_limit is not None and (
             type(self.shared_token_limit) is not int
             or not 0 < self.shared_token_limit <= 2**63 - 1
@@ -236,6 +278,9 @@ class GatewayConfig:
             raise ValueError(
                 "shared_token_limit requires a positive limit, dedicated shared database and exact operator token counter"
             )
+
+    def _check_upstream_endpoint(self) -> None:
+        """Upstream URL, authentication style and credentials."""
         if not isinstance(self.upstream_base_url, str) or any(
             char.isspace() or ord(char) < 32 or ord(char) == 127 for char in self.upstream_base_url
         ):
@@ -267,6 +312,9 @@ class GatewayConfig:
             raise ValueError("credentials cannot contain line breaks")
         if not self.inbound_token.isascii():
             raise ValueError("inbound_token must be ASCII")
+
+    def _check_limits(self) -> None:
+        """Timeouts, body and stream size limits and concurrency."""
         if (
             isinstance(self.timeout, bool)
             or not isinstance(self.timeout, int | float)
@@ -281,6 +329,9 @@ class GatewayConfig:
         if not positive_number(self.total_timeout) or not positive_number(self.progress_timeout):
             raise ValueError("total_timeout and progress_timeout must be finite positive numbers")
         StreamLimits(self.max_stream_bytes, self.max_stream_items, self.max_tool_argument_bytes)
+
+    def _check_client_policies(self) -> None:
+        """Client profile, usage, reasoning and request-shape policies."""
         if self.client_profile not in {"strict", "codex", "claude"}:
             raise ValueError("client_profile must be strict, codex or claude")
         if self.messages_usage_policy not in {"strict", "deferred"}:
@@ -302,6 +353,9 @@ class GatewayConfig:
             or self.default_max_output_tokens <= 0
         ):
             raise ValueError("default_max_output_tokens must be a positive integer")
+
+    def _check_capability_policies(self) -> None:
+        """The capability registry and the checks that require it."""
         if self.capabilities is not None and not isinstance(self.capabilities, CapabilityRegistry):
             raise ValueError("capabilities must be a CapabilityRegistry")
         if (
@@ -356,6 +410,24 @@ def apply_upstream_reasoning(payload: dict[str, Any], protocol: Protocol, policy
     else:
         outbound["reasoning"] = {"effort": "none"}
     return outbound
+
+
+@dataclass(slots=True)
+class _PreparedRequest:
+    """One POST after decoding and conversion, ready to send upstream."""
+
+    outbound: dict[str, Any]
+    data: bytes
+    streaming: bool
+    compact: bool
+    response_request: dict[str, Any]
+    tool_name_map: ToolNameMap | None
+    namespace_map: NamespaceMap | None
+    search_map: ClientToolSearchMap | None
+    tool_policy: BoundToolPolicy | None
+    text_logprobs: bool
+    token_quota: Any
+    token_amount: int | None
 
 
 def _classify_stream_failure(exc: BaseException, feature: str | None) -> tuple[str, Outcome]:
@@ -986,21 +1058,34 @@ def make_handler(
                 admission.release()
 
         def _handle_post(self, protocol: Protocol, target_url: SplitResult) -> None:
+            # Read the body, prepare the upstream request, then exchange it.
+            length = self._request_length(protocol, target_url)
+            if length is None:
+                return
+            prepared = self._prepare_post(protocol, target_url, length)
+            if prepared is not None:
+                self._exchange(protocol, target_url, prepared)
+
+        def _request_length(self, protocol: Protocol, target_url: SplitResult) -> int | None:
             # One unambiguous framing mode; never interpret chunked input as JSON.
             lengths = self.headers.get_all("Content-Length", [])
             if self.headers.get_all("Transfer-Encoding") or len(lengths) > 1:
                 self._error(
                     400, "ambiguous or unsupported request framing", protocol, phase="request", path=target_url.path
                 )
-                return
+                return None
             try:
                 length = int(self.headers.get("Content-Length", ""))
             except ValueError:
                 self._error(411, "Content-Length is required", protocol, phase="request", path=target_url.path)
-                return
+                return None
             if length < 0 or length > config.max_body_bytes:
                 self._error(413, "request body is too large", protocol, phase="request", path=target_url.path)
-                return
+                return None
+            return length
+
+        def _prepare_post(self, protocol: Protocol, target_url: SplitResult, length: int) -> _PreparedRequest | None:
+            """Decode, adapt, convert and preflight; None once the client was answered."""
             stage: FailurePhase = "request"
             try:
                 payload = decode_json(self.rfile.read(length))
@@ -1028,7 +1113,7 @@ def make_handler(
                         self._error(
                             exc.status, str(exc), protocol, phase="upstream", path=target_url.path, headers=exc.headers
                         )
-                        return
+                        return None
                     finally:
                         if shared_admission is not None and count_lease is not None:
                             try:
@@ -1046,7 +1131,7 @@ def make_handler(
                         count_body["object"] = "response.input_tokens"
                     self._trace.phase = "response"
                     self._json(200, count_body)
-                    return
+                    return None
                 streaming = payload.get("stream", False)
                 compact = target_url.path == "/v1/responses/compact"
                 if compact and (config.upstream_protocol != Protocol.RESPONSES or streaming or target_url.query):
@@ -1285,7 +1370,7 @@ def make_handler(
                     path=target_url.path,
                     headers={"x-should-retry": "false"},
                 )
-                return
+                return None
             except UnsupportedFeatureError as exc:
                 self._error(
                     422,
@@ -1297,12 +1382,41 @@ def make_handler(
                     path=target_url.path,
                     headers={"x-should-retry": "false"},
                 )
-                return
+                return None
             except (json.JSONDecodeError, UnicodeError, ConversionError) as exc:
                 self._error(
                     422, str(exc), protocol, phase=stage, path=target_url.path, headers={"x-should-retry": "false"}
                 )
-                return
+                return None
+            return _PreparedRequest(
+                outbound=outbound,
+                data=data,
+                streaming=streaming,
+                compact=compact,
+                response_request=response_request,
+                tool_name_map=tool_name_map,
+                namespace_map=namespace_map,
+                search_map=search_map,
+                tool_policy=tool_policy,
+                text_logprobs=text_logprobs,
+                token_quota=token_quota,
+                token_amount=token_amount,
+            )
+
+        def _exchange(self, protocol: Protocol, target_url: SplitResult, prepared: _PreparedRequest) -> None:
+            """Send the prepared request upstream and relay the response or failure."""
+            outbound = prepared.outbound
+            data = prepared.data
+            streaming = prepared.streaming
+            compact = prepared.compact
+            response_request = prepared.response_request
+            tool_name_map = prepared.tool_name_map
+            namespace_map = prepared.namespace_map
+            search_map = prepared.search_map
+            tool_policy = prepared.tool_policy
+            text_logprobs = prepared.text_logprobs
+            token_quota = prepared.token_quota
+            token_amount = prepared.token_amount
             headers = {
                 "Content-Type": "application/json",
                 "Accept": "text/event-stream" if streaming else "application/json",
