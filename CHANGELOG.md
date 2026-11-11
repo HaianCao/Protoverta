@@ -22,6 +22,11 @@ as a GitHub release with a wheel, an sdist and `SHA256SUMS`. Versions before
   `token_counter` and `retry_log` are typed callables.
 - Stream events and content parts that lack a field their kind requires now
   fail with a `StreamError`/`ConversionError` instead of a `TypeError`.
+- Protocol handling is organised per codec: `protoverta.core.CODECS` maps
+  each protocol to its request and response decoders/encoders and to the
+  response features it can represent, instead of `if/elif` branches.
+  Responses stream events dispatch through a handler table, and the
+  gateway classifies stream failures in one place. No wire behaviour changes.
 - The HTTPS transport keeps the TLS context it was given instead of reading
   CPython's private `HTTPSHandler._context`.
 - Response headers and chunked framing are read a buffered run at a time

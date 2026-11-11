@@ -10,9 +10,10 @@ import json
 import re
 import secrets
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
+from types import MappingProxyType
 from typing import Any, TypedDict
 
 from .custom_tools import custom_definition, encode_custom
@@ -888,9 +889,6 @@ def _decode_responses(body: dict[str, Any], *, public_reasoning: bool = False) -
     )
 
 
-_DECODERS = {Protocol.CHAT: _decode_chat, Protocol.MESSAGES: _decode_messages, Protocol.RESPONSES: _decode_responses}
-
-
 def _check_function_names(names: Iterable[str], target: Protocol) -> None:
     if target in {Protocol.CHAT, Protocol.RESPONSES} and any(
         not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", name) for name in names
@@ -1262,9 +1260,6 @@ def _encode_responses(req: Request) -> dict[str, Any]:
     return out
 
 
-_ENCODERS = {Protocol.CHAT: _encode_chat, Protocol.MESSAGES: _encode_messages, Protocol.RESPONSES: _encode_responses}
-
-
 def convert_request(
     body: dict[str, Any],
     source: Protocol | str,
@@ -1292,7 +1287,7 @@ def convert_request(
     if source == target:
         return body.copy()
     options = {"public_reasoning": public_reasoning} if source in {Protocol.CHAT, Protocol.RESPONSES} else {}
-    request = _DECODERS[source](_object(body, "request"), **options)
+    request = CODECS[source].decode_request(_object(body, "request"), **options)
     request.frequency_penalty = _optional_penalty(body.get("frequency_penalty"), "frequency_penalty")
     request.presence_penalty = _optional_penalty(body.get("presence_penalty"), "presence_penalty")
     if (
@@ -1336,7 +1331,7 @@ def convert_request(
     )
     request.output_format = decode_output_format(body, source)
     _check_turns(request, target, messages_mid_system=messages_mid_system)
-    output = _ENCODERS[target](request)
+    output = CODECS[target].encode_request(request)
     if responses_penalties:
         for key in ("frequency_penalty", "presence_penalty"):
             value = getattr(request, key)
@@ -1433,96 +1428,109 @@ def _decode_result_parts(
         raise TypeError("omit_reasoning must be a boolean")
     if omit_reasoning:
         body, _ = _omittable_reasoning(body, source, public_reasoning)
-    if source == Protocol.CHAT:
-        choices = _list(body.get("choices"), "choices")
-        if len(choices) != 1:
-            raise ConversionError("only one choice is supported")
-        choice = _object(choices[0], "choice")
-        if choice.get("logprobs") and not text_logprobs:
-            raise ConversionError("Chat logprobs cannot be preserved")
-        msg = _drop_null_legacy(_object(choice.get("message"), "message"))
-        _only(
-            msg,
-            {
-                "role",
-                "content",
-                "tool_calls",
-                "refusal",
-                "annotations",
-                "reasoning",
-                "reasoning_content",
-                "reasoning_details",
-            },
-            "Chat response message",
-        )
-        rejected_reasoning = (
-            (("reasoning_details",) if msg.get("reasoning_content") is None else ("reasoning", "reasoning_details"))
-            if public_reasoning
-            else ("reasoning", "reasoning_content", "reasoning_details")
-        )
-        if any(msg.get(key) not in (None, "", []) for key in rejected_reasoning):
-            raise ConversionError("Chat reasoning cannot be preserved across protocols")
-        if msg.get("role") != "assistant":
-            raise ConversionError("Chat response message must have assistant role")
-        if msg.get("annotations"):
-            raise ConversionError("Chat annotations cannot be preserved")
-        if msg.get("refusal") is not None and not isinstance(msg["refusal"], str):
-            raise ConversionError("Chat refusal must be a string or null")
-        if msg.get("refusal"):
-            raise UnsupportedFeatureError("refusal")
-        parts = _chat_content(msg.get("content"), "message.content")
-        if text_logprobs:
-            from .logprobs import align, chat_records
+    return CODECS[source].decode_result(body, public_reasoning=public_reasoning, text_logprobs=text_logprobs)
 
-            probabilities = chat_records(choice.get("logprobs"))
-            if probabilities or parts:
-                if len(parts) != 1 or parts[0].kind != "text":
-                    raise ConversionError("Chat logprobs require one text output")
-                align(probabilities, parts[0].text, required=True)
-                parts[0].logprobs = probabilities
-        if public_reasoning and msg.get("reasoning_content") is not None:
-            parts.insert(0, Part("reasoning_text", text=_string(msg["reasoning_content"], "reasoning_content")))
-        elif public_reasoning and msg.get("reasoning") not in (None, ""):
-            # OpenRouter's unsigned public reasoning field.
-            parts.insert(0, Part("reasoning_text", text=_string(msg["reasoning"], "reasoning")))
-        for index, call in enumerate(_optional_list(msg.get("tool_calls"), "tool_calls")):
-            call = _object(call, "tool_call")
-            parts.append(_chat_call(call, index))
-        usage = _object(body.get("usage") or {}, "usage")
-        reason = choice.get("finish_reason")
-        if reason == "content_filter":
-            raise UnsupportedFeatureError("content_filter")
-        if reason not in ("stop", "tool_calls", "length"):
-            raise ConversionError(f"unsupported Chat finish_reason: {reason}")
-        if reason != "length" and (reason == "tool_calls") != any(p.kind == "tool_call" for p in parts):
-            raise ConversionError("Chat tool_calls finish reason does not match output")
-        return Result(
-            _string(body.get("model"), "model"),
-            parts,
-            reason,
-            service_tier=_reported_service_tier(body.get("service_tier")),
-            **_decode_usage(usage, source),
-        )
-    if source == Protocol.MESSAGES:
-        if body.get("role") not in (None, "assistant"):
-            raise ConversionError("Messages response must have assistant role")
-        parts = _message_parts(body.get("content"), "content")
-        if any(p.kind == "tool_result" for p in parts):
-            raise ConversionError("tool result is not a valid Messages response")
-        usage = _object(body.get("usage") or {}, "usage")
-        reason = body.get("stop_reason")
-        if reason in ("refusal", "stop_sequence", "pause_turn"):
-            raise UnsupportedFeatureError(reason)
-        if reason not in ("end_turn", "tool_use", "max_tokens"):
-            raise ConversionError(f"unsupported Messages stop_reason: {reason}")
-        if reason != "max_tokens" and (reason == "tool_use") != any(p.kind == "tool_call" for p in parts):
-            raise ConversionError("Messages tool_use stop reason does not match output")
-        return Result(
-            _string(body.get("model"), "model"),
-            parts,
-            "length" if reason == "max_tokens" else ("tool_calls" if reason == "tool_use" else "stop"),
-            **_decode_usage(usage, source),
-        )
+
+def _decode_chat_result(body: dict[str, Any], *, public_reasoning: bool = False, text_logprobs: bool = False) -> Result:
+    choices = _list(body.get("choices"), "choices")
+    if len(choices) != 1:
+        raise ConversionError("only one choice is supported")
+    choice = _object(choices[0], "choice")
+    if choice.get("logprobs") and not text_logprobs:
+        raise ConversionError("Chat logprobs cannot be preserved")
+    msg = _drop_null_legacy(_object(choice.get("message"), "message"))
+    _only(
+        msg,
+        {
+            "role",
+            "content",
+            "tool_calls",
+            "refusal",
+            "annotations",
+            "reasoning",
+            "reasoning_content",
+            "reasoning_details",
+        },
+        "Chat response message",
+    )
+    rejected_reasoning = (
+        (("reasoning_details",) if msg.get("reasoning_content") is None else ("reasoning", "reasoning_details"))
+        if public_reasoning
+        else ("reasoning", "reasoning_content", "reasoning_details")
+    )
+    if any(msg.get(key) not in (None, "", []) for key in rejected_reasoning):
+        raise ConversionError("Chat reasoning cannot be preserved across protocols")
+    if msg.get("role") != "assistant":
+        raise ConversionError("Chat response message must have assistant role")
+    if msg.get("annotations"):
+        raise ConversionError("Chat annotations cannot be preserved")
+    if msg.get("refusal") is not None and not isinstance(msg["refusal"], str):
+        raise ConversionError("Chat refusal must be a string or null")
+    if msg.get("refusal"):
+        raise UnsupportedFeatureError("refusal")
+    parts = _chat_content(msg.get("content"), "message.content")
+    if text_logprobs:
+        from .logprobs import align, chat_records
+
+        probabilities = chat_records(choice.get("logprobs"))
+        if probabilities or parts:
+            if len(parts) != 1 or parts[0].kind != "text":
+                raise ConversionError("Chat logprobs require one text output")
+            align(probabilities, parts[0].text, required=True)
+            parts[0].logprobs = probabilities
+    if public_reasoning and msg.get("reasoning_content") is not None:
+        parts.insert(0, Part("reasoning_text", text=_string(msg["reasoning_content"], "reasoning_content")))
+    elif public_reasoning and msg.get("reasoning") not in (None, ""):
+        # OpenRouter's unsigned public reasoning field.
+        parts.insert(0, Part("reasoning_text", text=_string(msg["reasoning"], "reasoning")))
+    for index, call in enumerate(_optional_list(msg.get("tool_calls"), "tool_calls")):
+        call = _object(call, "tool_call")
+        parts.append(_chat_call(call, index))
+    usage = _object(body.get("usage") or {}, "usage")
+    reason = choice.get("finish_reason")
+    if reason == "content_filter":
+        raise UnsupportedFeatureError("content_filter")
+    if reason not in ("stop", "tool_calls", "length"):
+        raise ConversionError(f"unsupported Chat finish_reason: {reason}")
+    if reason != "length" and (reason == "tool_calls") != any(p.kind == "tool_call" for p in parts):
+        raise ConversionError("Chat tool_calls finish reason does not match output")
+    return Result(
+        _string(body.get("model"), "model"),
+        parts,
+        reason,
+        service_tier=_reported_service_tier(body.get("service_tier")),
+        **_decode_usage(usage, Protocol.CHAT),
+    )
+
+
+def _decode_messages_result(
+    body: dict[str, Any], *, public_reasoning: bool = False, text_logprobs: bool = False
+) -> Result:
+    # Messages has no public reasoning or text logprobs to carry.
+    if body.get("role") not in (None, "assistant"):
+        raise ConversionError("Messages response must have assistant role")
+    parts = _message_parts(body.get("content"), "content")
+    if any(p.kind == "tool_result" for p in parts):
+        raise ConversionError("tool result is not a valid Messages response")
+    usage = _object(body.get("usage") or {}, "usage")
+    reason = body.get("stop_reason")
+    if reason in ("refusal", "stop_sequence", "pause_turn"):
+        raise UnsupportedFeatureError(reason)
+    if reason not in ("end_turn", "tool_use", "max_tokens"):
+        raise ConversionError(f"unsupported Messages stop_reason: {reason}")
+    if reason != "max_tokens" and (reason == "tool_use") != any(p.kind == "tool_call" for p in parts):
+        raise ConversionError("Messages tool_use stop reason does not match output")
+    return Result(
+        _string(body.get("model"), "model"),
+        parts,
+        "length" if reason == "max_tokens" else ("tool_calls" if reason == "tool_use" else "stop"),
+        **_decode_usage(usage, Protocol.MESSAGES),
+    )
+
+
+def _decode_responses_result(
+    body: dict[str, Any], *, public_reasoning: bool = False, text_logprobs: bool = False
+) -> Result:
     parts = []
     for item in _list(body.get("output"), "output"):
         item = _object(item, "output item")
@@ -1583,29 +1591,40 @@ def _decode_result_parts(
         parts,
         reason,
         service_tier=_reported_service_tier(body.get("service_tier")),
-        **_decode_usage(usage, source),
+        **_decode_usage(usage, Protocol.RESPONSES),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class _ResultContent:
+    """What every response encoder needs, validated once for all protocols."""
+
+    text: str
+    reasoning: list[str]
+    calls: list[Part]
+    probabilities: list[dict[str, Any]]
 
 
 def _encode_result(result: Result, target: Protocol) -> dict[str, Any]:
     from .logprobs import align
 
+    codec = CODECS[target]
     probabilities = [record for part in result.parts for record in (part.logprobs or [])]
-    if probabilities and target == Protocol.MESSAGES:
-        raise ConversionError("Messages cannot preserve token logprobs")
-    if target == Protocol.MESSAGES and any(part.tool_type == "custom" for part in result.parts):
-        raise ConversionError("Messages cannot preserve native custom-tool formats")
+    if probabilities and not codec.result_logprobs:
+        raise ConversionError(f"{codec.label} cannot preserve token logprobs")
+    if not codec.custom_tools and any(part.tool_type == "custom" for part in result.parts):
+        raise ConversionError(f"{codec.label} cannot preserve native custom-tool formats")
     seen_ordinary = False
     for part in result.parts:
         if part.kind == "reasoning_text":
-            if target == Protocol.MESSAGES or seen_ordinary:
+            if not codec.unsigned_reasoning or seen_ordinary:
                 raise ConversionError(
                     "unsigned public reasoning requires a Chat/Responses assistant prefix; Messages signatures cannot be fabricated"
                 )
         else:
             seen_ordinary = True
     reasoning = [p.text for p in result.parts if p.kind == "reasoning_text"]
-    if target in {Protocol.CHAT, Protocol.RESPONSES}:
+    if not codec.text_after_tool_call:
         seen_tool_call = False
         for part in result.parts:
             if part.kind == "tool_call":
@@ -1615,46 +1634,57 @@ def _encode_result(result: Result, target: Protocol) -> dict[str, Any]:
     text = "".join(p.text for p in result.parts if p.kind == "text")
     align(probabilities, text)
     calls = [p for p in result.parts if p.kind == "tool_call"]
-    if target == Protocol.CHAT:
-        message: dict[str, Any] = {"role": "assistant", "content": text or None}
-        if reasoning:
-            message["reasoning_content"] = "".join(reasoning)
-        if calls:
-            message["tool_calls"] = [_encode_chat_call(p) for p in calls]
-        out: dict[str, Any] = {
-            "id": "chatcmpl-" + secrets.token_hex(12),
-            "created": int(time.time()),
-            "object": "chat.completion",
-            "model": result.model,
-            "choices": [{"index": 0, "message": message, "finish_reason": result.finish_reason}],
-        }
-        if probabilities:
-            out["choices"][0]["logprobs"] = {"content": probabilities, "refusal": None}
-        if result.service_tier is not None:
-            out["service_tier"] = _reported_service_tier(result.service_tier)
-        if result.input_tokens is not None and result.output_tokens is not None:
-            out["usage"] = _encode_usage(result, target)
-        return out
-    if target == Protocol.MESSAGES:
-        if result.input_tokens is None or result.output_tokens is None:
-            raise ConversionError("Messages response requires real upstream token usage")
-        blocks: list[dict[str, Any]] = []
-        for p in result.parts:
-            if p.kind == "text":
-                blocks.append({"type": "text", "text": p.text})
-            elif p.kind == "tool_call":
-                blocks.append({"type": "tool_use", "id": p.call_id, "name": p.name, "input": json.loads(p.arguments)})
-        out = {
-            "id": "msg_" + secrets.token_hex(12),
-            "type": "message",
-            "role": "assistant",
-            "model": result.model,
-            "content": blocks,
-            "stop_reason": {"stop": "end_turn", "tool_calls": "tool_use", "length": "max_tokens"}[result.finish_reason],
-            "stop_sequence": None,
-            "usage": _encode_usage(result, target),
-        }
-        return out
+    return codec.encode_result(result, _ResultContent(text, reasoning, calls, probabilities))
+
+
+def _encode_chat_result(result: Result, content: _ResultContent) -> dict[str, Any]:
+    text, reasoning, calls, probabilities = content.text, content.reasoning, content.calls, content.probabilities
+    message: dict[str, Any] = {"role": "assistant", "content": text or None}
+    if reasoning:
+        message["reasoning_content"] = "".join(reasoning)
+    if calls:
+        message["tool_calls"] = [_encode_chat_call(p) for p in calls]
+    out: dict[str, Any] = {
+        "id": "chatcmpl-" + secrets.token_hex(12),
+        "created": int(time.time()),
+        "object": "chat.completion",
+        "model": result.model,
+        "choices": [{"index": 0, "message": message, "finish_reason": result.finish_reason}],
+    }
+    if probabilities:
+        out["choices"][0]["logprobs"] = {"content": probabilities, "refusal": None}
+    if result.service_tier is not None:
+        out["service_tier"] = _reported_service_tier(result.service_tier)
+    if result.input_tokens is not None and result.output_tokens is not None:
+        out["usage"] = _encode_usage(result, Protocol.CHAT)
+    return out
+
+
+def _encode_messages_result(result: Result, content: _ResultContent) -> dict[str, Any]:
+    # Messages writes text and tool calls in part order, from result.parts.
+    if result.input_tokens is None or result.output_tokens is None:
+        raise ConversionError("Messages response requires real upstream token usage")
+    blocks: list[dict[str, Any]] = []
+    for p in result.parts:
+        if p.kind == "text":
+            blocks.append({"type": "text", "text": p.text})
+        elif p.kind == "tool_call":
+            blocks.append({"type": "tool_use", "id": p.call_id, "name": p.name, "input": json.loads(p.arguments)})
+    out = {
+        "id": "msg_" + secrets.token_hex(12),
+        "type": "message",
+        "role": "assistant",
+        "model": result.model,
+        "content": blocks,
+        "stop_reason": {"stop": "end_turn", "tool_calls": "tool_use", "length": "max_tokens"}[result.finish_reason],
+        "stop_sequence": None,
+        "usage": _encode_usage(result, Protocol.MESSAGES),
+    }
+    return out
+
+
+def _encode_responses_result(result: Result, content: _ResultContent) -> dict[str, Any]:
+    text, reasoning, calls, probabilities = content.text, content.reasoning, content.calls, content.probabilities
     output: list[dict[str, Any]] = []
     if reasoning:
         output.append(
@@ -1700,8 +1730,75 @@ def _encode_result(result: Result, target: Protocol) -> dict[str, Any]:
         out["service_tier"] = _reported_service_tier(result.service_tier)
     out["completed_at"] = int(time.time()) if out["status"] == "completed" else None
     if result.input_tokens is not None and result.output_tokens is not None:
-        out["usage"] = _encode_usage(result, target)
+        out["usage"] = _encode_usage(result, Protocol.RESPONSES)
     return out
+
+
+@dataclass(frozen=True, slots=True)
+class Codec:
+    """Everything protocol-specific about one wire format.
+
+    Requests and completed responses are decoded into the portable model and
+    encoded back through these functions; the flags state which response
+    features the format can represent. Adding a protocol means adding a codec.
+    """
+
+    protocol: Protocol
+    label: str
+    decode_request: Callable[..., Request]
+    encode_request: Callable[[Request], dict[str, Any]]
+    decode_result: Callable[..., Result]
+    encode_result: Callable[[Result, _ResultContent], dict[str, Any]]
+    #: Token logprobs on output text.
+    result_logprobs: bool
+    #: Native custom (free-form input) tool calls.
+    custom_tools: bool
+    #: Unsigned public reasoning ahead of the answer.
+    unsigned_reasoning: bool
+    #: Text after a tool call within one response.
+    text_after_tool_call: bool
+
+
+CODECS: Mapping[Protocol, Codec] = MappingProxyType(
+    {
+        Protocol.CHAT: Codec(
+            Protocol.CHAT,
+            "Chat",
+            _decode_chat,
+            _encode_chat,
+            _decode_chat_result,
+            _encode_chat_result,
+            result_logprobs=True,
+            custom_tools=True,
+            unsigned_reasoning=True,
+            text_after_tool_call=False,
+        ),
+        Protocol.MESSAGES: Codec(
+            Protocol.MESSAGES,
+            "Messages",
+            _decode_messages,
+            _encode_messages,
+            _decode_messages_result,
+            _encode_messages_result,
+            result_logprobs=False,
+            custom_tools=False,
+            unsigned_reasoning=False,
+            text_after_tool_call=True,
+        ),
+        Protocol.RESPONSES: Codec(
+            Protocol.RESPONSES,
+            "Responses",
+            _decode_responses,
+            _encode_responses,
+            _decode_responses_result,
+            _encode_responses_result,
+            result_logprobs=True,
+            custom_tools=True,
+            unsigned_reasoning=True,
+            text_after_tool_call=False,
+        ),
+    }
+)
 
 
 def convert_response(

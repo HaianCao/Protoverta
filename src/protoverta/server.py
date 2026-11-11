@@ -358,6 +358,23 @@ def apply_upstream_reasoning(payload: dict[str, Any], protocol: Protocol, policy
     return outbound
 
 
+def _classify_stream_failure(exc: BaseException, feature: str | None) -> tuple[str, Outcome]:
+    """Failure code and trace outcome for a stream that broke mid-response (first match wins)."""
+    if feature in {"refusal", "content_filter"}:
+        return "policy_refusal", "policy_refusal"
+    if isinstance(exc, UnsupportedReasoningError):
+        return "unsupported_reasoning", "unsupported_reasoning"
+    if isinstance(exc, UnsupportedStreamFeatureError):
+        return "unsupported_feature", "unsupported_feature"
+    if isinstance(exc, DeadlineExceeded):
+        return exc.kind, "timeout"
+    if isinstance(exc, TimeoutError):
+        return "upstream_timeout", "timeout"
+    if isinstance(exc, StreamLimitError):
+        return "stream_limit", "stream_limit"
+    return "invalid_stream", "invalid_stream"
+
+
 class _RedirectBlocker(HTTPRedirectHandler):
     def redirect_request(self, request: Request, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> None:
         return None
@@ -742,37 +759,9 @@ def make_handler(
                     feature = "tool_policy"
                 timeout = isinstance(exc, TimeoutError)
                 limited = isinstance(exc, StreamLimitError)
-                refusal = feature in {"refusal", "content_filter"}
-                code = (
-                    "policy_refusal"
-                    if refusal
-                    else "unsupported_reasoning"
-                    if isinstance(exc, UnsupportedReasoningError)
-                    else "unsupported_feature"
-                    if unsupported
-                    else exc.kind
-                    if isinstance(exc, DeadlineExceeded)
-                    else "upstream_timeout"
-                    if timeout
-                    else "stream_limit"
-                    if limited
-                    else "invalid_stream"
-                )
+                code, self._trace.outcome = _classify_stream_failure(exc, feature)
                 if policy_violation:
                     code = "tool_policy_violation"
-                self._trace.outcome = (
-                    "policy_refusal"
-                    if refusal
-                    else "unsupported_reasoning"
-                    if isinstance(exc, UnsupportedReasoningError)
-                    else "unsupported_feature"
-                    if unsupported
-                    else "timeout"
-                    if timeout
-                    else "stream_limit"
-                    if limited
-                    else "invalid_stream"
-                )
                 self._trace.phase = "stream"
                 if policy_violation:
                     self._trace.outcome = "invalid_response"
