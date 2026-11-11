@@ -48,14 +48,14 @@ html_css_files = [
     "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap",
     "protoverta.css",
 ]
-html_favicon = "_static/protoverta_logo_white.png"
+# One transparent logo reads on light and dark backgrounds.
+html_logo = "_static/protoverta_logo.png"
+html_favicon = "_static/protoverta_logo.png"
 _BRAND = {
     "font-stack": "Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
     "font-stack--monospace": "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
 }
 html_theme_options = {
-    "light_logo": "protoverta_logo_white.png",
-    "dark_logo": "protoverta_logo_black.png",
     "light_css_variables": {
         **_BRAND,
         "color-brand-primary": "#4f46e5",

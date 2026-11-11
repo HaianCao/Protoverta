@@ -28,7 +28,7 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://github.com/HaianCao/Protoverta"
-Documentation = "https://github.com/HaianCao/Protoverta/tree/main/docs"
+Documentation = "https://haiancao.github.io/Protoverta/"
 Repository = "https://github.com/HaianCao/Protoverta"
 Issues = "https://github.com/HaianCao/Protoverta/issues"
 Changelog = "https://github.com/HaianCao/Protoverta/blob/main/CHANGELOG.md"
